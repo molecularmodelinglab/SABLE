@@ -45,9 +45,22 @@ class MoleculeCharacterizationTool(BaseTool):
             "Rotatable Bonds": Descriptors.NumRotatableBonds(mol),
             "LogP": round(Descriptors.MolLogP(mol), 2),
             "TPSA": round(Descriptors.TPSA(mol), 2),
+            "QED" : round(Descriptors.qed(mol), 2),
         }
 
-        return properties
+        properties_dict = {}
+        data = {}
+        for property_name, value in properties.items():
+            if value is not None:
+                prop_data = {
+                    "value": value,
+                    "confidence": 1.0
+                }
+            properties_dict[property_name] = prop_data
+
+        data['molProperties'] = properties_dict
+
+        return data
 
     async def _arun(self, smiles: str) -> Dict[str, float | str | int]:
         """Async implementation of molecule characterization"""
