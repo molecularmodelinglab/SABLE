@@ -1,10 +1,7 @@
 import pandas as pd
 from typing import Type, List, Dict, Any, Optional, Union
 from pydantic import BaseModel, Field, field_validator
-
-from langchain.tools import BaseTool
-
-
+import json
 
 class TargetInput(BaseModel):
     """Configuration for a single optimization target."""
@@ -23,15 +20,27 @@ class TargetInput(BaseModel):
 
 class BayesianOptimizationInput(BaseModel):
     """Input schema for the Bayesian Optimization Tool."""
-    targets: List[TargetInput] = Field(..., description="List of optimization targets (properties and modes).")
-    search_space_smiles: Dict[str, str] = Field(..., description="Dictionary mapping unique IDs to SMILES strings for the search space.")
+    targets: str = Field(..., description="A JSON string representing a list of optimization targets. Each target should be a dictionary with 'name' and 'mode' keys. Example: '[{\"name\": \"QED\", \"mode\": \"MAX\"}]'")
     batch_size: int = Field(default=5, description="Number of molecules to recommend in the next batch.")
     encoding: str = Field(default="MORDRED", description="Molecular encoding strategy for SubstanceParameter (e.g., 'MORDRED', 'RDKIT', 'MorganFP').")
-    measurement_data: Optional[List[Dict[str, Any]]] = Field(default=None, description="Optional list of dictionaries representing previous measurements (like rows in a DataFrame). Each dict needs the search space ID key (e.g., 'Molecule_ID') and target keys.")
-    search_space_id_column: str = Field(default="Molecule_ID", description="The key/column name used for molecule IDs in the search_space_smiles and measurement_data.")
+    measurement_data: Optional[Union[List[Dict[str, Any]], str]] = Field(default=None, description="Optional list of dictionaries representing previous measurements OR a string key to retrieve measurement data from memory (e.g., 'measurement_data'). Each dict needs the search space ID key (e.g., 'Molecule_ID') and target keys.")
+    search_space_id_column: Optional[str] = Field(default="Molecule_ID", description="The key/column name used for molecule IDs in the measurement_data.")
+
+    @field_validator('batch_size')
+    def coerce_batch_size_to_int(cls, v):
+        return int(v)
 
     @field_validator('targets')
     def check_targets_non_empty(cls, v):
         if not v:
             raise ValueError("At least one target must be specified.")
+        try:
+            targets_list = json.loads(v)
+            if not isinstance(targets_list, list) or not targets_list:
+                raise ValueError("Targets must be a non-empty list.")
+            for target in targets_list:
+                if 'name' not in target or 'mode' not in target:
+                    raise ValueError("Each target must have 'name' and 'mode' keys.")
+        except json.JSONDecodeError:
+            raise ValueError("Targets must be a valid JSON string.")
         return v
