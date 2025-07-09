@@ -1,8 +1,9 @@
 from typing import Type, List, Dict, Any, Optional, Union
 from pydantic import BaseModel, Field
-from optimizer.configs import BayesianOptimizationInput
+from optimizer.configs import BayesianOptimizationInput, TargetInput
 from langchain.tools import BaseTool
 import pandas as pd
+import json
 
 
 try:
@@ -45,141 +46,102 @@ class BayesianOptimizationTool(BaseTool):
 
     def _run(
         self,
-        tool_input: str = None,
-        **kwargs: Any # To catch any unexpected args
+        targets: str,
+        batch_size: float,
+        encoding: str,
+        search_space_id_column: Optional[str] = "Molecule_ID",
+        measurement_data: Optional[Union[List[Dict[str, Any]], str]] = None,
+        memory: Optional[Dict[str, Any]] = None,
     ) -> Union[List[str], str]:
-        """
-        Executes the Bayesian Optimization campaign setup and recommendation.
+        """Use the tool."""
+        if memory is None:
+            memory = {}
 
-        Args:
-            targets: List of target configurations.
-            search_space_smiles: Dictionary mapping IDs to SMILES.
-            batch_size: Number of recommendations requested.
-            encoding: Molecular encoding method.
-            measurement_data: Optional list of prior measurements.
-            search_space_id_column: Identifier column name.
+        if not BAYBE_AVAILABLE:
+            return "Error: BayBE library is not installed. Cannot perform Bayesian Optimization."
 
-        Returns:
-            A list of recommended molecule IDs (strings) or an error message string.
-        """
-        self._check_baybe_installed()
-
-        targets = kwargs.get('targets', [])
-        search_space_smiles = kwargs.get('search_space_smiles', {})
-        batch_size = kwargs.get('batch_size', 5)
-        encoding = kwargs.get('encoding', 'MORDRED')
-        measurement_data = kwargs.get('measurement_data', None)
-        search_space_id_column = kwargs.get('search_space_id_column', 'Molecule_ID')
+        # Get search space from memory
+        if 'enumerated_molecules' in memory:
+            search_space = memory['enumerated_molecules']
+            print(f"Using enumerated_molecules from memory with {len(search_space)} entries.")
+        else:
+            return "Error: No search space found in memory. The 'EnumeratorTool' must be run first."
 
         try:
-            # 1. Validate and Prepare Inputs
-            if not targets:
-                return "Error: No optimization targets specified."
-            if not search_space_smiles:
-                return "Error: Search space (smiles dictionary) cannot be empty."
+            # The 'targets' are now a JSON string, so we need to parse it.
+            validated_targets = [TargetInput(**t) for t in json.loads(targets)]
 
-            # Canonicalize SMILES in search space for consistency
+            # Handle measurement_data - it can be a list of dicts or a memory key
+            processed_measurement_data = None
+            if measurement_data:
+                if isinstance(measurement_data, str):
+                    # It's a memory key, retrieve the data
+                    if measurement_data in memory:
+                        processed_measurement_data = memory[measurement_data]
+                        print(f"Using measurement data from memory key '{measurement_data}' with {len(processed_measurement_data)} entries.")
+                    else:
+                        return f"Error: Measurement data key '{measurement_data}' not found in memory."
+                else:
+                    # It's already a list of dicts
+                    processed_measurement_data = measurement_data
+
+            # Create BayBE parameters from the search space
             canonical_search_space = {
-                id_: get_canonical_smiles(smi) for id_, smi in search_space_smiles.items()
+                id_: get_canonical_smiles(smi) for id_, smi in search_space.items()
             }
-
-            # 2. Define Search Space Parameter
-            # Ensure IDs are strings for BayBE compatibility if they aren't already
-            str_canonical_search_space = {str(k): v for k, v in canonical_search_space.items()}
-            
             substance_param = SubstanceParameter(
-                name=search_space_id_column, # Use the specified ID column name
-                data=str_canonical_search_space,
+                name=search_space_id_column, 
+                data=canonical_search_space, 
                 encoding=encoding
             )
             searchspace = SearchSpace.from_product(parameters=[substance_param])
 
-            # 3. Define Objective
-            baybe_targets = []
-            # for t_dict in targets:
-            #     print(f"Processing target: {t_dict}")
-            #     target_input = TargetInput(**t_dict) # Validate each target dict
-            #     baybe_targets.append(
-            #         NumericalTarget(name=target_input.name, mode=target_input.mode, bounds=None) # Bounds can be added if needed
-            #     )
-            for target_obj in targets: # Renamed loop variable for clarity
-                print(f"Processing target object: {target_obj}")
-                # No need to re-initialize, just use the existing object's attributes
-                baybe_targets.append(
-                    NumericalTarget(name=target_obj.name, mode=target_obj.mode, bounds=target_obj.bounds, transformation=target_obj.transformation) 
-                )
-            print(f"BayBE targets created: {baybe_targets}")
+            # Create BayBE targets
+            baybe_targets = [
+                NumericalTarget(name=t.name, mode=t.mode, bounds=t.bounds, transformation=t.transformation)
+                for t in validated_targets
+            ]
+
+            # Create objective
             if len(baybe_targets) == 1:
                 objective = SingleTargetObjective(target=baybe_targets[0])
             else:
-                # For multi-objective, DesirabilityObjective is a common choice
-                # Weights can be customized if provided in TargetInput
-                # default_weight = TargetInput.model_fields['weight'].default # Get default from the model
-                weights = [target_obj.weight for target_obj in targets] # Corrected line
-                objective = DesirabilityObjective(targets=baybe_targets, weights=weights, scalarizer="MEAN")
-                # weights = [TargetInput(**t_dict).weight for t_dict in targets]
-                # objective = DesirabilityObjective(targets=baybe_targets, weights=weights, combine_func="MEAN")
-                # Alternatively: objective = MultiTargetObjective(targets=baybe_targets) if using specific multi-objective recommenders
+                weights = [t.weight for t in validated_targets]
+                objective = DesirabilityObjective(targets=baybe_targets, weights=weights)
 
-            # 4. Create Campaign
-            campaign = Campaign(
-                searchspace=searchspace,
-                objective=objective
-                # recommender can be specified here, defaults are usually good
-            )
+            # Create Campaign
+            campaign = Campaign(searchspace=searchspace, objective=objective)
 
-            # 5. Add Measurement Data (if provided)
-            if measurement_data:
-                try:
-                    # Convert list of dicts to DataFrame
-                    measurements_df = pd.DataFrame(measurement_data)
+            # Add measurements if provided
+            if processed_measurement_data:
+                df_measurements = pd.DataFrame(processed_measurement_data)
+                campaign.add_measurements(df_measurements)
 
-                    # Ensure the ID column exists and contains string IDs matching the search space keys
-                    if search_space_id_column not in measurements_df.columns:
-                         return f"Error: Measurement data is missing the specified ID column '{search_space_id_column}'."
-                    
-                    # Convert ID column to string to match SubstanceParameter keys
-                    measurements_df[search_space_id_column] = measurements_df[search_space_id_column].astype(str)
-
-                    # Check if all required target columns exist
-                    required_target_names = [t.name for t in baybe_targets]
-                    missing_cols = [col for col in required_target_names if col not in measurements_df.columns]
-                    if missing_cols:
-                        return f"Error: Measurement data is missing required target columns: {', '.join(missing_cols)}."
-
-                    # Ensure IDs in measurements exist in the search space
-                    valid_ids = set(str_canonical_search_space.keys())
-                    measured_ids = set(measurements_df[search_space_id_column])
-                    invalid_measured_ids = measured_ids - valid_ids
-                    if invalid_measured_ids:
-                         print(f"Warning: Measurement data contains IDs not found in the search space: {invalid_measured_ids}. These rows will be ignored by BayBE.")
-                         # Filter out invalid rows before adding
-                         measurements_df = measurements_df[measurements_df[search_space_id_column].isin(valid_ids)]
-
-
-                    if not measurements_df.empty:
-                        campaign.add_measurements(measurements_df)
-                    else:
-                         print("Warning: No valid measurement data to add after filtering.")
-
-
-                except Exception as e:
-                    return f"Error processing measurement data: {e}"
-
-            # 6. Get Recommendations
-            recommendations_df = campaign.recommend(batch_size=batch_size)
-
-            # Extract the recommended IDs (they should be strings matching the input keys)
+            # Get recommendations
+            recommendations_df = campaign.recommend(batch_size=int(batch_size))
+            
             recommended_ids = recommendations_df[search_space_id_column].tolist()
 
-            return recommended_ids # Return list of string IDs
+            # Store results in memory
+            # If this is the first run (no measurement data), preserve it as first_bo_recommendations
+            if not processed_measurement_data:
+                # First optimization round
+                memory['first_bo_recommendations'] = recommended_ids
+                memory['bo_recommendations'] = recommended_ids
+                summary_message = f"Successfully recommended {len(recommended_ids)} molecules using Bayesian Optimization (First Round) and stored them in memory under 'bo_recommendations'."
+            else:
+                # Second optimization round (with measurement data)
+                memory['bo_recommendations'] = recommended_ids
+                summary_message = f"Successfully recommended {len(recommended_ids)} molecules using Bayesian Optimization (Second Round) and stored them in memory under 'bo_recommendations'."
+            
+            return summary_message
 
         except Exception as e:
-            return f"Error during Bayesian Optimization: {e}"
+            return f"Error during Bayesian Optimization process: {e}"
 
-    
-    async def _arun(self, tool_input: str = None, **kwargs) -> Union[List[str], str]:
-        return self._run(tool_input=tool_input, **kwargs)
+    async def _arun(self, **kwargs):
+        # This tool does not support async execution
+        raise NotImplementedError("BayesianOptimizationTool does not support async")
 
 # Example of how to potentially use it (outside the class definition)
 if __name__ == '__main__':
