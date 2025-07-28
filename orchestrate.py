@@ -131,6 +131,20 @@ class GeminiToolOrchestrator:
                 tool = self.tools[tool_name]
                 try:
                     tool_result = tool._run(**args, memory=self.memory)
+
+                    # if tool_name == "Enumerator":
+                    #     self.memory['enumerated_molecules'] = tool_result
+                    # elif tool_name == "BayesianOptimizer":
+                    #     self.memory['bo_recommendations'] = tool_result
+                    # elif tool_name == "MoleculeCharacterizer":
+                    #     self.memory['characterization_results'] = tool_result
+                    # elif tool_name == "MeasurementExtractor":
+                    #     self.memory['measurement_data'] = tool_result
+                    # elif tool_name == "ReportGenerator":
+                    #     self.memory['final_report'] = tool_result
+                    # elif tool_name == "WorkflowSummary":
+                    #     self.memory['workflow_summary'] = tool_result
+
                 except Exception as e:
                     print(f"Error executing tool {tool_name}: {e}")
                     # Inform the model that the tool call failed
@@ -227,24 +241,6 @@ def main():
     """
 
     orchestrator.run_conversation(user_prompt=discovery_prompt)
-
-    # # After the conversation, print the final results from memory
-    # print("\n--- Final Results from Memory ---")
-    # if 'bo_recommendations' in orchestrator.memory:
-    #     print("\nBayesian Optimizer Recommendations:")
-    #     recommendations = orchestrator.memory['bo_recommendations']
-    #     all_molecules = orchestrator.memory.get('enumerated_molecules', {})
-    #     for rec_id in recommendations:
-    #         smiles = all_molecules.get(rec_id, "SMILES not found")
-    #         print(f"  - ID: {rec_id}, SMILES: {smiles}")
-
-    # if 'characterization_results' in orchestrator.memory:
-    #     print("\nMolecule Characterization Results:")
-    #     char_results = orchestrator.memory['characterization_results']
-    #     for mol_id, properties in char_results.items():
-    #         print(f"  - ID: {mol_id}")
-    #         for prop, value in properties.items():
-    #             print(f"    - {prop}: {value}")
 
     print("\n---------------------------------")
 
