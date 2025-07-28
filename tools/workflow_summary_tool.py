@@ -117,6 +117,8 @@ class WorkflowSummary(BaseTool):
 
         summary += "\n" + "=" * 60
 
+        memory['workflow_summary'] = summary
+
         return summary
 
     async def _arun(self, **kwargs):
