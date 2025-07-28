@@ -38,8 +38,6 @@ class EnumeratorTool(BaseTool):
     ) -> Union[Dict[str, str], str]:
         """Use the tool."""
         if memory is None:
-            # This can be a fallback or an error, depending on desired behavior.
-            # For now, let's initialize it to avoid breaking the logic.
             memory = {}
 
         try:
