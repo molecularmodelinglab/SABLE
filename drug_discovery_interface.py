@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 from rdkit import Chem
 from rdkit.Chem import Draw
 
-# Import your existing orchestrator
+
 from orchestrate import GeminiToolOrchestrator, BAYBE_AVAILABLE
 from tools.enumerator_tool import EnumeratorTool
 from tools.bayesopt_tool import BayesianOptimizationTool
@@ -483,7 +483,6 @@ def display_property_analysis(char_results):
             )
             st.plotly_chart(fig, use_container_width=True)
     
-    # Raw data table
     st.subheader("Detailed Property Data")
     st.dataframe(df, use_container_width=True)
 
