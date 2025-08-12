@@ -1,6 +1,7 @@
 aiohappyeyeballs==2.4.4
 aiohttp==3.11.11
 aiosignal==1.3.2
+altair==5.5.0
 annotated-types==0.7.0
 anyio==4.8.0
 appnope==0.1.4
@@ -16,6 +17,7 @@ babel==2.16.0
 baybe==0.12.2
 beautifulsoup4==4.12.3
 bleach==6.2.0
+blinker==1.9.0
 botorch==0.13.0
 cachetools==5.5.1
 cattrs==24.1.2
@@ -47,6 +49,8 @@ fqdn==1.5.1
 frozenlist==1.5.0
 fsspec==2025.3.0
 funcy==1.18
+gitdb==4.0.12
+GitPython==3.1.45
 google-ai-generativelanguage==0.6.15
 google-api-core==2.24.0
 google-api-python-client==2.159.0
@@ -58,7 +62,7 @@ google-cloud-core==2.4.1
 google-cloud-resource-manager==1.14.0
 google-cloud-storage==2.19.0
 google-crc32c==1.6.0
-google-generativeai==0.8.4
+google-generativeai==0.8.5
 google-resumable-media==2.7.2
 googleapis-common-protos==1.66.0
 gpytorch==1.14
@@ -77,7 +81,10 @@ importlib_metadata==8.6.1
 interface-meta==1.3.0
 ipykernel==6.29.5
 ipython==8.31.0
+ipywidgets==8.1.7
 isoduration==20.11.0
+jax==0.4.35
+jaxlib==0.4.35
 jaxtyping==0.2.38
 jedi==0.19.2
 Jinja2==3.1.5
@@ -97,6 +104,7 @@ jupyter_server_terminals==0.5.3
 jupyterlab==4.3.4
 jupyterlab_pygments==0.3.0
 jupyterlab_server==2.27.3
+jupyterlab_widgets==3.0.15
 kiwisolver==1.4.8
 langchain==0.3.15
 langchain-core==0.3.31
@@ -120,6 +128,7 @@ matplotlib==3.10.1
 matplotlib-inline==0.1.7
 mdurl==0.1.2
 mistune==3.1.0
+ml_dtypes==0.5.1
 mmh3==5.1.0
 mordred==1.2.0
 mordredcommunity==2.0.6
@@ -128,6 +137,7 @@ msgpack==1.1.0
 multidict==6.1.0
 multipledispatch==1.0.0
 mypy-extensions==1.0.0
+narwhals==2.0.0
 nbclient==0.10.2
 nbconvert==7.16.5
 nbformat==5.10.4
@@ -174,6 +184,7 @@ parso==0.8.4
 pexpect==4.9.0
 pillow==11.1.0
 platformdirs==4.3.6
+plotly==6.2.0
 primp==0.14.0
 prometheus_client==0.21.1
 prompt_toolkit==3.0.50
@@ -184,11 +195,13 @@ psutil==6.1.1
 ptyprocess==0.7.0
 PubChemPy==1.0.4
 pure_eval==0.2.3
+pyarrow==21.0.0
 pyasn1==0.6.1
 pyasn1_modules==0.4.1
 pycparser==2.22
 pydantic==2.10.6
 pydantic_core==2.27.2
+pydeck==0.9.1
 Pygments==2.19.1
 pyparsing==3.2.1
 pyre-extensions==0.0.32
@@ -221,17 +234,20 @@ setuptools-scm==8.2.0
 shapely==2.0.6
 six==1.17.0
 smart-open==7.1.0
+smmap==5.0.2
 smolagents==1.7.0
 sniffio==1.3.1
 soupsieve==2.6
 SQLAlchemy==2.0.37
 stack-data==0.6.3
+streamlit==1.47.1
 sympy==1.13.1
 tenacity==9.0.0
 terminado==0.18.1
 threadpoolctl==3.6.0
 tiktoken==0.8.0
 tinycss2==1.4.0
+toml==0.10.2
 torch==2.6.0
 tornado==6.4.2
 tqdm==4.67.1
@@ -245,11 +261,13 @@ uri-template==1.3.0
 uritemplate==4.1.1
 urllib3==2.3.0
 wadler_lindig==0.1.4
+watchdog==6.0.0
 wcwidth==0.2.13
 webcolors==24.11.1
 webencodings==0.5.1
 websocket-client==1.8.0
 wheel==0.45.1
+widgetsnbextension==4.0.14
 wrapt==1.17.2
 xarray==2025.1.2
 yarl==1.18.3
