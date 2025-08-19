@@ -17,6 +17,10 @@ class ReportGeneratorInput(BaseModel):
         "characterization_results",
         description="The key in memory for the characterization results."
     )
+    highlight_properties: Optional[List[str]] = Field(
+        default=None,
+        description="Subset of properties to highlight first in the report."
+    )
 
 class ReportGenerator(BaseTool):
     name: str = "ReportGenerator"
@@ -31,6 +35,7 @@ class ReportGenerator(BaseTool):
         final_recommendations_key: str = "bo_recommendations",
         all_molecules_key: str = "enumerated_molecules",
         characterization_key: str = "characterization_results",
+        highlight_properties: Optional[List[str]] = None,
         memory: Optional[Dict[str, Any]] = None
     ) -> str:
         """Generates a summary report."""
@@ -49,18 +54,29 @@ class ReportGenerator(BaseTool):
         report = "--- Molecule Discovery Final Report ---\n\n"
         report += f"Found {len(final_recommendations)} final recommended molecules:\n\n"
 
+
+        all_props = set()
+        if characterization_results:
+            for v in characterization_results.values():
+                all_props.update(v.keys())
+    
+        ordered_props = []
+        if highlight_properties:
+            ordered_props.extend([p for p in highlight_properties if p in all_props])
+        ordered_props.extend([p for p in sorted(all_props) if p not in ordered_props])
+
+
         for mol_id in final_recommendations:
             smiles = all_molecules.get(mol_id, "N/A")
             report += f"- Molecule ID: {mol_id}\n"
             report += f"  SMILES: {smiles}\n"
             
             if characterization_results and mol_id in characterization_results:
-                properties = characterization_results[mol_id]
-                qed_value = properties.get('QED', 'N/A')
-                report += f"  QED Score: {qed_value}\n"
+                props = characterization_results[mol_id]
                 report += "  Properties:\n"
-                for key, value in properties.items():
-                    report += f"    - {key}: {value}\n"
+                for prop in ordered_props:
+                    if prop in props:
+                        report += f"    - {prop}: {props[prop]}\n"
             report += "\n"
 
         report += "--- End of Report ---"
