@@ -76,6 +76,7 @@ class EnumeratorTool(BaseTool):
 
             # Store the results in memory instead of returning them
             memory['enumerated_molecules'] = enumerated_molecules_dict
+            memory['enumeration_table'] = limited_df.to_dict(orient='list')
             
             summary_message = f"Successfully enumerated {len(enumerated_molecules_dict)} molecules and stored them in memory under the key 'enumerated_molecules'."
             
