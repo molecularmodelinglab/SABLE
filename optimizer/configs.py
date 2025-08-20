@@ -9,7 +9,7 @@ class TargetInput(BaseModel):
     mode: str = Field(..., description="Optimization mode: 'MAX' for maximization, 'MIN' for minimization.")
     # Optional: weight and bounds for multi-objective desirability
     bounds: Optional[List[float]] = Field(default=None, description="Bounds for the target property (optional).")
-    transformation: Optional[str] = Field(default="LINEAR", description="Transformation function for the target property (optional).")
+    transformation: Optional[str] = Field(default=None, description="Transformation function for the target property (optional).")
     weight: float = Field(default=1.0, description="Weight for this target in multi-objective desirability (optional).")
 
     @field_validator('mode')
