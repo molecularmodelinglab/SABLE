@@ -9,13 +9,10 @@ import ast
 
 class MoleculeCharacterizationInput(BaseModel):
     """Input for characterizing a list of molecules."""
-    molecule_ids: Optional[str] = Field(default=None, description="Either a JSON string list of molecule IDs (e.g., '[\"mol_1\", \"mol_2\"]') or a memory key reference (e.g., 'bo_recommendations'). If not provided, the tool will look for 'bo_recommendations' in memory.")
-
-    @field_validator('molecule_ids', mode='before')
-    def parse_molecule_ids(cls, v):
-        # Don't parse anything here, let the _run method handle it
-        return v
-
+    molecule_ids: Optional[List[str]] = Field(
+        default=None, 
+        description="A list of molecule IDs (e.g., [\"mol_1\", \"mol_2\"]) or a memory key (e.g., 'bo_recommendations'). If None, defaults to 'bo_recommendations' from memory."
+    )
 
 class MoleculeCharacterizationTool(BaseTool):
     name: str = Field(default="MoleculeCharacterizer")
@@ -30,46 +27,28 @@ class MoleculeCharacterizationTool(BaseTool):
         if memory is None:
             memory = {}
 
-        # Determine the list of molecule IDs to process
-        ids_to_process = None
-        
-        if molecule_ids:
-            # Handle curly brace syntax like {{bo_recommendations}}
-            if molecule_ids.startswith('{{') and molecule_ids.endswith('}}'):
-                memory_key = molecule_ids[2:-2]  # Remove {{ and }}
-                if memory_key in memory:
-                    ids_to_process = memory[memory_key]
-                    print(f"Using '{memory_key}' from memory: {ids_to_process}")
-                else:
-                    return f"Error: Memory key '{memory_key}' not found in memory."
-            # Check if it's a direct memory key reference
-            elif molecule_ids in memory:
-                ids_to_process = memory[molecule_ids]
-                print(f"Using '{molecule_ids}' from memory: {ids_to_process}")
+        ids_to_process = molecule_ids
+        if not ids_to_process:
+            if 'bo_recommendations' in memory:
+                ids_to_process = memory['bo_recommendations']
+                print(f"Using 'bo_recommendations' from memory")
             else:
-                # Try to parse as JSON string or Python-style list
-                try:
-                    ids_to_process = json.loads(molecule_ids)
-                except json.JSONDecodeError:
-                    try:
-                        ids_to_process = ast.literal_eval(molecule_ids)
-                    except (ValueError, SyntaxError):
-                        # Assume it's a single ID
-                        ids_to_process = [molecule_ids]
-        elif 'bo_recommendations' in memory:
-            ids_to_process = memory['bo_recommendations']
-            print(f"Using 'bo_recommendations' from memory: {ids_to_process}")
-        else:
-            return "Error: No molecule IDs provided. Please provide 'molecule_ids' or ensure 'bo_recommendations' is in memory."
+                return "Error: No molecule IDs provided. Ensure 'bo_recommendations' is in memory."
+            
+        if not isinstance(ids_to_process, list):
+            return f"Error: molecule_ids must be a list, but got {type(ids_to_process).__name__}."
 
         # Retrieve the full molecule dictionary from memory
         all_molecules = memory.get('enumerated_molecules', {})
         if not all_molecules:
             return "Error: 'enumerated_molecules' not found in memory. Cannot retrieve SMILES strings."
+        
+        if 'characterization_results' not in memory:
+            memory['characterization_results'] = {}
 
         characterization_results = {}
         errors = []
-
+        successful_count = 0
         for mol_id in ids_to_process:
             smiles = all_molecules.get(mol_id)
             if not smiles:
@@ -97,20 +76,26 @@ class MoleculeCharacterizationTool(BaseTool):
                     "TPSA": round(Descriptors.TPSA(mol), 2),
                     "QED": round(Descriptors.qed(mol), 2),
                 }
-                characterization_results[mol_id] = properties
-
+                if mol_id not in memory['characterization_results']:
+                    memory['characterization_results'][mol_id] = {}
+                memory['characterization_results'][mol_id].update(properties)
+                successful_count += 1
             except Exception as e:
                 errors.append(f"Error characterizing molecule ID {mol_id}: {e}")
 
-        # Store results in memory
-        # If we're working with first_bo_recommendations, preserve those results separately
-        if 'first_bo_recommendations' in memory and ids_to_process == memory.get('first_bo_recommendations'):
-            memory['first_characterization_results'] = characterization_results
-            memory['characterization_results'] = characterization_results  # Also store in standard location
-            summary = f"Successfully characterized {len(characterization_results)} molecules (First Round). Results are in memory under 'first_characterization_results' and 'characterization_results'."
+        # Store results in memorys
+        if 'first_bo_recommendations' in memory and set(ids_to_process) == set(memory.get('first_bo_recommendations')):
+            if 'first_characterization_results' not in memory:
+                memory['first_characterization_results'] = {}
+            # This part needs to merge too
+            for mol_id, props in memory['characterization_results'].items():
+                 if mol_id in ids_to_process:
+                    if mol_id not in memory['first_characterization_results']:
+                        memory['first_characterization_results'][mol_id] = {}
+                    memory['first_characterization_results'][mol_id].update(props)
+            summary = f"Successfully characterized and merged data for {successful_count} molecules (First Round)."
         else:
-            memory['characterization_results'] = characterization_results
-            summary = f"Successfully characterized {len(characterization_results)} molecules. Results are in memory under 'characterization_results'."
+            summary = f"Successfully characterized and merged data for {successful_count} molecules."
         
         if errors:
             summary += f" Encountered {len(errors)} errors: {'; '.join(errors)}"
