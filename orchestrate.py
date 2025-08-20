@@ -198,31 +198,14 @@ def main():
 
     orchestrator = GeminiToolOrchestrator(tools=available_tools)
 
-    target_properties = ["BBB Permeability"]
-    targets_config = [
-        {"name": prop, "mode": "MAX", "weight": 1.0/len(target_properties)}#, "bounds": [0, 1]}
-        for prop in target_properties
-    ]
-
-    # discovery_prompt = """
-    # I need to find new drug candidates. Please start with the molecule Aspirin, which has the SMILES 'CC(=O)OC1=CC=CC=C1C(=O)O'.
-
-    # My goal is to maximize 'QED'.
-
-    # Here is the plan you should follow:
-    # 1. Use the Enumerator tool to generate a library of 20 molecules similar to Aspirin.
-    # 2. Use the BayesianOptimizer tool to get an initial batch of 5 recommended molecules to test from the generated library. Do not provide any measurement data for this first run. Use MORDRED descriptors for the optimization.
-    # 3. For each of the 5 recommended molecules, use the MoleculeCharacterizer tool to calculate their properties. To reference the recommendations from step 2, use "bo_recommendations" as the molecule_ids parameter.
-    # 4. Use the MeasurementExtractor tool to extract the 'QED' values from the characterization results and format them as measurement data for the next optimization step. IMPORTANT: Use "Molecule_ID" as the id_column_name to match the BayesianOptimizer's expectations.
-    # 5. Run the BayesianOptimizer tool a second time. This time, provide the measurement data you just extracted for 'QED' to get improved recommendations. Use "measurement_data" as the measurement_data parameter.
-    # 6. IMPORTANT: Use the MoleculeCharacterizer tool again to characterize the NEW set of recommended molecules from step 5. Use "bo_recommendations" as the molecule_ids parameter to get the final set of recommendations with their properties.
-    # 7. Use the ReportGenerator tool to create a final summary report of the recommended molecules and their properties. The report should prominently display the QED scores for each recommended molecule.
-    # 8. Use the WorkflowSummary tool to generate a comprehensive summary showing all evaluated molecules, both optimization rounds, and the improvement analysis.
-    
-    # Note: When referencing data stored in memory, use the simple key name (e.g., "bo_recommendations", "measurement_data") without any special syntax.
-    # """
-
-    # orchestrator.run_conversation(user_prompt=discovery_prompt)
+    target_properties = ["TPSA"]
+    if len(target_properties) < 2:
+        targets_config = {"name":  target_properties[0], "mode": "MAX"}
+    else:
+        targets_config = [
+            {"name": prop, "mode": "MAX", "weight": 1.0/len(target_properties)}#, "bounds": [0, 1]}
+            for prop in target_properties
+        ]
 
     discovery_prompt = f"""
     You must optimize Aspirin (SMILES 'CC(=O)OC1=CC=CC=C1C(=O)O').
@@ -232,7 +215,7 @@ def main():
     Plan:
     1. Enumerate 20 analogs.
     2. Run BayesianOptimizer (first round) with MORDRED.
-    3. Characterize recommended molecules with MoleculeCharacterizer or StoplightTool using bo_recommendations. Use the right characterization tool based on the property.
+    3. Characterize recommended molecules with MMoleculeCharacterizationTool or StoplightTool. Use the right characterization tool based on the property.
     4. Extract properties {target_properties} via MeasurementExtractor using a list of properties.
     5. Run BayesianOptimizer second round with measurement_data.
     6. Re-characterize new bo_recommendations.
