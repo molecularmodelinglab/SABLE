@@ -63,6 +63,7 @@ class EnumeratorTool(BaseTool):
             ##return validate the SMILES strings in the results
             results_df['Valid'] = results_df['Product'].apply(lambda x: self.validate_smiles(x))
             results_df = results_df[results_df['Valid'] == True]
+            # results_df = results_df['Product'].reset_index(drop=True)
 
             if results_df.empty:
                 return "No molecules were generated that met the criteria."
@@ -78,6 +79,7 @@ class EnumeratorTool(BaseTool):
             enumerated_molecules_dict = {f"mol_{i}": smi for i, smi in enumerate(enumerated_molecules_list)}
 
             # Store the results in memory instead of returning them
+            memory['enumerated_df'] = limited_df['Product'].reset_index(drop=True)
             memory['enumerated_molecules'] = enumerated_molecules_dict
             memory['enumeration_table'] = limited_df.to_dict(orient='list')
             
