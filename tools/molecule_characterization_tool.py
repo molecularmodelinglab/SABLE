@@ -22,7 +22,7 @@ class MoleculeCharacterizationTool(BaseTool):
     """)
     args_schema: Type[BaseModel] = MoleculeCharacterizationInput
 
-    def _run(self, molecule_ids: Optional[str] = None, memory: Optional[Dict[str, Any]] = None) -> str:
+    def _run(self, molecule_ids: Optional[List[str]] = None, memory: Optional[Dict[str, Any]] = None) -> str:
         """Run molecule characterization for a list of molecules."""
         if memory is None:
             memory = {}
