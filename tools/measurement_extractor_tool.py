@@ -17,6 +17,14 @@ class MeasurementExtractorInput(BaseModel):
         False,
         description="If True, will also look in 'stoplight_results' for missing properties."
     )
+    round_scope: str = Field(
+        "all",
+        description="Which BO round(s) to pull from: 'all', 'latest', or a specific round number as string (e.g. '3')."
+    )
+    recommendations_only: bool = Field(
+        False,
+        description="If True, only include molecules that were recommendations in the selected round scope."
+    )
 
 class MeasurementExtractor(BaseTool):
     name: str = "MeasurementExtractor"
@@ -32,22 +40,19 @@ class MeasurementExtractor(BaseTool):
         properties_to_extract: Union[List[str], str],
         id_column_name: str = "Molecule_ID",
         memory: Optional[Dict[str, Any]] = None,
-        include_stoplight: bool = False
+        include_stoplight: bool = False,
+        round_scope: str = "all",
+        recommendations_only: bool = False,
     ) -> str:
         """Extracts and formats measurement data."""
         if memory is None:
             memory = {}
 
-        # Check for characterization results in both possible locations
-        characterization_results = None
-        if 'characterization_results' in memory:
-            characterization_results = memory['characterization_results']
-        elif 'first_characterization_results' in memory:
-            characterization_results = memory['first_characterization_results']
-        else:
-            return "Error: No characterization results found in memory. The MoleculeCharacterizer must be run first."
-        
+        bo_rounds: List[Dict[str, Any]] = memory.get('bo_rounds', [])
         stoplight = memory.get('stoplight_results', {}) if include_stoplight else {}
+
+        if not bo_rounds:
+            return "Error: No characterization data found. Run a characterization tool first."
         
         if isinstance(properties_to_extract, str):
             try:
@@ -66,9 +71,38 @@ class MeasurementExtractor(BaseTool):
         if not all(isinstance(p, str) for p in properties):
             return "Error: All entries in properties_to_extract must be strings."
 
+        selected_rounds: List[Dict[str, Any]] = []
+        if round_scope == "all":
+            selected_rounds = bo_rounds
+        elif round_scope == "latest":
+            if bo_rounds:
+                selected_rounds = [bo_rounds[-1]]
+        else:
+            # numeric?
+            try:
+                rnum = int(round_scope)
+                selected_rounds = [r for r in bo_rounds if r.get("round") == rnum]
+            except ValueError:
+                return f"Error: round_scope '{round_scope}' is not 'all', 'latest', or an integer."
+
+        # Aggregate characterization dict
+        aggregated: Dict[str, Dict[str, Any]] = {}
+
+        if selected_rounds:
+            for r in selected_rounds:
+                for mid, props in r.get("characterization", {}).items():
+                    if recommendations_only and mid not in r.get("recommendations", []):
+                        continue
+                    if mid not in aggregated:
+                        aggregated[mid] = {}
+                    aggregated[mid].update(props)
+
+        if not aggregated:
+            return "Error: No characterized molecules matched the selection criteria."
+
         measurement_data: List[Dict[str, Any]] = []
 
-        for mol_id, data in characterization_results.items():
+        for mol_id, data in aggregated.items():
             row = {id_column_name: mol_id}
             for prop in properties:
                 if prop in data:
@@ -79,9 +113,25 @@ class MeasurementExtractor(BaseTool):
                     return f"Error: Property '{prop}' not found for molecule ID '{mol_id}'."
             measurement_data.append(row)
 
+        if not measurement_data:
+            return "Error: No measurements extracted."
+
         memory['measurement_data'] = measurement_data
-        
-        return f"Successfully extracted {properties} for {len(measurement_data)} molecules and stored in memory as 'measurement_data'."
+        # History log
+        hist = memory.setdefault('measurement_data_history', [])
+        hist.append({
+            "round_scope": round_scope,
+            "recommendations_only": recommendations_only,
+            "properties": properties,
+            "count": len(measurement_data)
+        })
+
+        scope_desc = f"round_scope={round_scope}"
+        if recommendations_only:
+            scope_desc += ", recommendations_only=True"
+
+        return (f"Extracted properties {properties} for {len(measurement_data)} molecules "
+                f"({scope_desc}); stored as 'measurement_data'.")
 
     async def _arun(self, **kwargs):
         raise NotImplementedError("MeasurementExtractor does not support async")
