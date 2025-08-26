@@ -9,10 +9,7 @@ import ast
 
 class MoleculeCharacterizationInput(BaseModel):
     """Input for characterizing a list of molecules."""
-    molecule_ids: Optional[List[str]] = Field(
-        default=None, 
-        description="A list of molecule IDs (e.g., [\"mol_1\", \"mol_2\"]) or a memory key (e.g., 'bo_recommendations'). If None, defaults to 'bo_recommendations' from memory."
-    )
+    pass
 
 class MoleculeCharacterizationTool(BaseTool):
     name: str = Field(default="MoleculeCharacterizer")
@@ -22,49 +19,55 @@ class MoleculeCharacterizationTool(BaseTool):
     """)
     args_schema: Type[BaseModel] = MoleculeCharacterizationInput
 
-    def _run(self, molecule_ids: Optional[List[str]] = None, memory: Optional[Dict[str, Any]] = None) -> str:
+    def _run(self, memory: Optional[Dict[str, Any]] = None) -> str:
         """Run molecule characterization for a list of molecules."""
         if memory is None:
             memory = {}
 
-        ids_to_process = molecule_ids
+        ids_to_process = None
         if not ids_to_process:
-            if 'bo_recommendations' in memory:
-                ids_to_process = memory['bo_recommendations']
-                print(f"Using 'bo_recommendations' from memory")
-            else:
-                return "Error: No molecule IDs provided. Ensure 'bo_recommendations' is in memory."
-            
+            bo_rounds = memory.get('bo_rounds', [])
+            if bo_rounds:
+                ids_to_process = bo_rounds[-1].get('recommendations', [])
+                if ids_to_process:
+                    print(f"Using latest BO round ({bo_rounds[-1]['round']}) recommendations.")
+
+        # if not ids_to_process:
+        #     return "Error: No molecule IDs resolved. Provide 'molecule_ids' or run BayesianOptimizer first."
         if not isinstance(ids_to_process, list):
-            return f"Error: molecule_ids must be a list, but got {type(ids_to_process).__name__}."
+            return f"Error: molecule_ids must be a list, got {type(ids_to_process).__name__}."
 
-        # Retrieve the full molecule dictionary from memory
-        all_molecules = memory.get('enumerated_molecules', {})
+
+        all_molecules = memory.get('search_space') or memory.get('enumerated_molecules', {})
         if not all_molecules:
-            return "Error: 'enumerated_molecules' not found in memory. Cannot retrieve SMILES strings."
-        
-        if 'characterization_results' not in memory:
-            memory['characterization_results'] = {}
+            return "Error: 'search_space' not in memory. Run Enumerator first."
 
-        characterization_results = {}
-        errors = []
-        successful_count = 0
+        memory.setdefault('characterization_results', {})
+
+        bo_rounds = memory.get('bo_rounds', [])
+        latest_round_for: Dict[str, Any] = {}
+        if bo_rounds:
+            for r in bo_rounds:
+                for mid in r.get('recommendations', []):
+                    latest_round_for[mid] = r
+
+        success = 0
+        errors: List[str] = []
+        rounds_touched = set()
+
         for mol_id in ids_to_process:
-            smiles = all_molecules.get(mol_id)
-            if not smiles:
-                errors.append(f"SMILES not found for molecule ID: {mol_id}")
+            smi = all_molecules.get(mol_id)
+            if not smi:
+                errors.append(f"SMILES not found for {mol_id}")
                 continue
-
+            mol = Chem.MolFromSmiles(smi)
+            if mol is None:
+                errors.append(f"Invalid SMILES for {mol_id}")
+                continue
             try:
-                mol = Chem.MolFromSmiles(smiles)
-                if mol is None:
-                    errors.append(f"Invalid SMILES '{smiles}' for molecule ID: {mol_id}")
-                    continue
-
-                # Calculate properties
-                properties = {
+                props = {
                     "Molecular_Formula": Chem.rdMolDescriptors.CalcMolFormula(mol),
-                    "Exact_Mass": round(Descriptors.ExactMolWt(mol), 2),
+                    "Exact_Mass": round(Descriptors.ExactMolWt(mol), 4),
                     "Molecular_Weight": round(Descriptors.MolWt(mol), 2),
                     "Heavy_Atom_Count": Descriptors.HeavyAtomCount(mol),
                     "Ring_Count": Descriptors.RingCount(mol),
@@ -74,32 +77,25 @@ class MoleculeCharacterizationTool(BaseTool):
                     "Rotatable_Bonds": Descriptors.NumRotatableBonds(mol),
                     "LogP": round(Descriptors.MolLogP(mol), 2),
                     "TPSA": round(Descriptors.TPSA(mol), 2),
-                    "QED": round(Descriptors.qed(mol), 2),
+                    "QED": round(Descriptors.qed(mol), 3),
                 }
-                if mol_id not in memory['characterization_results']:
-                    memory['characterization_results'][mol_id] = {}
-                memory['characterization_results'][mol_id].update(properties)
-                successful_count += 1
-            except Exception as e:
-                errors.append(f"Error characterizing molecule ID {mol_id}: {e}")
 
-        # Store results in memorys
-        if 'first_bo_recommendations' in memory and set(ids_to_process) == set(memory.get('first_bo_recommendations')):
-            if 'first_characterization_results' not in memory:
-                memory['first_characterization_results'] = {}
-            # This part needs to merge too
-            for mol_id, props in memory['characterization_results'].items():
-                 if mol_id in ids_to_process:
-                    if mol_id not in memory['first_characterization_results']:
-                        memory['first_characterization_results'][mol_id] = {}
-                    memory['first_characterization_results'][mol_id].update(props)
-            summary = f"Successfully characterized and merged data for {successful_count} molecules (First Round)."
+                memory['characterization_results'].setdefault(mol_id, {}).update(props)
+                # Round-specific
+                r = latest_round_for.get(mol_id)
+                if r:
+                    r['characterization'].setdefault(mol_id, {}).update(props)
+                    rounds_touched.add(r['round'])
+                success += 1
+            except Exception as e:
+                errors.append(f"{mol_id}: {e}")
+
+        if rounds_touched:
+            summary = f"Characterized {success} molecules across BO rounds {sorted(rounds_touched)}."
         else:
-            summary = f"Successfully characterized and merged data for {successful_count} molecules."
-        
+            summary = f"Characterized {success} molecules (no BO round matched)."
         if errors:
-            summary += f" Encountered {len(errors)} errors: {'; '.join(errors)}"
-            
+            summary += f" {len(errors)} errors: " + "; ".join(errors[:5]) + ("..." if len(errors) > 5 else "")
         return summary
 
     async def _arun(self, molecule_ids: Optional[List[str]] = None, memory: Optional[Dict[str, Any]] = None) -> str:
@@ -108,31 +104,3 @@ class MoleculeCharacterizationTool(BaseTool):
         return self._run(molecule_ids=molecule_ids, memory=memory)
 
 
-# Example usage (adapted for the new structure)
-if __name__ == "__main__":
-    # Create the tool
-    molecule_tool = MoleculeCharacterizationTool()
-
-    # Setup mock memory
-    mock_memory = {
-        'enumerated_molecules': {
-            "mol_1": "CC(=O)OC1=CC=CC=C1C(=O)O", # Aspirin
-            "mol_2": "CCO", # Ethanol
-            "mol_invalid": "this is not smiles"
-        },
-        'bo_recommendations': ["mol_1", "mol_2", "mol_invalid", "mol_not_found"]
-    }
-
-    try:
-        # Use the tool, which will get IDs from memory
-        summary_message = molecule_tool.run(memory=mock_memory)
-
-        # Print summary and results from memory
-        print(summary_message)
-        print("\nResults stored in memory:")
-        print("-" * 30)
-        import json
-        print(json.dumps(mock_memory.get('characterization_results', {}), indent=2))
-
-    except Exception as e:
-        print(f"An unexpected error occurred: {str(e)}")

@@ -11,7 +11,6 @@ import numpy as np
 
 class StoplightToolInput(BaseModel):
     """Input for the Stoplight API tool."""
-    molecule_ids: Optional[List[str]] = Field(default=None, description="A list of molecule IDs to analyze. If not provided, the tool will use 'bo_recommendations' from memory.")
     precision: int = Field(default=2, description="Number of decimal places for numerical results.")
 
 
@@ -24,26 +23,26 @@ class StoplightTool(BaseTool):
     args_schema: Type[BaseModel] = StoplightToolInput
     api_url: str = "https://stoplight.mml.unc.edu/smiles-csv"
 
-    def _run(self, molecule_ids: Optional[List[str]] = None, precision: int = 2, memory: Optional[Dict[str, Any]] = None) -> str:
+    def _run(self, precision: int = 2, memory: Optional[Dict[str, Any]] = None) -> str:
         """Run molecule property calculation for a list of molecules via API."""
         if memory is None:
             memory = {}
-
-        ids_to_process = molecule_ids
-        if not ids_to_process:
-            if 'bo_recommendations' in memory:
-                ids_to_process = memory['bo_recommendations']
-                print(f"Using 'bo_recommendations' from memory: {ids_to_process}")
-            else:
-                return "Error: No molecule IDs provided. Please provide 'molecule_ids' or ensure 'bo_recommendations' is in memory."
         
+        ids_to_process = None
+        if not ids_to_process:
+            bo_rounds = memory.get('bo_rounds', [])
+            if bo_rounds:
+                ids_to_process = bo_rounds[-1].get('recommendations', [])
+                if ids_to_process:
+                    print(f"Using latest BO round ({bo_rounds[-1]['round']}) recommendations: {ids_to_process}")
+           
         if not isinstance(ids_to_process, list):
             return f"Error: molecule_ids must be a list, but got {type(ids_to_process).__name__}."
         
         # Retrieve the full molecule dictionary from memory
-        all_molecules = memory.get('enumerated_molecules', {})
+        all_molecules = memory.get('search_space') or memory.get('enumerated_molecules', {})
         if not all_molecules:
-            return "Error: 'enumerated_molecules' not found in memory. Cannot retrieve SMILES strings."
+            return "Error: 'search_space' not found in memory. Cannot retrieve SMILES strings."
 
         smiles_list = []
         id_map = []
@@ -58,7 +57,7 @@ class StoplightTool(BaseTool):
         if not smiles_list:
             return "Error: No valid SMILES found for the provided molecule IDs."
         
-        payload = self._build_payload(smiles, precision)
+        payload = self._build_payload(smiles_list, precision)
 
         try:
             print("Sending batch request to Stoplight API...")
@@ -71,8 +70,15 @@ class StoplightTool(BaseTool):
         except json.JSONDecodeError:
             return "Failed to decode API batch response."
         
-        if 'characterization_results' not in memory:
-            memory['characterization_results'] = {}
+        memory.setdefault('characterization_results', {})
+
+        bo_rounds = memory.get('bo_rounds', [])
+        target_round = None
+        if bo_rounds:
+            for r in reversed(bo_rounds):
+                if any(m in r['recommendations'] for m in ids_to_process):
+                    target_round = r
+                    break
         
         processed_mols = 0
         for i, row in results.iterrows():
@@ -86,21 +92,19 @@ class StoplightTool(BaseTool):
             
             if "HBD" in stoplight_data:
                 # Update general characterization results
-                if mol_id not in memory['characterization_results']:
-                    memory['characterization_results'][mol_id] = {}
-                memory['characterization_results'][mol_id].update(stoplight_data)
+                # if mol_id not in memory['characterization_results']:
+                #     memory['characterization_results'][mol_id] = {}
+                # memory['characterization_results'][mol_id].update(stoplight_data)
+
+                if target_round is not None:
+                    if mol_id not in target_round['characterization']:
+                        target_round['characterization'][mol_id] = {}
+                    target_round['characterization'][mol_id].update(stoplight_data)
                 processed_mols += 1
 
-                # If these are the first recommendations, store them separately
-                if 'first_bo_recommendations' in memory and ids_to_process == memory.get('first_bo_recommendations'):
-                    if 'first_characterization_results' not in memory:
-                        memory['first_characterization_results'] = {}
-                    if mol_id not in memory['first_characterization_results']:
-                        memory['first_characterization_results'][mol_id] = {}
-                    memory['first_characterization_results'][mol_id].update(stoplight_data)
-        
-        summary = f"Successfully retrieved and merged Stoplight data for {processed_mols} molecules."
-        return summary
+        if target_round:
+            return f"Stoplight: characterized {processed_mols} molecules (BO Round {target_round['round']})."
+        return f"Stoplight: characterized {processed_mols} molecules (no BO round matched)."
 
 
     def _build_payload(self, smiles: str, precision: int) -> Dict[str, Any]:
@@ -125,29 +129,3 @@ class StoplightTool(BaseTool):
         raise NotImplementedError("StoplightTool does not support async execution.")
 
 
-# Example usage (adapted for the new structure)
-if __name__ == "__main__":
-    # Create the tool
-    stoplight_tool = StoplightTool()
-
-    # Setup mock memory
-    mock_memory = {
-        'enumerated_molecules': {
-            "mol_1": "CC(=O)OC1=CC=CC=C1C(=O)O", # Aspirin
-            "mol_2": "CCO"  # Ethanol
-        },
-        'bo_recommendations': ["mol_1", "mol_2", "mol_not_found"]
-    }
-
-    try:
-        # Use the tool, which will get IDs from memory
-        summary_message = stoplight_tool.run(memory=mock_memory)
-
-        # Print summary and results from memory
-        print(summary_message)
-        print("\nResults stored in memory:")
-        print("-" * 30)
-        print(json.dumps(mock_memory.get('stoplight_results', {}), indent=2))
-
-    except Exception as e:
-        print(f"An unexpected error occurred: {str(e)}")
