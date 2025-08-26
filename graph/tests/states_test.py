@@ -18,7 +18,7 @@ from nodes.validate_molecule import validate_molecule_node
 from nodes.bo_iteration import bo_iteration_node
 from nodes.llm_experiment import llm_experiment_node
 from nodes.record_experimental_results import record_experimental_results_node
-from nodes.check_exit_conditionsonditions_node
+from nodes.check_exit_conditions import check_exit_conditions_node
 from nodes.summarize_results import summarize_results_node
 from nodes.BOnodes.recording import summarize_results_node
 
