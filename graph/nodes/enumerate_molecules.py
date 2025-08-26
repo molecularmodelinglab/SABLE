@@ -1,6 +1,6 @@
 # nodes/enumerate_molecules.py
 
-from stateTracking import MoleculeEntry, MoleculeSource
+from graph.state import MoleculeEntry, MoleculeSource
 
 def enumerate_molecules_node(state):
     """

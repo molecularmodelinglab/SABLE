@@ -1,6 +1,6 @@
 # nodes/llm_experiment.py
 
-from stateTracking import ExperimentRun, ExperimentStatus
+from graph.state import ExperimentRun, ExperimentStatus
 
 def llm_experiment_node(state):
     """

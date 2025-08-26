@@ -9,17 +9,17 @@ This file contains the compiled LangGraph for molecular optimization.
 from langgraph import StateGraph, START, END
 
 # Import all nodes based on your file structure
-from nodes.extractArgs import extract_arguments_node
+from nodes.extract_arguments import extract_arguments_node
 from nodes.setup import setup_node
-from nodes.generateMol import generate_molecule_node
-from nodes.enumerateMols import enumerate_molecules_node
-from nodes.decideLibrary import decide_library_node
-from nodes.validateMols import validate_molecule_node
-from nodes.BOnodes.moleculeSelection import bo_iteration_node
-from nodes.BOnodes.llmExperimentsCall import llm_experiment_node
-from nodes.BOnodes.experimentResults import record_experimental_results_node
-from nodes.BOnodes.exitConditions import check_exit_conditions_node
-from nodes.summerization import summarize_results_node
+from nodes.generate_molecule import generate_molecule_node
+from nodes.enumerate_molecules import enumerate_molecules_node
+from nodes.decide_library import decide_library_node
+from nodes.validate_molecule import validate_molecule_node
+from nodes.bo_iteration import bo_iteration_node
+from nodes.llm_experiment import llm_experiment_node
+from nodes.record_experimental_results import record_experimental_results_node
+from nodes.check_exit_conditions import check_exit_conditions_node
+from nodes.summarize_results import summarize_results_node
 from nodes.BOnodes.recording import record_to_json_node
 
 # Create the graph

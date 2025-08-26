@@ -1,6 +1,6 @@
 # nodes/setup.py
 
-from stateTracking import OptimizationObjective, MoleculeSource, BOParameters, EnumerationParameters
+from graph.state import OptimizationObjective, MoleculeSource, BOParameters, EnumerationParameters
 
 def setup_node(state):
     """

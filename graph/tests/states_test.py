@@ -6,26 +6,26 @@ This script tests the complete molecular optimization workflow with dummy data
 using your actual file organization.
 """
 
-from stateTracking import StateTracker  # Adjust import based on your actual file structure
+from graph.state import StateTracker  # Adjust import based on your actual file structure
 
 # Import based on your actual file structure
-from nodes.extractArgs import extract_arguments_node
+from nodes.extract_arguments import extract_arguments_node
 from nodes.setup import setup_node  
-from nodes.generateMol import generate_molecule_node
-from nodes.enumerateMols import enumerate_molecules_node
-from nodes.decideLibrary import decide_library_node
-from nodes.validateMol import validate_molecule_node
-from nodes.BOnodes.moleculeSelection import bo_iteration_node
-from nodes.BOnodes.llmExperimentCall import llm_experiment_node
-from nodes.BOnodes.experimentResults import record_experimental_results_node
-from nodes.BOnodes.exitConditions import check_exit_conditions_node
-from nodes.summerization import summarize_results_node
+from nodes.generate_molecule import generate_molecule_node
+from nodes.enumerate_molecules import enumerate_molecules_node
+from nodes.decide_library import decide_library_node
+from nodes.validate_molecule import validate_molecule_node
+from nodes.bo_iteration import bo_iteration_node
+from nodes.llm_experiment import llm_experiment_node
+from nodes.record_experimental_results import record_experimental_results_node
+from nodes.check_exit_conditionsonditions_node
+from nodes.summarize_results import summarize_results_node
 from nodes.BOnodes.recording import summarize_results_node
 
 # Import your compiled graph (you'll need to create this file)
 # Assuming you saved your graph definition in molecular_graph.py
 try:
-    from molecular_graph import compiled_molecular_graph
+    from graph.molecular_graph import compiled_molecular_graph
 except ImportError:
     print("Error: molecular_graph.py not found. Create this file with your graph definition.")
     print("Copy your graph code into a file named 'molecular_graph.py'")

@@ -1,6 +1,6 @@
 # nodes/generate_molecule.py
 
-from stateTracking import MoleculeEntry, MoleculeSource
+from graph.state import MoleculeEntry, MoleculeSource
 
 def generate_molecule_node(state):
     """

@@ -1,7 +1,4 @@
 """
-StateTracker.py
-==============
-
 State management for molecular optimization workflow.
 """
 
