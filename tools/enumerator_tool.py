@@ -79,14 +79,14 @@ class EnumeratorTool(BaseTool):
             enumerated_molecules_dict = {f"mol_{i}": smi for i, smi in enumerate(enumerated_molecules_list)}
 
             # Store the results in memory instead of returning them
+            memory['search_space'] = enumerated_molecules_dict
             memory['enumerated_df'] = limited_df['Product'].reset_index(drop=True)
-            memory['enumerated_molecules'] = enumerated_molecules_dict
-            memory['enumeration_table'] = limited_df.to_dict(orient='list')
+            # memory['enumeration_table'] = limited_df.to_dict(orient='list')
             
-            summary_message = f"Successfully enumerated {len(enumerated_molecules_dict)} molecules and stored them in memory under the key 'enumerated_molecules'."
+            summary_message = f"Successfully enumerated {len(enumerated_molecules_dict)} molecules and stored them in memory under the key 'search_space'."
             
             return summary_message
-
+    
         except Exception as e:
             return f"Error in EnumeratorTool: {e}"
     
