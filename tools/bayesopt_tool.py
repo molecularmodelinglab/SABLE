@@ -59,13 +59,12 @@ class BayesianOptimizationTool(BaseTool):
 
         if not BAYBE_AVAILABLE:
             return "Error: BayBE library is not installed. Cannot perform Bayesian Optimization."
-
-        # Get search space from memory
-        if 'enumerated_molecules' in memory:
-            search_space = memory['enumerated_molecules']
-            print(f"Using enumerated_molecules from memory with {len(search_space)} entries.")
+        
+        if 'search_space' in memory:
+            search_space = memory['search_space']
+            print(f"Using search_space from memory with {len(search_space)} entries.")
         else:
-            return "Error: No search space found in memory. The 'EnumeratorTool' must be run first."
+            return "Error: No search space found in memory. Run Enumerator first (populates 'search_space')."
 
         try:
             # The 'targets' are now a JSON string, so we need to parse it.
@@ -122,18 +121,23 @@ class BayesianOptimizationTool(BaseTool):
             
             recommended_ids = recommendations_df[search_space_id_column].tolist()
 
-            # Store results in memory
-            # If this is the first run (no measurement data), preserve it as first_bo_recommendations
-            if not processed_measurement_data:
-                # First optimization round
-                memory['first_bo_recommendations'] = recommended_ids
-                memory['bo_recommendations'] = recommended_ids
-                summary_message = f"Successfully recommended {len(recommended_ids)} molecules using Bayesian Optimization (First Round) and stored them in memory under 'bo_recommendations'."
-            else:
-                # Second optimization round (with measurement data)
-                memory['bo_recommendations'] = recommended_ids
-                summary_message = f"Successfully recommended {len(recommended_ids)} molecules using Bayesian Optimization (Second Round) and stored them in memory under 'bo_recommendations'."
+            if 'bo_rounds' not in memory:
+                memory['bo_rounds'] = []
             
+            round_number = len(memory['bo_rounds']) + 1
+            round_entry = {
+                "round": round_number,
+                "recommendations": recommended_ids,
+                "measurements": processed_measurement_data if processed_measurement_data else [],
+                "characterization": {}
+            }
+
+            memory['bo_rounds'].append(round_entry)
+
+            summary_message = (
+                f"BO Round {round_number}: recommended {len(recommended_ids)} molecules. "
+                f"Stored in memory under 'bo_rounds[{round_number - 1}]'."
+            )
             return summary_message
 
         except Exception as e:
