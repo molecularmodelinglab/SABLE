@@ -43,7 +43,7 @@ class EnumeratorTool(BaseTool):
         try:
             # Handle defaults internally
             n_comps = n_compositions if n_compositions is not None else 10
-            sim_thresh = sim_threshold if sim_threshold is not None else 0.1
+            sim_thresh = sim_threshold if sim_threshold is not None else 0.01
             rxn_tags = reaction_tags if reaction_tags is not None else ['amide coupling', 'amide', 'C-N bond formation', 'C-N', 'alkylation', 'N-arylation', 'azole', 'amination']
             bb_source = building_blocks if building_blocks is not None else "test"
             custom_sites = custom_comp_sites if custom_comp_sites is not None else []
@@ -80,13 +80,13 @@ class EnumeratorTool(BaseTool):
 
             # Store the results in memory instead of returning them
             memory['search_space'] = enumerated_molecules_dict
-            memory['enumerated_df'] = limited_df['Product'].reset_index(drop=True)
+            # memory['enumerated_df'] = limited_df['Product'].reset_index(drop=True)
             # memory['enumeration_table'] = limited_df.to_dict(orient='list')
             
             summary_message = f"Successfully enumerated {len(enumerated_molecules_dict)} molecules and stored them in memory under the key 'search_space'."
-            
-            return summary_message
-    
+
+            return enumerated_molecules_dict
+
         except Exception as e:
             return f"Error in EnumeratorTool: {e}"
     
