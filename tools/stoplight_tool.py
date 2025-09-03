@@ -12,6 +12,7 @@ import numpy as np
 class StoplightToolInput(BaseModel):
     """Input for the Stoplight API tool."""
     precision: int = Field(default=2, description="Number of decimal places for numerical results.")
+    search_space: Optional[Dict[str, str]] = Field(default=None, description="Mapping of molecule IDs to their SMILES strings.")
 
 
 class StoplightTool(BaseTool):
@@ -23,31 +24,17 @@ class StoplightTool(BaseTool):
     args_schema: Type[BaseModel] = StoplightToolInput
     api_url: str = "https://stoplight.mml.unc.edu/smiles-csv"
 
-    def _run(self, precision: int = 2, memory: Optional[Dict[str, Any]] = None) -> str:
+    def _run(self, 
+             precision: int = 2, 
+             search_space: Optional[Dict[str, str]] = None,
+             ids_to_process: Optional[List[str]] = None,
+        ) -> str:
         """Run molecule property calculation for a list of molecules via API."""
-        if memory is None:
-            memory = {}
-        
-        ids_to_process = None
-        if not ids_to_process:
-            bo_rounds = memory.get('bo_rounds', [])
-            if bo_rounds:
-                ids_to_process = bo_rounds[-1].get('recommendations', [])
-                if ids_to_process:
-                    print(f"Using latest BO round ({bo_rounds[-1]['round']}) recommendations: {ids_to_process}")
-           
-        if not isinstance(ids_to_process, list):
-            return f"Error: molecule_ids must be a list, but got {type(ids_to_process).__name__}."
-        
-        # Retrieve the full molecule dictionary from memory
-        all_molecules = memory.get('search_space') or memory.get('enumerated_molecules', {})
-        if not all_molecules:
-            return "Error: 'search_space' not found in memory. Cannot retrieve SMILES strings."
 
         smiles_list = []
         id_map = []
         for mol_id in ids_to_process:
-            smiles = all_molecules.get(mol_id)
+            smiles = search_space.get(mol_id)
             if smiles:
                 smiles_list.append(smiles)
                 id_map.append(mol_id)
@@ -64,24 +51,14 @@ class StoplightTool(BaseTool):
             headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
             response = requests.post(self.api_url, headers=headers, json=payload)
             response.raise_for_status()
-            results = pd.read_csv(io.StringIO(response.content.decode('utf-8')))
+            output = pd.read_csv(io.StringIO(response.content.decode('utf-8')))
         except requests.exceptions.RequestException as e:
             return f"API error during batch request: {e}"
         except json.JSONDecodeError:
             return "Failed to decode API batch response."
         
-        memory.setdefault('characterization_results', {})
-
-        bo_rounds = memory.get('bo_rounds', [])
-        target_round = None
-        if bo_rounds:
-            for r in reversed(bo_rounds):
-                if any(m in r['recommendations'] for m in ids_to_process):
-                    target_round = r
-                    break
-        
-        processed_mols = 0
-        for i, row in results.iterrows():
+        results = {}
+        for i, row in output.iterrows():
             if i >= len(id_map):
                 break
             mol_id = id_map[i]
@@ -91,21 +68,9 @@ class StoplightTool(BaseTool):
             stoplight_data = {k: v for k, v in stoplight_data.items() if isinstance(v, (int, float))}
             
             if "HBD" in stoplight_data:
-                # Update general characterization results
-                # if mol_id not in memory['characterization_results']:
-                #     memory['characterization_results'][mol_id] = {}
-                # memory['characterization_results'][mol_id].update(stoplight_data)
-
-                if target_round is not None:
-                    if mol_id not in target_round['characterization']:
-                        target_round['characterization'][mol_id] = {}
-                    target_round['characterization'][mol_id].update(stoplight_data)
-                processed_mols += 1
-
-        if target_round:
-            return f"Stoplight: characterized {processed_mols} molecules (BO Round {target_round['round']})."
-        return f"Stoplight: characterized {processed_mols} molecules (no BO round matched)."
-
+                results[mol_id] = stoplight_data
+                
+        return results
 
     def _build_payload(self, smiles: str, precision: int) -> Dict[str, Any]:
         """Helper to construct the API payload."""
