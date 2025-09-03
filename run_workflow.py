@@ -94,9 +94,7 @@ class WorkflowRunner:
             state = WorkflowState(user_prompt=user_prompt)
             print(f"Starting new workflow: {state.workflow_id}")
         
-        # Run the graph
         try:
-            # Execute the graph with the initial state
             config = {
                 "recursion_limit": 25,
                 "debug": True
