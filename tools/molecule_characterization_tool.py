@@ -1,15 +1,13 @@
 from typing import Optional, Type, Dict, List, Any
 from langchain.tools import BaseTool
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from rdkit import Chem
 from rdkit.Chem import Descriptors
-import json
-import ast
-
 
 class MoleculeCharacterizationInput(BaseModel):
     """Input for characterizing a list of molecules."""
-    pass
+    search_space: Dict[str, str] = Field(..., description="Mapping of molecule IDs to their SMILES strings.")
+    ids_to_process: List[str] = Field(..., description="List of molecule IDs to process.")
 
 class MoleculeCharacterizationTool(BaseTool):
     name: str = Field(default="MoleculeCharacterizer")
@@ -19,44 +17,18 @@ class MoleculeCharacterizationTool(BaseTool):
     """)
     args_schema: Type[BaseModel] = MoleculeCharacterizationInput
 
-    def _run(self, memory: Optional[Dict[str, Any]] = None) -> str:
+    def _run(self,
+             search_space: Dict[str, str],
+             ids_to_process: List[str],
+        ) -> str:
         """Run molecule characterization for a list of molecules."""
-        if memory is None:
-            memory = {}
-
-        ids_to_process = None
-        if not ids_to_process:
-            bo_rounds = memory.get('bo_rounds', [])
-            if bo_rounds:
-                ids_to_process = bo_rounds[-1].get('recommendations', [])
-                if ids_to_process:
-                    print(f"Using latest BO round ({bo_rounds[-1]['round']}) recommendations.")
-
-        # if not ids_to_process:
-        #     return "Error: No molecule IDs resolved. Provide 'molecule_ids' or run BayesianOptimizer first."
-        if not isinstance(ids_to_process, list):
-            return f"Error: molecule_ids must be a list, got {type(ids_to_process).__name__}."
-
-
-        all_molecules = memory.get('search_space') or memory.get('enumerated_molecules', {})
-        if not all_molecules:
-            return "Error: 'search_space' not in memory. Run Enumerator first."
-
-        memory.setdefault('characterization_results', {})
-
-        bo_rounds = memory.get('bo_rounds', [])
-        latest_round_for: Dict[str, Any] = {}
-        if bo_rounds:
-            for r in bo_rounds:
-                for mid in r.get('recommendations', []):
-                    latest_round_for[mid] = r
-
-        success = 0
+        
         errors: List[str] = []
-        rounds_touched = set()
-
+        results: Dict[str, Dict[str, float]] = {}
+        
+        print("Characterizing molecules with rdkit")
         for mol_id in ids_to_process:
-            smi = all_molecules.get(mol_id)
+            smi = search_space.get(mol_id)
             if not smi:
                 errors.append(f"SMILES not found for {mol_id}")
                 continue
@@ -80,23 +52,12 @@ class MoleculeCharacterizationTool(BaseTool):
                     "QED": round(Descriptors.qed(mol), 3),
                 }
 
-                memory['characterization_results'].setdefault(mol_id, {}).update(props)
-                # Round-specific
-                r = latest_round_for.get(mol_id)
-                if r:
-                    r['characterization'].setdefault(mol_id, {}).update(props)
-                    rounds_touched.add(r['round'])
-                success += 1
+                results[mol_id] = props
+
             except Exception as e:
                 errors.append(f"{mol_id}: {e}")
 
-        if rounds_touched:
-            summary = f"Characterized {success} molecules across BO rounds {sorted(rounds_touched)}."
-        else:
-            summary = f"Characterized {success} molecules (no BO round matched)."
-        if errors:
-            summary += f" {len(errors)} errors: " + "; ".join(errors[:5]) + ("..." if len(errors) > 5 else "")
-        return summary
+        return results
 
     async def _arun(self, molecule_ids: Optional[List[str]] = None, memory: Optional[Dict[str, Any]] = None) -> str:
         """Async implementation of molecule characterization"""
