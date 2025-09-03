@@ -1,6 +1,6 @@
 """
 Main entry point for running the molecular optimization workflow.
-Includes state persistence and checkpointing.
+Includes state persistence and checkpointing. 
 """
 
 import json
