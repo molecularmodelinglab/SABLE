@@ -58,18 +58,6 @@ def bo_iteration_node(state: WorkflowState) -> Dict[str, Any]:
     else:
         bo_tool = BayesianOptimizationTool()
         
-        targets = []
-        for target in state.targets:
-            target_dict = {
-                "name": target.name,
-                "mode": target.mode,
-                "bounds": target.bounds if target.bounds else (0.0, 1.0),
-                "transformation": target.transformation
-            }
-            if len(state.targets) > 1:
-                target_dict["weight"] = target.weight
-            targets.append(target_dict)
-        
         measurement_data = None
         if state.experimental_results:
             measurement_data = []
@@ -87,15 +75,13 @@ def bo_iteration_node(state: WorkflowState) -> Dict[str, Any]:
                     }
                     measurement_data.append(measurement)
         
-        try:
-            memory = {"search_space": state.search_space}
-            
+        try:            
             result = bo_tool._run(
-                targets=json.dumps(targets),
+                target=state.state.target,
                 batch_size=state.bo_config.batch_size,
                 encoding=state.bo_config.encoding,
                 measurement_data=measurement_data,
-                memory=memory
+                search_space=state.search_space,
             )
             
             if isinstance(result, list):
