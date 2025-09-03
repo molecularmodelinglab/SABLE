@@ -50,7 +50,7 @@ class WorkflowRunner:
         
         json_path = self.checkpoint_dir / f"{checkpoint_name}.json"
         with open(json_path, 'w') as f:
-            json.dump(state.dict(), f, indent=2, default=str)
+            json.dump(state, f, indent=2, default=str)
         
         print(f"Checkpoint saved: {checkpoint_path}")
         return str(checkpoint_path)
@@ -102,18 +102,16 @@ class WorkflowRunner:
                 "debug": True
             }
             result = self.graph.invoke(state, config=config)
-            
+
             # Extract final state
             if isinstance(result, WorkflowState):
                 final_state = result
-            elif isinstance(result, dict) and "state" in result:
-                final_state = result["state"]
-            else:
-                final_state = state
-            
+            elif isinstance(result, dict) and "status" in result:
+                final_state = result
+  
             # Save final checkpoint
             if save_checkpoints:
-                self.save_checkpoint(final_state, f"{final_state.workflow_id}_final")
+                self.save_checkpoint(final_state, f"{final_state["workflow_id"]}_final")
             
             return final_state
             
