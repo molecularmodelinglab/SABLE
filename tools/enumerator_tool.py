@@ -34,21 +34,14 @@ class EnumeratorTool(BaseTool):
         reaction_tags: Optional[List[str]] = None,
         building_blocks: Optional[str] = None,
         custom_comp_sites: Optional[List[Tuple]] = None,
-        memory: Optional[Dict[str, Any]] = None,
     ) -> Union[Dict[str, str], str]:
-        """Use the tool."""
-        if memory is None:
-            memory = {}
-
         try:
-            # Handle defaults internally
             n_comps = n_compositions if n_compositions is not None else 10
-            sim_thresh = sim_threshold if sim_threshold is not None else 0.3
+            sim_thresh = sim_threshold if sim_threshold is not None else 0.01
             rxn_tags = reaction_tags if reaction_tags is not None else ['amide coupling', 'amide', 'C-N bond formation', 'C-N', 'alkylation', 'N-arylation', 'azole', 'amination']
-            bb_source = building_blocks if building_blocks is not None else "EU_stock"
+            bb_source = building_blocks if building_blocks is not None else "test"
             custom_sites = custom_comp_sites if custom_comp_sites is not None else []
 
-            # Initialize the enumerator
             enumerator = MoleculeEnumerator(
                 n_compositions=n_comps,
                 molecule=molecule,
@@ -60,6 +53,9 @@ class EnumeratorTool(BaseTool):
 
             enumerator.enumerate()
             results_df = enumerator.get_results()
+            
+            results_df['Valid'] = results_df['Product'].apply(lambda x: self.validate_smiles(x))
+            results_df = results_df[results_df['Valid'] == True]
 
             if results_df.empty:
                 return "No molecules were generated that met the criteria."
@@ -74,15 +70,50 @@ class EnumeratorTool(BaseTool):
             # Format the output as a dictionary of {id: smiles}
             enumerated_molecules_dict = {f"mol_{i}": smi for i, smi in enumerate(enumerated_molecules_list)}
 
-            # Store the results in memory instead of returning them
-            memory['enumerated_molecules'] = enumerated_molecules_dict
-            
-            summary_message = f"Successfully enumerated {len(enumerated_molecules_dict)} molecules and stored them in memory under the key 'enumerated_molecules'."
-            
-            return summary_message
+            return enumerated_molecules_dict
 
         except Exception as e:
             return f"Error in EnumeratorTool: {e}"
+    
+    @staticmethod
+    def validate_smiles(smiles_string):
+        """
+        Validates a SMILES string using RDKit.
+
+        Args:
+            smiles_string (str): The SMILES string to validate.
+
+        Returns:
+            bool: True if the SMILES string is valid, False otherwise.
+            str or None:  Error message if invalid, None if valid.
+        """
+        try:
+            mol = Chem.MolFromSmiles(smiles_string)
+            if mol is None:  # Crucial: Check for None return value!
+                return False, "RDKit could not parse the SMILES string (returned None)."
+            # Further checks (optional, but recommended)
+            Chem.SanitizeMol(mol)  # Check for chemical validity (valence, etc.)
+
+            # Check for disconnected structures (if that's considered invalid in your context)
+            if '.' in smiles_string:
+                fragments = Chem.GetMolFrags(mol, asMols=True)
+                if len(fragments) > 1:
+                    # Check if its salts, not truly disconnected molecules.
+                    is_salt = all('.' in Chem.MolToSmiles(frag) for frag in fragments)  # . indicates ions
+                    if not is_salt:
+                        return False, "SMILES string represents disconnected molecules."
+            return True
+        except Chem.rdchem.KekulizeException:
+            return False
+        except Chem.rdchem.AtomValenceException:
+            return False
+        except Chem.rdchem.AtomKekulizeException:
+            return False
+        except Chem.rdchem.MolSanitizeException as e:
+            return False
+        except Exception as e:
+            return False
+
 
     async def _arun(self, **kwargs):
         raise NotImplementedError("EnumeratorTool does not support async")
