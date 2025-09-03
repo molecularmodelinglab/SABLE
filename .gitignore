@@ -2,7 +2,9 @@ __pycache__/
 
 buildingblocks/
 test_checkpoints/
+debug_checkpoints/
 
 *pyc
 
 config.yml
+debug.py
