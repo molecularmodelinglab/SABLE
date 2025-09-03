@@ -15,12 +15,11 @@ def check_exit_conditions_node(state: WorkflowState) -> Dict[str, Any]:
         "max_iterations": state.max_iterations
     })
     
-    # Check iteration limit
     if state.current_iteration >= state.max_iterations - 1:
         state.exit_reason = f"Maximum iterations reached ({state.max_iterations})"
         state.status = WorkflowStatus.COMPLETED
         state.log("check_exit_conditions_max_iterations")
-        return {"state": state}
+        return state
     
     # Check convergence based on best molecule scores
     if len(state.best_molecules) >= 5:
@@ -30,7 +29,7 @@ def check_exit_conditions_node(state: WorkflowState) -> Dict[str, Any]:
             state.exit_reason = "Convergence detected - top molecules have identical scores"
             state.status = WorkflowStatus.COMPLETED
             state.log("check_exit_conditions_converged")
-            return {"state": state}
+            return state
         
         # Check if improvement is minimal
         if len(state.bo_rounds) >= 3:
@@ -41,8 +40,8 @@ def check_exit_conditions_node(state: WorkflowState) -> Dict[str, Any]:
                 state.log("check_exit_conditions_minimal_improvement", {
                     "score_improvement": score_improvement
                 })
-                return {"state": state}
-    
+                return state
+
     # Check if search space is exhausted
     tested_smiles = {r.smiles for r in state.experimental_results}
     available_smiles = set(state.search_space.values())
@@ -52,7 +51,7 @@ def check_exit_conditions_node(state: WorkflowState) -> Dict[str, Any]:
         state.exit_reason = "Search space exhausted - all molecules tested"
         state.status = WorkflowStatus.COMPLETED
         state.log("check_exit_conditions_exhausted")
-        return {"state": state}
+        return state
     
     if len(remaining) < state.bo_config.batch_size:
         state.exit_reason = f"Insufficient molecules remaining ({len(remaining)}) for next batch"
@@ -61,7 +60,7 @@ def check_exit_conditions_node(state: WorkflowState) -> Dict[str, Any]:
             "remaining": len(remaining),
             "required": state.bo_config.batch_size
         })
-        return {"state": state}
+        return state
     
     # No exit conditions met, continue
     state.current_iteration += 1
