@@ -43,6 +43,11 @@ class CASCharacterizationTool(BaseTool):
         for i in json_data['experimentalProperties']:
             if i['name'] == 'Boiling Point':
                 cas_data['boiling_point'] = float(re.findall(r'[-+]?\d*\.\d+|\d+', i['property'])[0])
+            else:
+                cas_data['boiling_point'] = None
+                
             if i['name'] == 'Melting Point':
                 cas_data['melting_point'] = float(re.findall(r'[-+]?\d*\.\d+|\d+', i['property'])[0])
+            else:
+                cas_data['melting_point'] = None    
         return cas_data
