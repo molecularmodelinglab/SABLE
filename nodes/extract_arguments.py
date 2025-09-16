@@ -56,7 +56,6 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
         
         # Stoplight properties
         'solubility': ['solubility', 'soluble', 'water solubility', 'aqueous'],
-        'alogp': ['alogp', 'calculated logp'],
         'fsp3': ['fsp3', 'fraction sp3', 'saturation'],
         'cns_activity': ['cns', 'brain', 'bbb', 'blood brain barrier', 'central nervous'],
         
