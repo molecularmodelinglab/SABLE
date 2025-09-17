@@ -4,8 +4,49 @@ This node analyzes the user's request and extracts key parameters.
 """
 
 import re
-from typing import Dict, Any
+from typing import Dict, Any, List
 from schemas.state import WorkflowState, TargetProperty, OptimizationMode, MoleculeSource
+try:
+    from rdkit import Chem  # type: ignore
+    _RDKit_AVAILABLE = True
+except Exception:
+    Chem = None  # type: ignore
+    _RDKit_AVAILABLE = False
+
+
+def _is_likely_smiles(s: str) -> bool:
+    """Conservative SMILES validator.
+
+    Prefer RDKit parsing; fallback to simple heuristics if RDKit unavailable.
+    Filters out normal words like 'Optimize'.
+    """
+    if not isinstance(s, str) or not s or len(s) > 200 or ' ' in s:
+        return False
+
+    # Quick reject: pure letters that look like normal words
+    if re.fullmatch(r"[A-Za-z]+", s):
+        return False
+
+    # Require at least one structure character or ring/special token
+    if not re.search(r"[=#@()\[\]\.0-9]", s) and not re.search(r"(Cl|Br)", s):
+        # If it lacks any typical SMILES symbols, likely not a SMILES
+        return False
+
+    if _RDKit_AVAILABLE:
+        try:
+            mol = Chem.MolFromSmiles(s, sanitize=False)
+            if mol is None:
+                return False
+            try:
+                Chem.SanitizeMol(mol, catchErrors=True)
+            except Exception:
+                return False
+            return True
+        except Exception:
+            return False
+    else:
+        # Heuristic fallback: must contain atom tokens and structure symbols
+        return bool(re.search(r"^(?:\[.*?\]|Br|Cl|[A-Z][a-z]?|[cnops])+[A-Za-z0-9@+\-\[\]()=#%\.]*$", s))
 
 
 def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
@@ -19,13 +60,19 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
     parsed = {}
     
     # Extract starting molecule (look for SMILES patterns or molecule names)
-    smiles_pattern = r'[A-Z][A-Za-z0-9@+\-\[\]()=#%]*'
+    # Start with permissive tokenization, then aggressively validate
+    smiles_pattern = r"(?:\[.*?\]|Br|Cl|[A-Z][a-z]?|[cnops])[A-Za-z0-9@+\-\[\]()=#%\.]*"
     smiles_matches = re.findall(smiles_pattern, state.user_prompt)
-    if smiles_matches:
-        # Filter for likely SMILES (contain certain characters)
-        potential_smiles = [s for s in smiles_matches if any(c in s for c in ['C', 'O', 'N', '=', '(', ')'])]
-        if potential_smiles:
-            parsed['starting_molecules'] = potential_smiles[:3]  # Take up to 3
+    candidates: List[str] = [s for s in smiles_matches if _is_likely_smiles(s)]
+    # Deduplicate while preserving order
+    seen = set()
+    potential_smiles = []
+    for s in candidates:
+        if s not in seen:
+            seen.add(s)
+            potential_smiles.append(s)
+    if potential_smiles:
+        parsed['starting_molecules'] = potential_smiles[:3]  # Take up to 3
     
     # Common molecule names
     molecule_names = {
@@ -38,7 +85,9 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
     
     for name, smiles in molecule_names.items():
         if name in prompt:
-            parsed.setdefault('starting_molecules', []).append(smiles)
+            parsed.setdefault('starting_molecules', [])
+            if smiles not in parsed['starting_molecules']:
+                parsed['starting_molecules'].append(smiles)
     
     # Extract target properties - aligned with available characterization tools
     # These properties can be calculated by RDKit (MoleculeCharacterizationTool) or Stoplight
@@ -121,6 +170,7 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
     if 'max_iterations' in parsed:
         state.max_iterations = parsed['max_iterations']
     
+    print(f"Extracted arguments: {parsed}")
     state.log("extract_arguments_completed", parsed)
     
     return state
