@@ -4,7 +4,6 @@ from pydantic import BaseModel, Field
 from typing import Type, List, Dict, Any, Union, Optional, Tuple
 from rdkit import Chem
 
-from enumeration.enumerator import MoleculeEnumerator
 from healer.application.healer import MoleculeHEALER
 from schemas.errors import ToolError
 
