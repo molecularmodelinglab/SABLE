@@ -57,7 +57,7 @@ class BOConfiguration(BaseModel):
     acquisition_function: str = "expected_improvement"
     batch_size: int = Field(default=5, ge=1)
     n_initial_points: int = Field(default=10, ge=1)
-    max_iterations: int = Field(default=50, ge=1)
+    max_iterations: int = Field(default=4, ge=1)
     encoding: str = Field(
         default="MORDRED", description="Molecular encoding/fingerprint method."
     )
