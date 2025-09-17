@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: anole:latest
-    entrypoint: ["/app/docker/entrypoint.sh"]
+    entrypoint: ["bash", "/app/docker/entrypoint.sh"]
     command: [] # default: run example prompt
     environment:
       - PYTHONUNBUFFERED=1

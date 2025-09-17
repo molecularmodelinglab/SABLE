@@ -36,12 +36,11 @@ RUN rm -rf healer/*.egg-info healer/*/*.egg-info || true
 
 # Install local healer (vendored in repo) to avoid private Git auth
 # Guarded to avoid build failures if packaging files are missing
-RUN if [ -f healer/pyproject.toml ] || [ -f healer/setup.py ]; then \
-            # micromamba run -n anole 
-            python -m pip install -e ./healer; \
-        else \
-            echo "healer source not found (skipping install)"; \
-        fi
+# RUN if [ -f healer/pyproject.toml ] || [ -f healer/setup.py ]; then \
+#             micromamba run -n anole python -m pip install -e ./healer; \
+#         else \
+#             echo "healer source not found (skipping install)"; \
+#         fi
 
 # Entrypoint wrapper for convenient CLI usage (invoke via bash to avoid chmod)
 ENTRYPOINT ["bash", "/app/docker/entrypoint.sh"]
