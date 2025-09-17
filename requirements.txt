@@ -87,6 +87,8 @@ ormsgpack==1.10.0
 packaging==25.0
 pandas==2.3.2
 pillow==11.3.0
+fastapi==0.115.5
+uvicorn==0.32.1
 proto-plus==1.26.1
 protobuf==5.29.5
 pyasn1==0.6.1
