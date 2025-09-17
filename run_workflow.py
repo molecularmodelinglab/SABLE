@@ -153,34 +153,34 @@ class WorkflowRunner:
             output_file: Output file path
         """
         results = {
-            "workflow_id": state.workflow_id,
-            "user_prompt": state.user_prompt,
-            "status": state.status,
-            "exit_reason": state.exit_reason,
-            "summary": state.summary,
+            "workflow_id": state["workflow_id"],
+            "user_prompt": state["user_prompt"],
+            "status": state["status"],
+            "exit_reason": state["exit_reason"],
+            "summary": state["summary"],
             "configuration": {
-                "targets": [t.model_dump() for t in state.targets],
-                "molecule_source": state.molecule_source,
-                "max_iterations": state.max_iterations,
-                "bo_config": state.bo_config.model_dump() if state.bo_config else None
+                "targets": [t.model_dump() for t in state["targets"]],
+                "molecule_source": state["molecule_source"],
+                "max_iterations": state["max_iterations"],
+                "bo_config": state["bo_config"].model_dump() if state["bo_config"] else None
             },
             "results": {
-                "total_iterations": state.current_iteration,
-                "molecules_tested": len(state.experimental_results),
+                "total_iterations": state["current_iteration"],
+                "molecules_tested": len(state["experimental_results"]),
                 "best_molecules": [
                     {
                         "smiles": smiles,
                         "score": score,
                         "properties": next(
-                            (r.properties for r in state.experimental_results if r.smiles == smiles),
+                            (r.properties for r in state["experimental_results"] if r.smiles == smiles),
                             {}
                         )
                     }
-                    for smiles, score in state.best_molecules[:10]
+                    for smiles, score in state["best_molecules"][:10]
                 ]
             },
-            "experimental_data": [r.model_dump() for r in state.experimental_results],
-            "logs": state.logs
+            "experimental_data": [r.model_dump() for r in state["experimental_results"]],
+            "logs": state["logs"]
         }
         
         with open(output_file, 'w') as f:
