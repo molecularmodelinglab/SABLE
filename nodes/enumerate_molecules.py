@@ -8,6 +8,8 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from schemas.state import WorkflowState
+from schemas.errors import NodeError, ToolError
+from utils.telemetry import emit_event
 from tools.enumerator_tool import EnumeratorTool
 
 
@@ -27,8 +29,13 @@ def enumerate_molecules_node(state: WorkflowState) -> Dict[str, Any]:
     })
     
     if not state.starting_molecules:
-        state.log("enumerate_molecules_error", "No starting molecules available")
-        return {"state": state}
+        emit_event(state, kind="no_starting_molecules", node="enumerate_molecules", severity="error")
+        raise NodeError(
+            "No starting molecules available for enumeration",
+            node="enumerate_molecules",
+            code="EMPTY_STARTING_SET",
+            details={"hint": "Provide starting_molecules or adjust molecule_source"},
+        )
     
     enumerator = EnumeratorTool()
     
@@ -46,8 +53,13 @@ def enumerate_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                 molecule=starting_smiles,
                 n_compositions=min(max_molecules // len(state.starting_molecules), 100),
             )
-            
-            # Parse the result (it returns a dict with molecule_id -> SMILES)
+
+            # Validate tool output
+            if isinstance(result, str):
+                emit_event(state, kind="enumerator_tool_error", node="enumerate_molecules", tool="Enumerator", severity="error", data={"message": result})
+                raise ToolError(result, node="enumerate_molecules", tool="Enumerator", code="ENUMERATOR_FAILED")
+
+            # Parse the result (must be dict with molecule_id -> SMILES)
             if isinstance(result, dict):
                 for _, smiles in result.items():
                     # Create unique IDs for our state
@@ -60,14 +72,27 @@ def enumerate_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                 "generated_count": len(result) if isinstance(result, dict) else 0
             })
             
+        except ToolError as e:
+            emit_event(state, kind="enumerate_batch_failed", node="enumerate_molecules", severity="error", data={"starting": starting_smiles, "error": str(e)})
+            raise
         except Exception as e:
             state.log("enumerate_molecules_error", {
                 "starting_molecule": starting_smiles,
                 "error": str(e)
             })
-            print(f"❌ ERROR in enumerate_molecules_node for {starting_smiles}: {e}")
+            emit_event(state, kind="unexpected_exception", node="enumerate_molecules", severity="error", data={"starting": starting_smiles, "error": str(e)})
+            raise NodeError(str(e), node="enumerate_molecules", code="ENUMERATE_EXCEPTION")
     
-    # Update state with enumerated molecules
+    # Validate and update state with enumerated molecules
+    if not all_molecules:
+        emit_event(state, kind="empty_search_space", node="enumerate_molecules", severity="error")
+        raise NodeError(
+            "Enumeration produced an empty search space",
+            node="enumerate_molecules",
+            code="EMPTY_SEARCH_SPACE",
+            details={"starting_smiles_count": len(state.starting_molecules)},
+        )
+
     state.search_space = all_molecules
     
     state.log("enumerate_molecules_completed", {
