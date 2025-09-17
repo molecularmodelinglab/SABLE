@@ -14,3 +14,16 @@ services:
       # - ./config.yml:/app/config.yml
     # Uncomment to pass a custom prompt via command
     # command: ["run", "Optimize aspirin for better QED and solubility. Enumerate 50 analogs and run 3 iterations."]
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: anole:latest
+    command: ["bash", "-lc", "uvicorn server.app:app --host 0.0.0.0 --port 8000"]
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./data:/app/data
