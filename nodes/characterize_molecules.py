@@ -10,6 +10,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from rdkit import Chem
 from rdkit.Chem import Descriptors
 from schemas.state import WorkflowState, ExperimentResult
+from schemas.errors import NodeError
+from utils.telemetry import emit_event
 from schemas.characterization import (
     CharacterizationTool,
     PROPERTY_MAPPINGS,
@@ -30,8 +32,8 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
     })
     
     if not state.current_bo_recommendations:
-        state.log("characterize_molecules_skipped", "No molecules to characterize")
-        return {"state": state}
+        emit_event(state, kind="no_recommendations", node="characterize_molecules", severity="error")
+        raise NodeError("No molecules to characterize for this iteration", node="characterize_molecules", code="EMPTY_BATCH")
     
     # Get tool choice
     tool_choice = state.characterization_config.get('tool', CharacterizationTool.AUTO)
@@ -59,7 +61,7 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                 "properties": list(next(iter(results.values())).keys()) if results else []
             })
         except Exception as e:
-            state.log("characterize_rdkit_error", str(e))
+            emit_event(state, kind="rdkit_tool_exception", node="characterize_molecules", tool="MoleculeCharacterizer", severity="error", data={"error": str(e)})
     
     # Use Stoplight tool
     if tool_choice in [CharacterizationTool.STOPLIGHT, CharacterizationTool.COMBINED]:
@@ -83,9 +85,10 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                 "api_response": stoplight_result
             })
         except Exception as e:
-            state.log("characterize_stoplight_error", str(e))
+            emit_event(state, kind="stoplight_tool_exception", node="characterize_molecules", tool="Stoplight", severity="error", data={"error": str(e)})
     
     # Convert results to ExperimentResult objects
+    mapped_any = False
     for mol_id in state.current_bo_recommendations:
         if mol_id in state.search_space and mol_id in results:
             smiles = state.search_space[mol_id]
@@ -137,6 +140,11 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                     }
                 )
                 state.add_experimental_result(exp_result)
+                mapped_any = True
+
+    if not mapped_any:
+        emit_event(state, kind="no_properties_mapped", node="characterize_molecules", severity="error", data={"count": len(state.current_bo_recommendations)})
+        raise NodeError("Characterization produced no mappable properties for targets", node="characterize_molecules", code="NO_USABLE_DATA")
     
     state.log("characterize_molecules_completed", {
         "tool_used": tool_choice,

@@ -4,6 +4,7 @@ Check exit conditions for the optimization loop.
 
 from typing import Dict, Any
 from schemas.state import WorkflowState, WorkflowStatus
+from utils.telemetry import emit_event
 
 
 def check_exit_conditions_node(state: WorkflowState) -> Dict[str, Any]:
@@ -14,6 +15,13 @@ def check_exit_conditions_node(state: WorkflowState) -> Dict[str, Any]:
         "iteration": state.current_iteration,
         "max_iterations": state.max_iterations
     })
+    
+    # Hard stop if search space is empty
+    if not state.search_space:
+        state.exit_reason = "Search space is empty"
+        state.status = WorkflowStatus.FAILED
+        emit_event(state, kind="empty_search_space", node="check_exit_conditions", severity="error")
+        return state
     
     if state.current_iteration >= state.max_iterations - 1:
         state.exit_reason = f"Maximum iterations reached ({state.max_iterations})"
@@ -62,6 +70,13 @@ def check_exit_conditions_node(state: WorkflowState) -> Dict[str, Any]:
         })
         return state
     
+    # Ensure BO produced recommendations in previous step
+    if not state.current_bo_recommendations:
+        state.exit_reason = "No BO recommendations available"
+        state.status = WorkflowStatus.FAILED
+        state.log("check_exit_conditions_no_recommendations")
+        return state
+
     # No exit conditions met, continue
     state.current_iteration += 1
     state.log("check_exit_conditions_continue", {
