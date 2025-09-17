@@ -39,6 +39,25 @@ docker run --rm -v "$PWD/checkpoints:/app/checkpoints" anole:latest resume /app/
 docker run --rm -v "$PWD:/app" anole:latest export --output /app/results.json "Optimize caffeine for higher logP and lower TPSA"
 ```
 
+### Using docker compose
+
+The repo includes a `docker-compose.yml` you can customize. Examples:
+
+```bash
+# Build
+docker compose build
+
+# Run with the example prompt
+docker compose up
+
+# Run with a custom prompt via env var
+PROMPT='Optimize aspirin for better QED and solubility. Enumerate 50 analogs and run 3 iterations.' \
+docker compose up
+
+# Or override the command
+docker compose run --rm anole run "Optimize ibuprofen for lower TPSA"
+```
+
 ### Mounting configuration and API keys
 
 Copy `config.example.yml` to `config.yml` and edit as needed (e.g., credentials for external services). Mount it into the container:
