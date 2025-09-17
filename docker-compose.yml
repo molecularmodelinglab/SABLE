@@ -1,0 +1,16 @@
+services:
+  anole:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: anole:latest
+    entrypoint: ["/app/docker/entrypoint.sh"]
+    command: [] # default: run example prompt
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./checkpoints:/app/checkpoints
+      # Uncomment to mount a local config.yml
+      # - ./config.yml:/app/config.yml
+    # Uncomment to pass a custom prompt via command
+    # command: ["run", "Optimize aspirin for better QED and solubility. Enumerate 50 analogs and run 3 iterations."]
