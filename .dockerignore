@@ -1,0 +1,40 @@
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pkl
+
+# VCS
+.git
+.gitignore
+
+# Environments
+.env
+.venv/
+.conda/
+
+# Notebooks outputs
+**/.ipynb_checkpoints/
+
+# Local data and results
+checkpoints/
+results.json
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+
+# Legacy (do not include in image build context to keep image small)
+legacy/
+
+# CI, docs build artifacts
+site/
+dist/
+build/
+
+# Healer large data (if any)
+healer/data/
