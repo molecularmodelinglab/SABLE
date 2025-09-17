@@ -6,7 +6,7 @@ Includes state persistence and checkpointing.
 import json
 import pickle
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
 from pathlib import Path
 
 from edges.graph_builder import compile_graph
@@ -44,10 +44,60 @@ class WorkflowRunner:
         if not checkpoint_name:
             checkpoint_name = f"{state.workflow_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
+        # Ensure we don't attempt to pickle a locally wrapped logger
+        if hasattr(state, "_log_wrapped") and getattr(state, "_log_wrapped", False):
+            try:
+                state.log = getattr(state, "_original_log")  # type: ignore
+                delattr(state, "_original_log")
+                delattr(state, "_log_wrapped")
+            except Exception:
+                pass
+
         checkpoint_path = self.checkpoint_dir / f"{checkpoint_name}.pkl"
-        
+
+        # Restore original logger if wrapped to avoid pickling local closures
+        if getattr(state, "_log_wrapped", False):
+            try:
+                state.log = getattr(state, "_original_log")  # type: ignore
+            except Exception:
+                pass
+
+        # Ensure event callback is not pickled
+        try:
+            if hasattr(state, "_event_callback"):
+                setattr(state, "_event_callback", None)
+        except Exception:
+            pass
+
+        # Temporarily remove any instance-level 'log' to prevent pickling method objects
+        had_instance_log = False
+        saved_instance_log = None
+        if hasattr(state, "__dict__") and "log" in state.__dict__:
+            had_instance_log = True
+            saved_instance_log = state.__dict__.get("log")
+            try:
+                del state.__dict__["log"]
+            except Exception:
+                had_instance_log = False
+
         with open(checkpoint_path, 'wb') as f:
             pickle.dump(state, f)
+
+        # Restore instance-level log if we removed it
+        if had_instance_log:
+            state.__dict__["log"] = saved_instance_log  # type: ignore
+
+        # Clean wrapper markers so next save starts clean
+        if hasattr(state, "_original_log"):
+            try:
+                delattr(state, "_original_log")
+            except Exception:
+                pass
+        if hasattr(state, "_log_wrapped"):
+            try:
+                delattr(state, "_log_wrapped")
+            except Exception:
+                pass
         
         json_path = self.checkpoint_dir / f"{checkpoint_name}.json"
         with open(json_path, 'w') as f:
@@ -75,7 +125,8 @@ class WorkflowRunner:
     def run(self, 
             user_prompt: str,
             checkpoint_path: Optional[str] = None,
-            save_checkpoints: bool = True) -> WorkflowState:
+            save_checkpoints: bool = True,
+            event_callback: Optional[callable] = None) -> WorkflowState:
         """
         Run the molecular optimization workflow.
         
@@ -94,6 +145,13 @@ class WorkflowRunner:
         else:
             state = WorkflowState(user_prompt=user_prompt)
             print(f"Starting new workflow: {state.workflow_id}")
+
+        # If provided, set the state's event callback (no monkey-patching of methods)
+        if event_callback is not None:
+            try:
+                setattr(state, "_event_callback", event_callback)  # PrivateAttr on model
+            except Exception:
+                pass
         
         try:
             config = {
@@ -106,11 +164,12 @@ class WorkflowRunner:
             if isinstance(result, WorkflowState):
                 final_state = result
             elif isinstance(result, dict) and "status" in result:
-                final_state = result
+                # Some nodes might return dicts; convert minimal fields to model for consistency
+                final_state = state
   
             # Save final checkpoint
             if save_checkpoints:
-                self.save_checkpoint(final_state, f"{final_state['workflow_id']}_final")
+                self.save_checkpoint(final_state, f"{final_state.workflow_id}_final")
             
             return final_state
             
@@ -153,39 +212,39 @@ class WorkflowRunner:
             output_file: Output file path
         """
         results = {
-            "workflow_id": state["workflow_id"],
-            "user_prompt": state["user_prompt"],
-            "status": state["status"],
-            "exit_reason": state["exit_reason"],
-            "summary": state["summary"],
+            "workflow_id": state.workflow_id,
+            "user_prompt": state.user_prompt,
+            "status": state.status,
+            "exit_reason": state.exit_reason,
+            "summary": state.summary,
             "configuration": {
-                "targets": [t.model_dump() for t in state["targets"]],
-                "molecule_source": state["molecule_source"],
-                "max_iterations": state["max_iterations"],
-                "bo_config": state["bo_config"].model_dump() if state["bo_config"] else None
+                "targets": [t.model_dump() for t in state.targets],
+                "molecule_source": state.molecule_source,
+                "max_iterations": state.max_iterations,
+                "bo_config": state.bo_config.model_dump() if state.bo_config else None,
             },
             "results": {
-                "total_iterations": state["current_iteration"],
-                "molecules_tested": len(state["experimental_results"]),
+                "total_iterations": state.current_iteration,
+                "molecules_tested": len(state.experimental_results),
                 "best_molecules": [
                     {
                         "smiles": smiles,
                         "score": score,
                         "properties": next(
-                            (r.properties for r in state["experimental_results"] if r.smiles == smiles),
-                            {}
-                        )
+                            (r.properties for r in state.experimental_results if r.smiles == smiles),
+                            {},
+                        ),
                     }
-                    for smiles, score in state["best_molecules"][:10]
-                ]
+                    for smiles, score in state.best_molecules[:10]
+                ],
             },
-            "experimental_data": [r.model_dump() for r in state["experimental_results"]],
-            "logs": state["logs"]
+            "experimental_data": [r.model_dump() for r in state.experimental_results],
+            "logs": state.logs,
         }
-        
+
         with open(output_file, 'w') as f:
             json.dump(results, f, indent=2, default=str)
-        
+
         print(f"Results exported to: {output_file}")
 
 
