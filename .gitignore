@@ -6,6 +6,8 @@ debug_checkpoints/
 
 node_modules/
 
+data/
+
 *pyc
 
 config.yml
