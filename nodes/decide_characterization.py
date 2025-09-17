@@ -8,6 +8,7 @@ from schemas.characterization import (
     determine_best_tool,
     normalize_property_name,
 )
+from utils.telemetry import emit_event
 
 
 def decide_characterization_node(state: WorkflowState) -> Dict[str, Any]:
@@ -18,6 +19,8 @@ def decide_characterization_node(state: WorkflowState) -> Dict[str, Any]:
     
 
     target_properties = [t.name for t in state.targets]
+    if not target_properties:
+        emit_event(state, kind="no_targets", node="decide_characterization", severity="warning")
     
     normalized_properties = [normalize_property_name(p) for p in target_properties]
     
