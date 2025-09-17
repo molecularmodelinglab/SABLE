@@ -4,6 +4,7 @@ from typing import Type, List, Dict, Any, Union, Optional, Tuple
 from rdkit import Chem
 
 from enumeration.enumerator import MoleculeEnumerator
+from schemas.errors import ToolError
 
 class EnumeratorInput(BaseModel):
     """Input schema for the EnumeratorTool."""
@@ -37,11 +38,12 @@ class EnumeratorTool(BaseTool):
     ) -> Union[Dict[str, str], str]:
         try:
             n_comps = n_compositions if n_compositions is not None else 10
-            sim_thresh = sim_threshold if sim_threshold is not None else 0.01
+            sim_thresh = sim_threshold if sim_threshold is not None else 0.1
             rxn_tags = reaction_tags if reaction_tags is not None else ['amide coupling', 'amide', 'C-N bond formation', 'C-N', 'alkylation', 'N-arylation', 'azole', 'amination']
             bb_source = building_blocks if building_blocks is not None else "test"
             custom_sites = custom_comp_sites if custom_comp_sites is not None else []
-
+            
+            print("Molecule to enumerate:", molecule)
             enumerator = MoleculeEnumerator(
                 n_compositions=n_comps,
                 molecule=molecule,
@@ -53,65 +55,64 @@ class EnumeratorTool(BaseTool):
 
             enumerator.enumerate()
             results_df = enumerator.get_results()
-            
-            results_df['Valid'] = results_df['Product'].apply(lambda x: self.validate_smiles(x))
-            results_df = results_df[results_df['Valid'] == True]
+
+            # Basic sanity: ensure Product column exists and has strings
+            if 'Product' not in results_df.columns:
+                raise ToolError("Enumerator did not return a 'Product' column.", tool="Enumerator", code="BAD_OUTPUT")
+
+            results_df = results_df.dropna(subset=['Product']).copy()
+
+            # Validate SMILES strictly; keep boolean only
+            results_df['Valid'] = results_df['Product'].map(self.validate_smiles)
+            results_df = results_df[results_df['Valid']]
 
             if results_df.empty:
-                return "No molecules were generated that met the criteria."
+                raise ToolError("No molecules were generated that met the criteria.", tool="Enumerator", code="NO_RESULTS")
 
             # Limit the number of molecules to n_compositions
-            limited_df = results_df.head(int(n_comps))
-            enumerated_molecules_list = limited_df['Product'].to_list()
+            if len(results_df) > n_comps:
+                limited_df = results_df.head(int(n_comps))
+            else:
+                limited_df = results_df
+            enumerated_molecules_list = limited_df['Product'].tolist()
 
             if not enumerated_molecules_list:
-                return "No molecules were generated that met the criteria."
+                raise ToolError("No molecules were generated that met the criteria.", tool="Enumerator", code="NO_RESULTS")
 
             # Format the output as a dictionary of {id: smiles}
             enumerated_molecules_dict = {f"mol_{i}": smi for i, smi in enumerate(enumerated_molecules_list)}
-
+            print(f"EnumeratorTool generated {len(enumerated_molecules_dict)} molecules.")
             return enumerated_molecules_dict
 
+        except ToolError:
+            raise
         except Exception as e:
-            return f"Error in EnumeratorTool: {e}"
+            raise ToolError(f"Error in EnumeratorTool: {e}", tool="Enumerator", code="EXCEPTION")
     
     @staticmethod
-    def validate_smiles(smiles_string):
-        """
-        Validates a SMILES string using RDKit.
-
-        Args:
-            smiles_string (str): The SMILES string to validate.
-
-        Returns:
-            bool: True if the SMILES string is valid, False otherwise.
-            str or None:  Error message if invalid, None if valid.
-        """
+    def validate_smiles(smiles_string) -> bool:
+        """Return True iff smiles parses and sanitizes, False otherwise (no exceptions)."""
         try:
-            mol = Chem.MolFromSmiles(smiles_string)
-            if mol is None:  # Crucial: Check for None return value!
-                return False, "RDKit could not parse the SMILES string (returned None)."
-            # Further checks (optional, but recommended)
-            Chem.SanitizeMol(mol)  # Check for chemical validity (valence, etc.)
-
-            # Check for disconnected structures (if that's considered invalid in your context)
+            if not isinstance(smiles_string, str) or not smiles_string:
+                return False
+            # Avoid sanitization at parse time; sanitize explicitly with catchErrors
+            mol = Chem.MolFromSmiles(smiles_string, sanitize=False)
+            if mol is None:
+                return False
+            try:
+                Chem.SanitizeMol(mol, catchErrors=True)
+            except Exception:
+                return False
+            # Optional: reject multi-fragment molecules
             if '.' in smiles_string:
-                fragments = Chem.GetMolFrags(mol, asMols=True)
-                if len(fragments) > 1:
-                    # Check if its salts, not truly disconnected molecules.
-                    is_salt = all('.' in Chem.MolToSmiles(frag) for frag in fragments)  # . indicates ions
-                    if not is_salt:
-                        return False, "SMILES string represents disconnected molecules."
+                try:
+                    frags = Chem.GetMolFrags(mol, asMols=True)
+                    if len(frags) > 1:
+                        return False
+                except Exception:
+                    return False
             return True
-        except Chem.rdchem.KekulizeException:
-            return False
-        except Chem.rdchem.AtomValenceException:
-            return False
-        except Chem.rdchem.AtomKekulizeException:
-            return False
-        except Chem.rdchem.MolSanitizeException as e:
-            return False
-        except Exception as e:
+        except Exception:
             return False
 
 
