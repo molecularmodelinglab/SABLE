@@ -24,9 +24,8 @@ def test_basic_workflow():
         try:
             state = runner.run(user_prompt=prompt, save_checkpoints=True)
 
-            assert state["status"] in [WorkflowStatus.COMPLETED, WorkflowStatus.RUNNING], f"Unexpected status: {state["status"]}"
+            assert state["status"] in [WorkflowStatus.COMPLETED, WorkflowStatus.RUNNING], f"Unexpected status: {state.status}"
             assert state["workflow_id"] is not None
-            # assert len(state["logs"]) > 0, "No logs were generated."
 
             print(f"✓ Test {i} PASSED")
             print(f"  - Final Status: {state["status"]}")
@@ -104,11 +103,24 @@ def test_state_methods():
     print("\n✓ All state method tests passed.")
 
 
+def test_empty_starting_molecules_triggers_error():
+    """Ensure enumeration fails fast when no starting molecules for ENUMERATED source."""
+    runner = WorkflowRunner(checkpoint_dir=CHECKPOINT_DIR)
+    prompt = "Enumerate 10 molecules. 2 iterations."  # No molecule name provided
+    try:
+        runner.run(user_prompt=prompt, save_checkpoints=False)
+    except Exception as e:
+        print("Caught expected error:", e)
+        return
+    raise AssertionError("Expected an error due to empty starting molecules but workflow completed")
+
+
 def main():
     """Main function to run the entire test suite."""
     print("Starting molecular optimization workflow test suite...")
     test_state_methods()
     test_checkpoint_resume()
+    # test_empty_starting_molecules_triggers_error()
     test_basic_workflow()
     print("\n" + "=" * 50)
     print("🎉 All tests completed successfully! 🎉")
