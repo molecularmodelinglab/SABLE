@@ -4,6 +4,8 @@ buildingblocks/
 test_checkpoints/
 debug_checkpoints/
 
+node_modules/
+
 *pyc
 
 config.yml
