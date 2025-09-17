@@ -4,6 +4,8 @@ Summarize the optimization results.
 
 from typing import Dict, Any
 from schemas.state import WorkflowState
+from schemas.characterization import PROPERTY_MAPPINGS, normalize_property_name
+from tools.molecule_characterization_tool import MoleculeCharacterizationTool
 
 
 def summarize_results_node(state: WorkflowState) -> Dict[str, Any]:
@@ -32,8 +34,44 @@ def summarize_results_node(state: WorkflowState) -> Dict[str, Any]:
     
     if state.starting_molecules:
         summary_parts.append("Starting Molecules:")
+        # Compute baseline target properties for starting molecules using RDKit
+        try:
+            tmp_ids = [f"start_{i}" for i, _ in enumerate(state.starting_molecules)]
+            tmp_space = {tmp_ids[i]: smi for i, smi in enumerate(state.starting_molecules)}
+            rdkit_tool = MoleculeCharacterizationTool()
+            rdkit_result = rdkit_tool._run(search_space=tmp_space, ids_to_process=tmp_ids)
+        except Exception:
+            rdkit_result = {}
+
         for i, smiles in enumerate(state.starting_molecules, 1):
             summary_parts.append(f"  {i}. {smiles}")
+            # Map to target properties for comparison
+            mapped = {}
+            props = rdkit_result.get(f"start_{i-1}", {}) if isinstance(rdkit_result, dict) else {}
+            for target in state.targets:
+                tnorm = normalize_property_name(target.name)
+                # Direct match
+                for k, v in props.items():
+                    if normalize_property_name(k) == tnorm:
+                        mapped[target.name] = float(v)
+                        break
+                if target.name in mapped:
+                    continue
+                # Via PROPERTY_MAPPINGS
+                if tnorm in PROPERTY_MAPPINGS:
+                    rk, sk = PROPERTY_MAPPINGS[tnorm]
+                    for cand in [rk, sk]:
+                        if not cand:
+                            continue
+                        for k, v in props.items():
+                            if normalize_property_name(k) == normalize_property_name(cand):
+                                mapped[target.name] = float(v)
+                                break
+                        if target.name in mapped:
+                            break
+            if mapped:
+                props_str = ", ".join([f"{k}: {v:.3f}" for k, v in mapped.items()])
+                summary_parts.append(f"     Baseline: {props_str}")
         summary_parts.append("")
     
     if state.best_molecules:
