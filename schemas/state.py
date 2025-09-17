@@ -6,8 +6,8 @@ of the molecular optimization workflow as it flows through a LangGraph graph.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
-from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Optional, Tuple, Callable
+from pydantic import BaseModel, Field, PrivateAttr
 
 
 class OptimizationMode(str, Enum):
@@ -137,17 +137,32 @@ class WorkflowState(BaseModel):
     logs: List[Dict[str, Any]] = Field(default_factory=list)
     summary: Optional[str] = None
 
+    # Private callback used for UI live events; not part of the public schema
+    _event_callback: Optional[Callable[[Dict[str, Any]], None]] = PrivateAttr(default=None)
+
     def log(self, action: str, data: Any = None) -> None:
         """Adds a structured log entry to the state."""
-        self.logs.append(
-            {
-                "timestamp": datetime.now().isoformat(),
-                "iteration": self.current_iteration,
-                "action": action,
-                "data": data,
-            }
-        )
+        event = {
+            "timestamp": datetime.now().isoformat(),
+            "iteration": self.current_iteration,
+            "action": action,
+            "data": data,
+        }
+        self.logs.append(event)
         self.updated_at = datetime.now()
+
+        # Fan out to UI if an event callback is present
+        cb = getattr(self, "_event_callback", None)
+        if cb is not None:
+            try:
+                payload = {
+                    **event,
+                    "workflow_id": self.workflow_id,
+                }
+                cb(payload)
+            except Exception:
+                # Never let UI callback failures break the workflow
+                pass
 
     def add_experimental_result(self, result: ExperimentResult) -> None:
         """Adds an experimental result and updates the list of best molecules."""
