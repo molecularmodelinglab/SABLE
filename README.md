@@ -56,6 +56,11 @@ docker compose up
 
 # Or override the command
 docker compose run --rm anole run "Optimize ibuprofen for lower TPSA"
+
+# Run the API service (port 8000) and UI dev server (port 5173)
+docker compose up api
+# In another terminal
+cd ui && npm install && npm run dev
 ```
 
 ### Mounting configuration and API keys
