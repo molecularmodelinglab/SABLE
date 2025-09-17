@@ -209,7 +209,7 @@ def main():
     
     # Handle example mode
     if args.example:
-        prompt = "Optimize aspirin for better QED and solubility. Enumerate 50 analogs and run 5 iterations of optimization."
+        prompt = "Optimize aspirin for better QED. Enumerate 50 analogs and run 5 iterations of optimization."
         print(f"Running example: {prompt}")
     elif args.prompt:
         prompt = args.prompt
