@@ -95,6 +95,35 @@ def enumerate_molecules_node(state: WorkflowState) -> Dict[str, Any]:
 
     state.search_space = all_molecules
     
+    # Assess feasibility vs. planned iterations and batch size
+    batch_size = state.bo_config.batch_size if state.bo_config else 5
+    tested_smiles = {r.smiles for r in state.experimental_results}
+    remaining_count = len(set(state.search_space.values()) - tested_smiles)
+    max_additional_rounds = remaining_count // max(1, batch_size)
+    if state.max_iterations > max_additional_rounds:
+        old = state.max_iterations
+        state.max_iterations = max_additional_rounds
+        emit_event(
+            state,
+            kind="max_iterations_adjusted",
+            node="enumerate_molecules",
+            severity="warning",
+            data={
+                "old_max_iterations": old,
+                "new_max_iterations": state.max_iterations,
+                "remaining_molecules": remaining_count,
+                "batch_size": batch_size,
+            },
+        )
+        if state.max_iterations == 0:
+            emit_event(
+                state,
+                kind="insufficient_for_first_batch",
+                node="enumerate_molecules",
+                severity="error",
+                data={"remaining_molecules": remaining_count, "batch_size": batch_size},
+            )
+    
     state.log("enumerate_molecules_completed", {
         "total_molecules": len(all_molecules),
         "molecule_ids": list(all_molecules.keys())[:10]

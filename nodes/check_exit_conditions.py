@@ -61,12 +61,13 @@ def check_exit_conditions_node(state: WorkflowState) -> Dict[str, Any]:
         state.log("check_exit_conditions_exhausted")
         return state
     
-    if len(remaining) < state.bo_config.batch_size:
-        state.exit_reason = f"Insufficient molecules remaining ({len(remaining)}) for next batch"
+    required = state.bo_config.batch_size if state.bo_config else 5
+    if len(remaining) < required:
+        state.exit_reason = f"Insufficient molecules remaining ({len(remaining)}) for next batch (requires {required})"
         state.status = WorkflowStatus.COMPLETED
         state.log("check_exit_conditions_insufficient_molecules", {
             "remaining": len(remaining),
-            "required": state.bo_config.batch_size
+            "required": required
         })
         return state
     
