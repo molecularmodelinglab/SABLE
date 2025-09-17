@@ -11,6 +11,7 @@ from pathlib import Path
 
 from edges.graph_builder import compile_graph
 from schemas.state import WorkflowState
+from schemas.errors import NodeError, ToolError
 
 
 class WorkflowRunner:
@@ -109,10 +110,18 @@ class WorkflowRunner:
   
             # Save final checkpoint
             if save_checkpoints:
-                self.save_checkpoint(final_state, f"{final_state["workflow_id"]}_final")
+                self.save_checkpoint(final_state, f"{final_state['workflow_id']}_final")
             
             return final_state
             
+        except (NodeError, ToolError) as e:
+            print(f"Error during workflow execution: {e}")
+            state.status = "failed"
+            state.exit_reason = getattr(e, "code", None) or str(e)
+            state.log("workflow_error", getattr(e, "to_dict", lambda: {"message": str(e)})())
+            if save_checkpoints:
+                self.save_checkpoint(state, f"{state.workflow_id}_error")
+            raise
         except Exception as e:
             print(f"Error during workflow execution: {e}")
             state.status = "failed"
@@ -150,10 +159,10 @@ class WorkflowRunner:
             "exit_reason": state.exit_reason,
             "summary": state.summary,
             "configuration": {
-                "targets": [t.dict() for t in state.targets],
+                "targets": [t.model_dump() for t in state.targets],
                 "molecule_source": state.molecule_source,
                 "max_iterations": state.max_iterations,
-                "bo_config": state.bo_config.dict() if state.bo_config else None
+                "bo_config": state.bo_config.model_dump() if state.bo_config else None
             },
             "results": {
                 "total_iterations": state.current_iteration,
@@ -170,7 +179,7 @@ class WorkflowRunner:
                     for smiles, score in state.best_molecules[:10]
                 ]
             },
-            "experimental_data": [r.dict() for r in state.experimental_results],
+            "experimental_data": [r.model_dump() for r in state.experimental_results],
             "logs": state.logs
         }
         
