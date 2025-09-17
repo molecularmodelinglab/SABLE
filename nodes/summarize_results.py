@@ -26,7 +26,7 @@ def summarize_results_node(state: WorkflowState) -> Dict[str, Any]:
         f"- Molecule Source: {state.molecule_source}",
         f"- Total Iterations: {total_iterations}",
         f"- Molecules Tested: {total_molecules_tested}",
-        f"- Batch Size: {state.bo_config.batch_size if state.bo_config else 'N/A'}",
+    f"- Batch Size: {state.bo_config.batch_size if state.bo_config else 'N/A'}",
         f""
     ]
     
@@ -64,7 +64,7 @@ def summarize_results_node(state: WorkflowState) -> Dict[str, Any]:
             "Search Space Statistics:",
             f"- Total Molecules in Space: {len(state.search_space)}",
             f"- Molecules Tested: {len(tested_smiles)}",
-            f"- Coverage: {len(tested_smiles)/len(state.search_space)*100:.1f}%"
+            f"- Coverage: {(len(tested_smiles)/len(state.search_space)*100):.1f}%" if len(state.search_space) else "- Coverage: 0.0%"
         ])
     
     state.summary = "\n".join(summary_parts)
