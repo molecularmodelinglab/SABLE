@@ -31,28 +31,55 @@ class WorkflowRunner:
         self.checkpoint_dir.mkdir(exist_ok=True)
         self.graph = compile_graph()
     
-    def save_checkpoint(self, state: WorkflowState, checkpoint_name: Optional[str] = None) -> str:
+    def save_checkpoint(self, state, checkpoint_name: Optional[str] = None) -> str:
         """
         Save a checkpoint of the current state.
         
         Args:
-            state: Current workflow state
+            state: Current workflow state (WorkflowState object or dict)
             checkpoint_name: Optional name for checkpoint
             
         Returns:
             Path to saved checkpoint
         """
+        # Handle both WorkflowState objects and dicts
+        if isinstance(state, dict):
+            workflow_id = state.get('workflow_id', 'unknown')
+            state_dict = state
+        else:
+            workflow_id = state.workflow_id
+            state_dict = state
+        
         if not checkpoint_name:
-            checkpoint_name = f"{state.workflow_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            checkpoint_name = f"{workflow_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
         checkpoint_path = self.checkpoint_dir / f"{checkpoint_name}.pkl"
         
-        with open(checkpoint_path, 'wb') as f:
-            pickle.dump(state, f)
+        # Temporarily remove llm_client before pickling (it's not serializable)
+        llm_client_backup = None
+        if isinstance(state, dict):
+            llm_client_backup = state_dict.pop('llm_client', None)
+        else:
+            llm_client_backup = getattr(state, 'llm_client', None)
+            state.llm_client = None
+        
+        try:
+            with open(checkpoint_path, 'wb') as f:
+                pickle.dump(state_dict, f)
+        finally:
+            # Restore llm_client
+            if isinstance(state, dict):
+                if llm_client_backup is not None:
+                    state_dict['llm_client'] = llm_client_backup
+            else:
+                state.llm_client = llm_client_backup
         
         json_path = self.checkpoint_dir / f"{checkpoint_name}.json"
         with open(json_path, 'w') as f:
-            json.dump(state, f, indent=2, default=str)
+            # Create a JSON-safe copy without llm_client
+            json_state = dict(state_dict) if isinstance(state_dict, dict) else state_dict.model_dump()
+            json_state.pop('llm_client', None)
+            json.dump(json_state, f, indent=2, default=str)
         
         print(f"Checkpoint saved: {checkpoint_path}")
         return str(checkpoint_path)
@@ -69,6 +96,14 @@ class WorkflowRunner:
         """
         with open(checkpoint_path, 'rb') as f:
             state = pickle.load(f)
+        
+        # Reinitialize LLM client after loading (it wasn't serialized)
+        print("Reinitializing LLM client...")
+        state.llm_client = get_llm_client()
+        if state.llm_client:
+            print(f"✓ LLM client reinitialized successfully")
+        else:
+            print("⚠ LLM client not available - will use rule-based extraction only")
         
         print(f"Checkpoint loaded: {checkpoint_path}")
         return state
