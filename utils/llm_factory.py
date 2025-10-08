@@ -13,6 +13,18 @@ Required Environment Variables:
 
 import os
 from typing import Protocol, Optional
+from pathlib import Path
+
+# Load environment variables from .env file if it exists
+try:
+    from dotenv import load_dotenv
+    # Look for .env in the project root
+    env_path = Path(__file__).parent.parent / '.env'
+    if env_path.exists():
+        load_dotenv(env_path)
+        print(f"✓ Loaded environment from {env_path}")
+except ImportError:
+    print("Note: python-dotenv not installed. Using system environment variables only.")
 
 # Use try-except blocks to handle missing dependencies gracefully
 try:
