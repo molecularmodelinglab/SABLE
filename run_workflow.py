@@ -12,6 +12,7 @@ from pathlib import Path
 from edges.graph_builder import compile_graph
 from schemas.state import WorkflowState
 from schemas.errors import NodeError, ToolError
+from utils.llm_factory import get_llm_client
 
 
 class WorkflowRunner:
@@ -94,6 +95,14 @@ class WorkflowRunner:
         else:
             state = WorkflowState(user_prompt=user_prompt)
             print(f"Starting new workflow: {state.workflow_id}")
+            
+            # Initialize LLM client for argument extraction
+            print("Initializing LLM client...")
+            state.llm_client = get_llm_client()
+            if state.llm_client:
+                print(f"✓ LLM client initialized successfully")
+            else:
+                print("⚠ LLM client not available - will use rule-based extraction only")
         
         try:
             config = {
