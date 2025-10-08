@@ -4,7 +4,7 @@ Extract and parse arguments from user prompt using hybrid LLM + rule-based appro
 
 import re
 import json
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, final
 from schemas.state import WorkflowState, TargetProperty, OptimizationMode, MoleculeSource
 try:
     from rdkit import Chem  # type: ignore
@@ -43,6 +43,25 @@ def _is_likely_smiles(s: str) -> bool:
 
 class HybridArgumentExtractor:
     """Combines LLM-based extraction with rule-based validation and fallbacks."""
+    
+    # Property bounds based on known ranges - shared across methods
+    PROPERTY_BOUNDS = {
+        'qed': (0.0, 1.0),
+        'logp': (-10.0, 10.0),
+        'tpsa': (0.0, 300.0),
+        'molecular_weight': (0.0, 1000.0),
+        'h_bond_donors': (0.0, 20.0),
+        'h_bond_acceptors': (0.0, 20.0),
+        'rotatable_bonds': (0.0, 30.0),
+        'ring_count': (0.0, 10.0),
+        'heavy_atom_count': (0.0, 100.0),
+        'solubility': (-10.0, 0.0),  # logS scale
+        'fsp3': (0.0, 1.0),
+        'cns_activity': (0.0, 1.0),
+        'toxicity': (0.0, 1.0),
+        'binding_affinity': (0.0, 20.0),  # pIC50 scale
+        'permeability': (0.0, 1000.0)  # nm/s
+    }
     
     def __init__(self, llm_client=None):
         self.llm_client = llm_client
@@ -203,25 +222,6 @@ Respond with valid JSON only.
             'permeability': ['permeability', 'permeable', 'caco-2', 'caco2']
         }
         
-        # Property bounds based on known ranges
-        property_bounds = {
-            'qed': (0.0, 1.0),
-            'logp': (-10.0, 10.0),
-            'tpsa': (0.0, 300.0),
-            'molecular_weight': (0.0, 1000.0),
-            'h_bond_donors': (0.0, 20.0),
-            'h_bond_acceptors': (0.0, 20.0),
-            'rotatable_bonds': (0.0, 30.0),
-            'ring_count': (0.0, 10.0),
-            'heavy_atom_count': (0.0, 100.0),
-            'solubility': (-10.0, 0.0),  # logS scale
-            'fsp3': (0.0, 1.0),
-            'cns_activity': (0.0, 1.0),
-            'toxicity': (0.0, 1.0),
-            'binding_affinity': (0.0, 20.0),  # pIC50 scale
-            'permeability': (0.0, 1000.0)  # nm/s
-        }
-        
         targets = []
         for prop, keywords in property_keywords.items():
             if any(kw in prompt_lower for kw in keywords):
@@ -234,10 +234,15 @@ Respond with valid JSON only.
                 targets.append({
                     'property_name': prop,
                     'optimization_mode': mode.value,
-                    'weight': 1.0 / max(1, len(targets) + 1),
-                    'bounds': property_bounds.get(prop),
-                    'transformation': "LINEAR"  # Can be set to 'LINEAR', 'LOG', etc. if needed
+                    'bounds': self.PROPERTY_BOUNDS.get(prop),
+                    'transformation': "LINEAR"
                 })
+        
+        # Assign equal weights to all targets
+        if targets:
+            equal_weight = 1.0 / len(targets)
+            for target in targets:
+                target['weight'] = equal_weight
         
         parsed['target_properties'] = targets
         
@@ -340,11 +345,41 @@ Respond with valid JSON only.
         
         merged['starting_molecules'] = validated_smiles
         
-        # Cross-validate properties
+        # Cross-validate and supplement target properties
         if not merged.get('target_properties') and rule_result.get('target_properties'):
             merged['target_properties'] = rule_result['target_properties']
             merged['confidence_score'] = merged.get('confidence_score', 1.0) * 0.8
             supplements.append("target_properties from rules")
+        elif merged.get('target_properties'):
+            # LLM extracted properties - supplement with bounds and transformations from rules
+            bounds_added = 0
+            weights_fixed = 0
+            
+            for prop in merged['target_properties']:
+                prop_name = prop.get('property_name', '').lower()
+                
+                # Add bounds if missing
+                if not prop.get('bounds') and prop_name in self.PROPERTY_BOUNDS:
+                    prop['bounds'] = self.PROPERTY_BOUNDS[prop_name]
+                    bounds_added += 1
+                
+                # Add transformation if missing
+                if not prop.get('transformation'):
+                    prop['transformation'] = 'LINEAR'
+            
+            # Normalize weights to ensure they sum to 1.0 and are equal
+            num_props = len(merged['target_properties'])
+            if num_props > 0:
+                equal_weight = 1.0 / num_props
+                for prop in merged['target_properties']:
+                    if not prop.get('weight') or prop['weight'] != equal_weight:
+                        prop['weight'] = equal_weight
+                        weights_fixed += 1
+            
+            if bounds_added > 0:
+                supplements.append(f"bounds for {bounds_added} properties")
+            if weights_fixed > 0:
+                supplements.append(f"equal weights for {num_props} properties")
         
         # Sanity check numerical values
         if merged.get('max_iterations', 0) > 100:
@@ -393,6 +428,8 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
     
     # Validate and merge results
     final_result = extractor.validate_and_merge(llm_result, rule_result, state.user_prompt)
+
+    print(f"\n🛠️  Final Extracted Arguments: {final_result}")
     
     # Update state with extracted arguments
     state.parsed_arguments = final_result
