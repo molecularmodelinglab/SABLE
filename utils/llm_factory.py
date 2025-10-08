@@ -22,7 +22,7 @@ try:
     env_path = Path(__file__).parent.parent / '.env'
     if env_path.exists():
         load_dotenv(env_path)
-        print(f"✓ Loaded environment from {env_path}")
+        print(f"✓ Loaded environment file")
 except ImportError:
     print("Note: python-dotenv not installed. Using system environment variables only.")
 
