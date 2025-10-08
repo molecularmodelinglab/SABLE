@@ -15,9 +15,38 @@ ANOLE is an agentic workflow that enumerates, characterizes, and optimizes small
 
 - Python 3.12
 - RDKit (installed via conda/micromamba in Docker image)
-- External dependency: healer (moelcule enumerator)
+- External dependency: healer (molecule enumerator)
+- Optional: LLM API key (OpenAI or Google Gemini) for enhanced argument extraction
 
 Note: Files in `legacy/` are old and not used by the current workflow. They remain for reference but are excluded from the Docker build context.
+
+## LLM Configuration (Optional but Recommended)
+
+ANOLE uses a hybrid approach for extracting arguments from natural language prompts:
+- **LLM-based extraction** (if configured): Uses GPT or Gemini for intelligent parsing
+- **Rule-based extraction** (fallback): Uses regex patterns when LLM is unavailable
+
+To enable LLM-based extraction, set up your API keys:
+
+```bash
+# Copy the example environment file
+cp .env.example .env
+
+# Edit .env and add your API key:
+# For OpenAI:
+LLM_PROVIDER=openai
+OPENAI_API_KEY=your_api_key_here
+
+# OR for Google Gemini:
+LLM_PROVIDER=gemini
+GOOGLE_API_KEY=your_api_key_here
+```
+
+Get API keys:
+- OpenAI: https://platform.openai.com/api-keys
+- Google Gemini: https://aistudio.google.com/app/apikey
+
+**Note:** ANOLE works without an LLM (using rule-based extraction), but LLM extraction provides better accuracy for complex prompts.
 
 ## Quick start (Docker)
 
