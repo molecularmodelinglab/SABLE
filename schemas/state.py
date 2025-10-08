@@ -108,6 +108,10 @@ class WorkflowState(BaseModel):
         default_factory=dict, description="Configuration for characterization tools."
     )
 
+    llm_client: Optional[Any] = Field(
+        default=None, exclude=True
+    )
+
     # === Bayesian Optimization State ===
     bo_config: Optional[BOConfiguration] = None
     bo_rounds: List[Dict[str, Any]] = Field(
@@ -186,3 +190,4 @@ class WorkflowState(BaseModel):
         """Pydantic model configuration."""
         validate_assignment = True
         use_enum_values = True
+        arbitrary_types_allowed = True
