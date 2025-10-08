@@ -1,9 +1,9 @@
 services:
-  anole:
+  lizard:
     build:
       context: .
       dockerfile: Dockerfile
-    image: anole:latest
+    image: lizard:latest
     entrypoint: ["bash", "/app/docker/entrypoint.sh"]
     command: [] # default: run example prompt
     environment:
