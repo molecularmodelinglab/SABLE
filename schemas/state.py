@@ -38,7 +38,7 @@ class TargetProperty(BaseModel):
     """Defines a target property to be optimized."""
     name: str
     mode: OptimizationMode = OptimizationMode.MAXIMIZE
-    weight: float = Field(
+    weight: Optional[float] = Field(
         default=1.0,
         ge=0.0,
         le=1.0,
