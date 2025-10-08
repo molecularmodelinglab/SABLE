@@ -114,6 +114,25 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
         'permeability': ['permeability', 'permeable', 'caco-2', 'caco2']
     }
     
+    # Property bounds based on known ranges
+    property_bounds = {
+        'qed': (0.0, 1.0),
+        'logp': (-10.0, 10.0),
+        'tpsa': (0.0, 200.0),
+        'molecular_weight': (0.0, 1000.0),
+        'h_bond_donors': (0.0, 20.0),
+        'h_bond_acceptors': (0.0, 20.0),
+        'rotatable_bonds': (0.0, 30.0),
+        'ring_count': (0.0, 10.0),
+        'heavy_atom_count': (0.0, 100.0),
+        'solubility': (-10.0, 0.0),  # logS scale
+        'fsp3': (0.0, 1.0),
+        'cns_activity': (0.0, 1.0),
+        'toxicity': (0.0, 1.0),
+        'binding_affinity': (0.0, 20.0),  # pIC50 scale
+        'permeability': (0.0, 1000.0)  # nm/s
+    }
+    
     targets = []
     for prop, keywords in property_keywords.items():
         if any(kw in prompt for kw in keywords):
@@ -126,7 +145,9 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
             targets.append({
                 'name': prop.upper() if prop in ['qed', 'tpsa'] else prop.capitalize(),
                 'mode': mode,
-                'weight': 1.0 / max(1, len(targets) + 1)  # Equal weights
+                'weight': 1.0 / max(1, len(targets) + 1),  # Equal weights
+                'bounds': property_bounds.get(prop),
+                'transformation': 'LINEAR'  # Can be set to 'LINEAR', 'LOG', etc. if needed
             })
     
     parsed['targets'] = targets
