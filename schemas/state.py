@@ -14,6 +14,7 @@ class OptimizationMode(str, Enum):
     """Defines the optimization mode for a target property."""
     MAXIMIZE = "MAX"
     MINIMIZE = "MIN"
+    MATCH = "MATCH"
 
 
 class MoleculeSource(str, Enum):
