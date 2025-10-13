@@ -43,7 +43,6 @@ def _is_likely_smiles(s: str) -> bool:
 
 class HybridArgumentExtractor:
     """Combines LLM-based extraction with rule-based validation and fallbacks."""
-    
     # Property bounds based on known ranges - shared across methods
     PROPERTY_BOUNDS = {
         'qed': (0.0, 1.0),
@@ -78,7 +77,7 @@ User Request: "{prompt}"
 
 Extract the following information and respond with a JSON object:
 - starting_molecules: List of SMILES strings or molecule names mentioned
-- target_properties: List of objects with property_name, optimization_mode (MAX/MIN), weight, bounds (tuple)
+- target_properties: List of objects with property_name, optimization_mode (MAX/MIN/MATCH), weight, bounds (tuple)
 - molecule_source: How to obtain molecules (generated/provided/enumerated/external_library)
 - max_iterations: Number of optimization rounds (default 10, max 100)
 - batch_size: Molecules per iteration (default 5, max 50)
@@ -230,12 +229,18 @@ Respond with valid JSON only.
                     mode = OptimizationMode.MINIMIZE
                 elif prop == 'molecular_weight' and any(word in prompt_lower for word in ['reduce', 'minimize', 'lower', 'small']):
                     mode = OptimizationMode.MINIMIZE
+
+                if mode == OptimizationMode.MATCH:
+                    transformation = "TRIANGULAR"
+                elif mode in [OptimizationMode.MAXIMIZE, OptimizationMode.MINIMIZE]:
+                    transformation = "LINEAR"
+                
                 
                 targets.append({
                     'property_name': prop,
                     'optimization_mode': mode.value,
                     'bounds': self.PROPERTY_BOUNDS.get(prop),
-                    'transformation': "LINEAR"
+                    'transformation': transformation
                 })
         
         # Assign equal weights to all targets
@@ -353,20 +358,48 @@ Respond with valid JSON only.
         elif merged.get('target_properties'):
             # LLM extracted properties - supplement with bounds and transformations from rules
             bounds_added = 0
+            bounds_fixed = 0
             weights_fixed = 0
             
             for prop in merged['target_properties']:
                 prop_name = prop.get('property_name', '').lower()
                 
-                # Add bounds if missing
+                # Add bounds if completely missing
                 if not prop.get('bounds') and prop_name in self.PROPERTY_BOUNDS:
                     prop['bounds'] = self.PROPERTY_BOUNDS[prop_name]
                     bounds_added += 1
+                elif prop.get('bounds'):
+                    # Fix partial bounds (e.g., [None, 60] or [2, None])
+                    bounds = prop['bounds']
+                    if isinstance(bounds, (list, tuple)) and len(bounds) == 2:
+                        lower, upper = bounds
+                        default_bounds = self.PROPERTY_BOUNDS.get(prop_name)
+                        
+                        # Replace None with default bounds
+                        if lower is None and default_bounds:
+                            lower = default_bounds[0]
+                            bounds_fixed += 1
+                        elif lower is None:
+                            lower = 0.0  # Fallback if no default bounds
+                            bounds_fixed += 1
+                        
+                        if upper is None and default_bounds:
+                            upper = default_bounds[1]
+                            bounds_fixed += 1
+                        elif upper is None:
+                            upper = 1000.0  # Fallback if no default bounds
+                            bounds_fixed += 1
+                        
+                        # Ensure bounds is a tuple (not list) for consistency
+                        prop['bounds'] = (float(lower), float(upper))
                 
                 # Add transformation if missing
                 if not prop.get('transformation'):
-                    prop['transformation'] = 'LINEAR'
-            
+                    if prop['optimization_mode'] == OptimizationMode.MATCH:
+                        prop['transformation'] = "TRIANGULAR"
+                    elif prop['optimization_mode'] in [OptimizationMode.MAXIMIZE, OptimizationMode.MINIMIZE]:
+                        prop['transformation'] = "LINEAR"
+
             # Normalize weights to ensure they sum to 1.0 and are equal
             num_props = len(merged['target_properties'])
             if num_props > 0:
@@ -378,6 +411,8 @@ Respond with valid JSON only.
             
             if bounds_added > 0:
                 supplements.append(f"bounds for {bounds_added} properties")
+            if bounds_fixed > 0:
+                supplements.append(f"fixed partial bounds for {bounds_fixed} values")
             if weights_fixed > 0:
                 supplements.append(f"equal weights for {num_props} properties")
         
