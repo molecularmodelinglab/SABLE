@@ -14,8 +14,8 @@ class TargetInput(BaseModel):
 
     @field_validator('mode')
     def validate_mode(cls, v):
-        if v not in ["MAX", "MIN"]:
-            raise ValueError("Mode must be either 'MAX' or 'MIN'.")
+        if v not in ["MAX", "MIN", "MATCH"]:
+            raise ValueError("Mode must be either 'MAX', 'MIN', or 'MATCH'.")
         return v
 
 class BayesianOptimizationInput(BaseModel):
