@@ -159,10 +159,68 @@ class WorkflowRunner:
             return final_state
             
         except (NodeError, ToolError) as e:
-            print(f"Error during workflow execution: {e}")
+            print(f"\n{'='*70}")
+            print(f"❌ WORKFLOW ERROR")
+            print(f"{'='*70}")
+            print(f"Error Type: {type(e).__name__}")
+            print(f"Error Message: {e}")
+            print(f"Error Code: {getattr(e, 'code', 'N/A')}")
+            
+            # Print workflow context for debugging
+            print(f"\n📋 Workflow Context at Failure:")
+            print(f"   Workflow ID: {state.workflow_id}")
+            print(f"   Status: {state.status}")
+            print(f"   Current Iteration: {state.current_iteration}/{state.max_iterations}")
+            
+            if state.parsed_arguments:
+                print(f"\n🛠️  Parsed Arguments:")
+                for key, value in state.parsed_arguments.items():
+                    if key not in ['llm_confidence', 'extraction_quality', 'confidence_score', 'extraction_method']:
+                        print(f"   {key}: {value}")
+            
+            if state.starting_molecules:
+                print(f"\n🧪 Starting Molecules ({len(state.starting_molecules)}):")
+                for i, smiles in enumerate(state.starting_molecules[:3], 1):
+                    print(f"   {i}. {smiles}")
+                if len(state.starting_molecules) > 3:
+                    print(f"   ... and {len(state.starting_molecules) - 3} more")
+            
+            if state.targets:
+                print(f"\n🎯 Target Properties ({len(state.targets)}):")
+                for target in state.targets:
+                    print(f"   - {target.name}: {target.mode.value}, weight={target.weight:.3f}, bounds={target.bounds}")
+            
+            if state.search_space:
+                print(f"\n🔬 Search Space: {len(state.search_space)} molecules")
+            
+            if state.experimental_results:
+                print(f"\n📊 Experimental Results: {len(state.experimental_results)} evaluations")
+            
+            print(f"\n💾 Error checkpoint will be saved to: {state.workflow_id}_error.pkl")
+            print(f"{'='*70}\n")
+            
             state.status = "failed"
             state.exit_reason = getattr(e, "code", None) or str(e)
-            state.log("workflow_error", getattr(e, "to_dict", lambda: {"message": str(e)})())
+            
+            # Enhanced error logging with full context
+            error_context = {
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+                "error_code": getattr(e, "code", None),
+                "workflow_id": state.workflow_id,
+                "current_iteration": state.current_iteration,
+                "max_iterations": state.max_iterations,
+                "status": state.status,
+                "parsed_arguments": state.parsed_arguments,
+                "starting_molecules": state.starting_molecules,
+                "targets": [t.model_dump() for t in state.targets] if state.targets else [],
+                "molecule_source": state.molecule_source,
+                "search_space_size": len(state.search_space),
+                "results_count": len(state.experimental_results)
+            }
+            
+            state.log("workflow_error", error_context)
+            
             if save_checkpoints:
                 self.save_checkpoint(state, f"{state.workflow_id}_error")
             raise
