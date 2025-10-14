@@ -14,6 +14,7 @@ class OptimizationMode(str, Enum):
     """Defines the optimization mode for a target property."""
     MAXIMIZE = "MAX"
     MINIMIZE = "MIN"
+    MATCH = "MATCH"
 
 
 class MoleculeSource(str, Enum):
@@ -38,7 +39,7 @@ class TargetProperty(BaseModel):
     """Defines a target property to be optimized."""
     name: str
     mode: OptimizationMode = OptimizationMode.MAXIMIZE
-    weight: float = Field(
+    weight: Optional[float] = Field(
         default=1.0,
         ge=0.0,
         le=1.0,
@@ -106,6 +107,10 @@ class WorkflowState(BaseModel):
     )
     characterization_config: Dict[str, Any] = Field(
         default_factory=dict, description="Configuration for characterization tools."
+    )
+
+    llm_client: Optional[Any] = Field(
+        default=None, exclude=True
     )
 
     # === Bayesian Optimization State ===
@@ -201,3 +206,4 @@ class WorkflowState(BaseModel):
         """Pydantic model configuration."""
         validate_assignment = True
         use_enum_values = True
+        arbitrary_types_allowed = True

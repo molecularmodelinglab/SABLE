@@ -3,12 +3,17 @@ __pycache__/
 buildingblocks/
 test_checkpoints/
 debug_checkpoints/
+data/
+
+node_modules/
 
 node_modules/
 
 data/
 
 *pyc
+
+.env
 
 config.yml
 debug.py

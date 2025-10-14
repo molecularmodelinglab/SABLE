@@ -12,6 +12,7 @@ from pathlib import Path
 from edges.graph_builder import compile_graph
 from schemas.state import WorkflowState
 from schemas.errors import NodeError, ToolError
+from utils.llm_factory import get_llm_client
 
 
 class WorkflowRunner:
@@ -30,78 +31,55 @@ class WorkflowRunner:
         self.checkpoint_dir.mkdir(exist_ok=True)
         self.graph = compile_graph()
     
-    def save_checkpoint(self, state: WorkflowState, checkpoint_name: Optional[str] = None) -> str:
+    def save_checkpoint(self, state, checkpoint_name: Optional[str] = None) -> str:
         """
         Save a checkpoint of the current state.
         
         Args:
-            state: Current workflow state
+            state: Current workflow state (WorkflowState object or dict)
             checkpoint_name: Optional name for checkpoint
             
         Returns:
             Path to saved checkpoint
         """
-        if not checkpoint_name:
-            checkpoint_name = f"{state.workflow_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        # Handle both WorkflowState objects and dicts
+        if isinstance(state, dict):
+            workflow_id = state.get('workflow_id', 'unknown')
+            state_dict = state
+        else:
+            workflow_id = state.workflow_id
+            state_dict = state
         
-        # Ensure we don't attempt to pickle a locally wrapped logger
-        if hasattr(state, "_log_wrapped") and getattr(state, "_log_wrapped", False):
-            try:
-                state.log = getattr(state, "_original_log")  # type: ignore
-                delattr(state, "_original_log")
-                delattr(state, "_log_wrapped")
-            except Exception:
-                pass
-
+        if not checkpoint_name:
+            checkpoint_name = f"{workflow_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
         checkpoint_path = self.checkpoint_dir / f"{checkpoint_name}.pkl"
-
-        # Restore original logger if wrapped to avoid pickling local closures
-        if getattr(state, "_log_wrapped", False):
-            try:
-                state.log = getattr(state, "_original_log")  # type: ignore
-            except Exception:
-                pass
-
-        # Ensure event callback is not pickled
+        
+        # Temporarily remove llm_client before pickling (it's not serializable)
+        llm_client_backup = None
+        if isinstance(state, dict):
+            llm_client_backup = state_dict.pop('llm_client', None)
+        else:
+            llm_client_backup = getattr(state, 'llm_client', None)
+            state.llm_client = None
+        
         try:
-            if hasattr(state, "_event_callback"):
-                setattr(state, "_event_callback", None)
-        except Exception:
-            pass
-
-        # Temporarily remove any instance-level 'log' to prevent pickling method objects
-        had_instance_log = False
-        saved_instance_log = None
-        if hasattr(state, "__dict__") and "log" in state.__dict__:
-            had_instance_log = True
-            saved_instance_log = state.__dict__.get("log")
-            try:
-                del state.__dict__["log"]
-            except Exception:
-                had_instance_log = False
-
-        with open(checkpoint_path, 'wb') as f:
-            pickle.dump(state, f)
-
-        # Restore instance-level log if we removed it
-        if had_instance_log:
-            state.__dict__["log"] = saved_instance_log  # type: ignore
-
-        # Clean wrapper markers so next save starts clean
-        if hasattr(state, "_original_log"):
-            try:
-                delattr(state, "_original_log")
-            except Exception:
-                pass
-        if hasattr(state, "_log_wrapped"):
-            try:
-                delattr(state, "_log_wrapped")
-            except Exception:
-                pass
+            with open(checkpoint_path, 'wb') as f:
+                pickle.dump(state_dict, f)
+        finally:
+            # Restore llm_client
+            if isinstance(state, dict):
+                if llm_client_backup is not None:
+                    state_dict['llm_client'] = llm_client_backup
+            else:
+                state.llm_client = llm_client_backup
         
         json_path = self.checkpoint_dir / f"{checkpoint_name}.json"
         with open(json_path, 'w') as f:
-            json.dump(state, f, indent=2, default=str)
+            # Create a JSON-safe copy without llm_client
+            json_state = dict(state_dict) if isinstance(state_dict, dict) else state_dict.model_dump()
+            json_state.pop('llm_client', None)
+            json.dump(json_state, f, indent=2, default=str)
         
         print(f"Checkpoint saved: {checkpoint_path}")
         return str(checkpoint_path)
@@ -118,6 +96,14 @@ class WorkflowRunner:
         """
         with open(checkpoint_path, 'rb') as f:
             state = pickle.load(f)
+        
+        # Reinitialize LLM client after loading (it wasn't serialized)
+        print("Reinitializing LLM client...")
+        state.llm_client = get_llm_client()
+        if state.llm_client:
+            print(f"✓ LLM client reinitialized successfully")
+        else:
+            print("⚠ LLM client not available - will use rule-based extraction only")
         
         print(f"Checkpoint loaded: {checkpoint_path}")
         return state
@@ -145,13 +131,14 @@ class WorkflowRunner:
         else:
             state = WorkflowState(user_prompt=user_prompt)
             print(f"Starting new workflow: {state.workflow_id}")
-
-        # If provided, set the state's event callback (no monkey-patching of methods)
-        if event_callback is not None:
-            try:
-                setattr(state, "_event_callback", event_callback)  # PrivateAttr on model
-            except Exception:
-                pass
+            
+            # Initialize LLM client for argument extraction
+            print("Initializing LLM client...")
+            state.llm_client = get_llm_client()
+            if state.llm_client:
+                print(f"✓ LLM client initialized successfully")
+            else:
+                print("⚠ LLM client not available - will use rule-based extraction only")
         
         try:
             config = {
@@ -174,10 +161,68 @@ class WorkflowRunner:
             return final_state
             
         except (NodeError, ToolError) as e:
-            print(f"Error during workflow execution: {e}")
+            print(f"\n{'='*70}")
+            print(f"❌ WORKFLOW ERROR")
+            print(f"{'='*70}")
+            print(f"Error Type: {type(e).__name__}")
+            print(f"Error Message: {e}")
+            print(f"Error Code: {getattr(e, 'code', 'N/A')}")
+            
+            # Print workflow context for debugging
+            print(f"\n📋 Workflow Context at Failure:")
+            print(f"   Workflow ID: {state.workflow_id}")
+            print(f"   Status: {state.status}")
+            print(f"   Current Iteration: {state.current_iteration}/{state.max_iterations}")
+            
+            if state.parsed_arguments:
+                print(f"\n🛠️  Parsed Arguments:")
+                for key, value in state.parsed_arguments.items():
+                    if key not in ['llm_confidence', 'extraction_quality', 'confidence_score', 'extraction_method']:
+                        print(f"   {key}: {value}")
+            
+            if state.starting_molecules:
+                print(f"\n🧪 Starting Molecules ({len(state.starting_molecules)}):")
+                for i, smiles in enumerate(state.starting_molecules[:3], 1):
+                    print(f"   {i}. {smiles}")
+                if len(state.starting_molecules) > 3:
+                    print(f"   ... and {len(state.starting_molecules) - 3} more")
+            
+            if state.targets:
+                print(f"\n🎯 Target Properties ({len(state.targets)}):")
+                for target in state.targets:
+                    print(f"   - {target.name}: {target.mode.value}, weight={target.weight:.3f}, bounds={target.bounds}")
+            
+            if state.search_space:
+                print(f"\n🔬 Search Space: {len(state.search_space)} molecules")
+            
+            if state.experimental_results:
+                print(f"\n📊 Experimental Results: {len(state.experimental_results)} evaluations")
+            
+            print(f"\n💾 Error checkpoint will be saved to: {state.workflow_id}_error.pkl")
+            print(f"{'='*70}\n")
+            
             state.status = "failed"
             state.exit_reason = getattr(e, "code", None) or str(e)
-            state.log("workflow_error", getattr(e, "to_dict", lambda: {"message": str(e)})())
+            
+            # Enhanced error logging with full context
+            error_context = {
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+                "error_code": getattr(e, "code", None),
+                "workflow_id": state.workflow_id,
+                "current_iteration": state.current_iteration,
+                "max_iterations": state.max_iterations,
+                "status": state.status,
+                "parsed_arguments": state.parsed_arguments,
+                "starting_molecules": state.starting_molecules,
+                "targets": [t.model_dump() for t in state.targets] if state.targets else [],
+                "molecule_source": state.molecule_source,
+                "search_space_size": len(state.search_space),
+                "results_count": len(state.experimental_results)
+            }
+            
+            state.log("workflow_error", error_context)
+            
             if save_checkpoints:
                 self.save_checkpoint(state, f"{state.workflow_id}_error")
             raise

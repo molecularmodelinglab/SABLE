@@ -9,6 +9,7 @@ from typing import Dict, Any
 from langgraph.graph import StateGraph, END
 from schemas.state import WorkflowState, MoleculeSource
 
+from nodes.extract_arguments_hybrid import extract_arguments_node as extract_arguments_hybrid_node
 from nodes.extract_arguments import extract_arguments_node
 from nodes.setup import setup_node
 from nodes.enumerate_molecules import enumerate_molecules_node
@@ -78,7 +79,8 @@ def build_molecular_graph() -> StateGraph:
 
     graph = StateGraph(WorkflowState)
     
-    graph.add_node("extract_arguments", extract_arguments_node)
+    # graph.add_node("extract_arguments", extract_arguments_node)
+    graph.add_node("extract_arguments", extract_arguments_hybrid_node)
     graph.add_node("setup", setup_node)
     graph.add_node("enumerate_molecules", enumerate_molecules_node)
     graph.add_node("bo_iteration", bo_iteration_node)

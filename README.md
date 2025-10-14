@@ -1,8 +1,8 @@
-# ANOLE — Adaptive Navigation for Open‑ended Ligand Exploration
+# LIZARD — LIgand optimiZation via Agentic Research and Discovery
 
-ANOLE is an agentic workflow that enumerates, characterizes, and optimizes small molecules toward user‑defined target properties. It wires together nodes (argument extraction, enumeration, Bayesian optimization, characterization, summarization) with clear telemetry and checkpoints.
+LIZARD is an agentic workflow that enumerates, characterizes, and optimizes small molecules toward user‑defined target properties. It wires together nodes (argument extraction, enumeration, Bayesian optimization, characterization, summarization) with clear telemetry and checkpoints.
 
-<img src="images/anole.png" width="300" />
+<img src="images/lizard.png" width="300" />
 
 ## Features
 
@@ -15,28 +15,57 @@ ANOLE is an agentic workflow that enumerates, characterizes, and optimizes small
 
 - Python 3.12
 - RDKit (installed via conda/micromamba in Docker image)
-- External dependency: healer (moelcule enumerator)
+- External dependency: healer (molecule enumerator)
+- Optional: LLM API key (OpenAI or Google Gemini) for enhanced argument extraction
 
 Note: Files in `legacy/` are old and not used by the current workflow. They remain for reference but are excluded from the Docker build context.
+
+## LLM Configuration (Optional but Recommended)
+
+LIZARD uses a hybrid approach for extracting arguments from natural language prompts:
+- **LLM-based extraction** (if configured): Uses GPT or Gemini for intelligent parsing
+- **Rule-based extraction** (fallback): Uses regex patterns when LLM is unavailable
+
+To enable LLM-based extraction, set up your API keys:
+
+```bash
+# Copy the example environment file
+cp .env.example .env
+
+# Edit .env and add your API key:
+# For OpenAI:
+LLM_PROVIDER=openai
+OPENAI_API_KEY=your_api_key_here
+
+# OR for Google Gemini:
+LLM_PROVIDER=gemini
+GOOGLE_API_KEY=your_api_key_here
+```
+
+Get API keys:
+- OpenAI: https://platform.openai.com/api-keys
+- Google Gemini: https://aistudio.google.com/app/apikey
+
+**Note:** LIZARD works without an LLM (using rule-based extraction), but LLM extraction provides better accuracy for complex prompts.
 
 ## Quick start (Docker)
 
 Build the image and run with the example prompt. The image bundles Python 3.12, RDKit, and pip dependencies.
 
 ```bash
-docker build -t anole:latest .
+docker build -t lizard:latest .
 
 # Run the example prompt
-docker run --rm anole:latest
+docker run --rm lizard:latest
 
 # Provide your own prompt
-docker run --rm anole:latest run "Optimize aspirin for better QED. Enumerate 50 analogs and run 3 iterations."
+docker run --rm lizard:latest run "Optimize aspirin for better QED. Enumerate 50 analogs and run 3 iterations."
 
 # Resume from a checkpoint mounted from the host
-docker run --rm -v "$PWD/checkpoints:/app/checkpoints" anole:latest resume /app/checkpoints/<checkpoint_file>.pkl
+docker run --rm -v "$PWD/checkpoints:/app/checkpoints" lizard:latest resume /app/checkpoints/<checkpoint_file>.pkl
 
 # Export results to a mounted path
-docker run --rm -v "$PWD:/app" anole:latest export --output /app/results.json "Optimize caffeine for higher logP and lower TPSA"
+docker run --rm -v "$PWD:/app" lizard:latest export --output /app/results.json "Optimize caffeine for higher logP and lower TPSA"
 ```
 
 ### Using docker compose
@@ -55,7 +84,7 @@ PROMPT='Optimize aspirin for better QED and solubility. Enumerate 50 analogs and
 docker compose up
 
 # Or override the command
-docker compose run --rm anole run "Optimize ibuprofen for lower TPSA"
+docker compose run --rm lizard run "Optimize ibuprofen for lower TPSA"
 
 # Run the API service (port 8000) and UI dev server (port 5173)
 docker compose up api
@@ -69,7 +98,7 @@ Copy `config.example.yml` to `config.yml` and edit as needed (e.g., credentials 
 
 ```bash
 cp config.example.yml config.yml
-docker run --rm -v "$PWD/config.yml:/app/config.yml" anole:latest run "Your prompt here"
+docker run --rm -v "$PWD/config.yml:/app/config.yml" lizard:latest run "Your prompt here"
 ```
 
 ### Checkpoints and artifacts
@@ -79,12 +108,12 @@ docker run --rm -v "$PWD/config.yml:/app/config.yml" anole:latest run "Your prom
 
 ## Local development
 
-You can run ANOLE locally if you have Python 3.12 and RDKit available.
+You can run LIZARD locally if you have Python 3.12 and RDKit available.
 
 ```bash
 # Optional: use conda/mamba to install rdkit, then pip install the rest
-conda create -n anole python=3.12 -c conda-forge rdkit
-conda activate anole
+conda create -n lizard python=3.12 -c conda-forge rdkit
+conda activate lizard
 pip install -r requirements.txt
 
 # Run
