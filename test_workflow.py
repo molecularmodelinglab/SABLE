@@ -2,6 +2,7 @@ import os
 import traceback
 from run_workflow import WorkflowRunner
 from schemas.state import ExperimentResult, WorkflowState, WorkflowStatus
+from test_questions import questions
 
 CHECKPOINT_DIR = "test_checkpoints"
 
@@ -11,11 +12,12 @@ def test_basic_workflow():
     print("Testing basic molecular optimization workflow...")
     print("=" * 50)
 
-    test_prompts = [
-        "Optimize aspirin for better QED. Use 20 molecules and 3 iterations.",
-        "Find analogs of caffeine with improved drug-likeness. Enumerate 50 derivatives.",
-        "Improve the TPSA and LogP of ibuprofen through molecular optimization.",
-    ]
+    # test_prompts = [
+    #     "Optimize aspirin for better QED. Use 20 molecules and 3 iterations.",
+    #     "Find analogs of caffeine with improved drug-likeness. Enumerate 50 derivatives.",
+    #     "Improve the TPSA and LogP of ibuprofen through molecular optimization.",
+    # ]
+    test_prompts = questions  # Use full set from test_questions.py
 
     runner = WorkflowRunner(checkpoint_dir=CHECKPOINT_DIR)
 
