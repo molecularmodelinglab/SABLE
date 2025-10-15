@@ -19,6 +19,7 @@ class RunInfo(BaseModel):
     summary_available: bool = False
     results_available: bool = False
     paths: Dict[str, str] = Field(default_factory=dict)
+    note: Optional[str] = None
 
 
 class RunList(BaseModel):
