@@ -76,9 +76,14 @@ class WorkflowRunner:
         
         json_path = self.checkpoint_dir / f"{checkpoint_name}.json"
         with open(json_path, 'w') as f:
-            # Create a JSON-safe copy without llm_client
-            json_state = dict(state_dict) if isinstance(state_dict, dict) else state_dict.model_dump()
+            # Create a JSON-safe copy without llm_client and event_callback
+            if isinstance(state, dict):
+                json_state = dict(state)
+            else:
+                json_state = state.model_dump()
+            
             json_state.pop('llm_client', None)
+            json_state.pop('_event_callback', None)
             json.dump(json_state, f, indent=2, default=str)
         
         print(f"Checkpoint saved: {checkpoint_path}")
@@ -120,6 +125,7 @@ class WorkflowRunner:
             user_prompt: User's optimization request
             checkpoint_path: Optional checkpoint to resume from
             save_checkpoints: Whether to save checkpoints after each iteration
+            event_callback: Optional callback for streaming events to UI
             
         Returns:
             Final workflow state
@@ -140,6 +146,10 @@ class WorkflowRunner:
             else:
                 print("⚠ LLM client not available - will use rule-based extraction only")
         
+        # Set event callback for streaming logs to UI
+        if event_callback:
+            state._event_callback = event_callback
+        
         try:
             config = {
                 "recursion_limit": 50,
@@ -147,13 +157,11 @@ class WorkflowRunner:
             }
             result = self.graph.invoke(state, config=config)
 
-            # Extract final state
             if isinstance(result, WorkflowState):
                 final_state = result
             elif isinstance(result, dict) and "status" in result:
-                # Some nodes might return dicts; convert minimal fields to model for consistency
-                final_state = state
-  
+                final_state = WorkflowState(**result)
+
             # Save final checkpoint
             if save_checkpoints:
                 self.save_checkpoint(final_state, f"{final_state.workflow_id}_final")
