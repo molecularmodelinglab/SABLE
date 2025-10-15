@@ -1,12 +1,12 @@
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
-from typing import Dict, Any, Callable
+from typing import Dict, Any, Callable, Deque
 from pathlib import Path
 from datetime import datetime
 
 from server.models import RunCreateRequest, RunInfo, RunList
-from server.storage import ensure_run_dirs, results_json_path, summary_txt_path, run_dir, DATA_ROOT
+from server.storage import ensure_run_dirs, results_json_path, summary_txt_path, run_dir
 from run_workflow import WorkflowRunner
 
 
@@ -83,6 +83,9 @@ def create_run(req: RunCreateRequest, background: BackgroundTasks):
     run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     paths = ensure_run_dirs(run_id)
     (Path(paths["inputs"]) / "prompt.txt").write_text(req.prompt)
+    note = req.note.strip() if req.note else None
+    if note:
+        (Path(paths["inputs"]) / "note.txt").write_text(note)
 
     info = RunInfo(
         id=run_id,
@@ -90,6 +93,7 @@ def create_run(req: RunCreateRequest, background: BackgroundTasks):
         created_at=datetime.now(),
         updated_at=datetime.now(),
         paths=paths,
+        note=note,
     )
     _RUNS[run_id] = info
 
@@ -153,8 +157,19 @@ def list_checkpoints(run_id: str):
     base = run_dir(run_id) / "checkpoints"
     if not base.exists():
         return []
-    items = sorted([p.name for p in base.glob("*")])
+    items = sorted([p.name for p in base.glob("*") if p.is_file()])
     return items
+
+
+@app.get("/runs/{run_id}/checkpoints/{filename:path}")
+def download_checkpoint(run_id: str, filename: str):
+    base = (run_dir(run_id) / "checkpoints").resolve()
+    target = (base / filename).resolve()
+    if not str(target).startswith(str(base)):
+        raise HTTPException(400, "Invalid checkpoint path")
+    if not target.exists() or not target.is_file():
+        raise HTTPException(404, "Checkpoint not found")
+    return FileResponse(str(target), filename=target.name)
 
 
 @app.get("/runs/{run_id}/artifacts/results.json")
@@ -171,3 +186,26 @@ def get_summary(run_id: str):
     if not p.exists():
         raise HTTPException(404, "Summary not found")
     return FileResponse(str(p), media_type="text/plain")
+
+
+@app.get("/runs/{run_id}/logs")
+def get_logs(run_id: str, limit: int = Query(200, ge=1, le=2000)):
+    path = run_dir(run_id) / "logs" / "logs.ndjson"
+    if not path.exists():
+        raise HTTPException(404, "Logs not found")
+
+    import json
+    from collections import deque
+
+    events: Deque[Dict[str, Any]] = deque(maxlen=limit)
+    with path.open() as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                events.append({"message": line})
+
+    return {"events": list(events)}
