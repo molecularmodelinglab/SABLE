@@ -30,7 +30,7 @@ export function NewRunPage() {
       <div className="new-run__header">
         <div>
           <h1>Launch New Optimization</h1>
-          <p>Define targets, guardrails, and compute parameters for the ANOLE agent.</p>
+          <p>Specify a starting compound, target property, and bounds for the LIZARD agent.</p>
         </div>
       </div>
 
@@ -45,29 +45,6 @@ export function NewRunPage() {
             required
           />
         </label>
-
-        <div className="new-run__inline">
-          <label>
-            <span>Max iterations (optional)</span>
-            <input
-              type="number"
-              min={1}
-              value={maxIterations}
-              onChange={(event) => setMaxIterations(event.target.value ? Number(event.target.value) : '' as const)}
-              placeholder="Auto"
-            />
-          </label>
-          <label>
-            <span>Batch size (optional)</span>
-            <input
-              type="number"
-              min={1}
-              value={batchSize}
-              onChange={(event) => setBatchSize(event.target.value ? Number(event.target.value) : '' as const)}
-              placeholder="Auto"
-            />
-          </label>
-        </div>
 
         <label>
           <span>Notebook note (optional)</span>
