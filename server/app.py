@@ -50,12 +50,8 @@ def _run_workflow_background(run_id: str, prompt: str, max_iterations: int | Non
     def emit(event: Dict[str, Any]):
         _append_log(run_id, event)
 
+    # Run the workflow with event callback for streaming logs
     state = runner.run(user_prompt=prompt, checkpoint_path=None, save_checkpoints=True, event_callback=emit)
-    # Optionally override max_iterations/batch_size
-    if max_iterations is not None:
-        state.max_iterations = max_iterations
-    if batch_size is not None and state.bo_config:
-        state.bo_config.batch_size = batch_size
 
     # Export results
     results_path = results_json_path(run_id)
