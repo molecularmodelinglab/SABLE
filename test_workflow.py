@@ -26,15 +26,15 @@ def test_basic_workflow():
         try:
             state = runner.run(user_prompt=prompt, save_checkpoints=True)
 
-            assert state["status"] in [WorkflowStatus.COMPLETED, WorkflowStatus.RUNNING], f"Unexpected status: {state.status}"
-            assert state["workflow_id"] is not None
+            assert state.status in [WorkflowStatus.COMPLETED, WorkflowStatus.RUNNING], f"Unexpected status: {state.status}"
+            assert state.workflow_id is not None
 
             print(f"✓ Test {i} PASSED")
-            print(f"  - Final Status: {state["status"]}")
-            print(f"  - Iterations Completed: {state["current_iteration"]}")
-            print(f"  - Molecules Tested: {len(state["experimental_results"])}")
-            if state["best_molecules"]:
-                print(f"  - Best Score Achieved: {state["best_molecules"][0][1]:.4f}")
+            print(f"  - Final Status: {state.status}")
+            print(f"  - Iterations Completed: {state.current_iteration}")
+            print(f"  - Molecules Tested: {len(state.experimental_results)}")
+            if state.best_molecules:
+                print(f"  - Best Score Achieved: {state.best_molecules[0][1]:.4f}")
 
         except Exception as e:
             print(f"✗ Test {i} FAILED: {e}")
