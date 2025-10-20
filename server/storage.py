@@ -2,8 +2,8 @@ import os
 from pathlib import Path
 from typing import Dict
 
-# Use ANOLE_DATA_ROOT if set; otherwise default to a writable local ./data directory
-DATA_ROOT = Path(os.environ.get("ANOLE_DATA_ROOT", str(Path.cwd() / "data")))
+# Use LIZARD_DATA_ROOT if set; otherwise default to a writable local ./data directory
+DATA_ROOT = Path(os.environ.get("LIZARD_DATA_ROOT", str(Path.cwd() / "data")))
 
 
 def run_dir(run_id: str) -> Path:

@@ -10,7 +10,7 @@ from server.storage import ensure_run_dirs, results_json_path, summary_txt_path,
 from run_workflow import WorkflowRunner
 
 
-app = FastAPI(title="ANOLE API", version="0.1.0")
+app = FastAPI(title="LIZARD API", version="0.1.0")
 
 origins = [
     "http://localhost:5173",
