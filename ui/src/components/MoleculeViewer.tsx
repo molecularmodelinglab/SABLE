@@ -1,30 +1,75 @@
 import { useEffect, useRef, useState } from 'react'
-import { Drawer, parse } from 'smiles-drawer'
+import SmilesDrawer from 'smiles-drawer'
 
 export function MoleculeViewer({ smiles, caption }: { smiles: string; caption?: string }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const drawerRef = useRef<any>(null)
   const [error, setError] = useState<string | null>(null)
+  const idRef = useRef<string>(`smiles-${Math.random().toString(36).slice(2, 11)}`)
+
+  // Instantiate the drawer once
+  useEffect(() => {
+    if (!drawerRef.current) {
+      drawerRef.current = new SmilesDrawer.SmiDrawer({
+        width: 220,
+        height: 180,
+        padding: 10,
+      })
+    }
+  }, [])
 
   useEffect(() => {
-    if (!smiles) return
-    const canvas = canvasRef.current
-    if (!canvas) return
+    const drawer = drawerRef.current
+    if (!smiles || !drawer) {
+      return
+    }
 
-    const context = canvas.getContext('2d')
-    context?.clearRect(0, 0, canvas.width, canvas.height)
+    const container = containerRef.current
+    if (!container) {
+      return
+    }
 
-    const drawer = new Drawer({ width: 220, height: 180, padding: 10 })
-    parse(smiles, (tree) => {
-      drawer.draw(tree, canvas, 'light', false)
-      setError(null)
-    }, (err) => {
-      setError(typeof err === 'string' ? err : 'Failed to render molecule')
-    })
+    let isCancelled = false
+
+    // Clear previous content and mount a fresh SVG target
+    container.innerHTML = ''
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    svg.setAttribute('id', idRef.current)
+    svg.setAttribute('width', '220')
+    svg.setAttribute('height', '180')
+    svg.setAttribute('viewBox', '0 0 220 180')
+    container.appendChild(svg)
+
+    const handleSuccess = () => {
+      if (!isCancelled) {
+        setError(null)
+      }
+    }
+
+    const handleError = (err: unknown) => {
+      if (!isCancelled) {
+        console.error('SMILES draw error:', err)
+        setError(typeof err === 'string' ? err : 'Failed to render molecule')
+      }
+    }
+
+    try {
+      drawer.draw(smiles, svg, 'light', handleSuccess, handleError)
+    } catch (err) {
+      handleError(err)
+    }
+
+    return () => {
+      isCancelled = true
+      if (container.contains(svg)) {
+        container.removeChild(svg)
+      }
+    }
   }, [smiles])
 
   return (
     <div className="molecule-viewer">
-      <canvas ref={canvasRef} width={220} height={180} />
+      <div ref={containerRef} className="molecule-viewer__canvas" />
       <div className="molecule-viewer__caption">
         {caption || smiles}
       </div>
