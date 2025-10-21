@@ -20,7 +20,25 @@ class RunInfo(BaseModel):
     results_available: bool = False
     paths: Dict[str, str] = Field(default_factory=dict)
     note: Optional[str] = None
+    user_id: Optional[str] = None
+    username: Optional[str] = None
+    session_id: Optional[str] = None
 
 
 class RunList(BaseModel):
     runs: List[RunInfo]
+
+
+class LoginRequest(BaseModel):
+    username: str
+    email: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class LoginResponse(BaseModel):
+    session_id: str
+    token: str
+    user_id: str
+    username: str
+    expires_at: datetime
+
