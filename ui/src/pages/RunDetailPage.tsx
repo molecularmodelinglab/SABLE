@@ -9,6 +9,7 @@ import {
   getRunLogs,
   getRunResults,
   getRunSummary,
+  getSessionToken,
   type RunEvent,
   type RunInfo,
   type RunResults,
@@ -24,6 +25,30 @@ import { extractMoleculeRecords, extractNumericSeries, flattenRecord } from '../
 const TABS = ['overview', 'logs', 'checkpoints', 'results', 'visualizations'] as const
 
 type TabKey = (typeof TABS)[number]
+
+// Helper function to download file with authentication
+async function downloadFile(url: string, filename: string) {
+  const token = getSessionToken()
+  const headers: HeadersInit = {}
+  if (token) {
+    headers['X-Session-Token'] = token
+  }
+  
+  const response = await fetch(url, { headers })
+  if (!response.ok) {
+    throw new Error('Download failed')
+  }
+  
+  const blob = await response.blob()
+  const downloadUrl = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = downloadUrl
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.URL.revokeObjectURL(downloadUrl)
+}
 
 export function RunDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -125,7 +150,7 @@ export function RunDetailPage() {
             disabled={!run.results_available}
             onClick={() => {
               if (!id || !run.results_available) return
-              window.open(`${apiBase}/runs/${id}/artifacts/results.json`, '_blank')
+              downloadFile(`${apiBase}/runs/${id}/artifacts/results.json`, `${id}_results.json`)
             }}
           >
             Download results
@@ -135,7 +160,7 @@ export function RunDetailPage() {
             disabled={!run.summary_available}
             onClick={() => {
               if (!id || !run.summary_available) return
-              window.open(`${apiBase}/runs/${id}/artifacts/summary.txt`, '_blank')
+              downloadFile(`${apiBase}/runs/${id}/artifacts/summary.txt`, `${id}_summary.txt`)
             }}
           >
             Download summary
@@ -236,7 +261,7 @@ export function RunDetailPage() {
           <h2>Molecular visualizations</h2>
           {moleculeRecords.length ? (
             <div className="run-detail__molecule-grid">
-              {moleculeRecords.slice(0, 6).map((record) => (
+              {moleculeRecords.slice(0, 8).map((record) => (
                 <MoleculeViewer key={record.id} smiles={record.smiles} caption={record.id} />
               ))}
             </div>
