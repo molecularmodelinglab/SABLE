@@ -1,4 +1,26 @@
+import { LoginRequest, LoginResponse, Session } from './types/session'
+import { Experiment, ExperimentListResponse } from './types/experiment'
+import { AuditEvent, AuditEventsResponse } from './types/audit'
+import { AnalyticsSummary, HealthCheck } from './types/analytics'
+
 export const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000'
+
+// Session token storage
+let sessionToken: string | null = localStorage.getItem('lizard_session_token')
+
+export function setSessionToken(token: string) {
+  sessionToken = token
+  localStorage.setItem('lizard_session_token', token)
+}
+
+export function clearSessionToken() {
+  sessionToken = null
+  localStorage.removeItem('lizard_session_token')
+}
+
+export function getSessionToken(): string | null {
+  return sessionToken
+}
 
 export type RunInfo = {
   id: string
@@ -10,6 +32,9 @@ export type RunInfo = {
   results_available: boolean
   paths?: Record<string, string>
   note?: string | null
+  user_id?: string | null
+  username?: string | null
+  session_id?: string | null
 }
 
 export type RunEvent = {
@@ -25,7 +50,18 @@ export type RunEvent = {
 export type RunResults = unknown
 
 async function request<T>(path: string, init?: RequestInit, parse: 'json' | 'text' = 'json'): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, init)
+  const headers = new Headers(init?.headers || {})
+  
+  // Add session token if available
+  if (sessionToken) {
+    headers.set('X-Session-Token', sessionToken)
+  }
+  
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers,
+  })
+  
   if (!res.ok) {
     const body = await res.text()
     throw new Error(body || res.statusText)
@@ -59,11 +95,7 @@ export async function getCheckpoints(id: string): Promise<string[]> {
 
 export async function getRunResults(id: string): Promise<RunResults | null> {
   try {
-    const res = await fetch(`${API_BASE}/runs/${id}/artifacts/results.json`)
-    if (!res.ok) {
-      return null
-    }
-    return (await res.json()) as RunResults
+    return await request<RunResults>(`/runs/${id}/artifacts/results.json`)
   } catch (error) {
     return null
   }
@@ -71,11 +103,7 @@ export async function getRunResults(id: string): Promise<RunResults | null> {
 
 export async function getRunSummary(id: string): Promise<string | null> {
   try {
-    const res = await fetch(`${API_BASE}/runs/${id}/artifacts/summary.txt`)
-    if (!res.ok) {
-      return null
-    }
-    return await res.text()
+    return await request<string>(`/runs/${id}/artifacts/summary.txt`, undefined, 'text')
   } catch (error) {
     return null
   }
@@ -108,3 +136,95 @@ export function openEventStream(id: string, onEvent: (evt: RunEvent) => void): (
 export async function deleteRun(id: string): Promise<void> {
   await request(`/runs/${id}`, { method: 'DELETE' })
 }
+
+
+// ==================== Session Management ====================
+
+export async function login(req: LoginRequest): Promise<LoginResponse> {
+  const response = await request<LoginResponse>('/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  setSessionToken(response.token)
+  return response
+}
+
+export async function logout(): Promise<void> {
+  await request('/auth/logout', { method: 'POST' })
+  clearSessionToken()
+}
+
+export async function getCurrentSession(): Promise<Session> {
+  return request<Session>('/auth/session')
+}
+
+export async function listUserSessions(): Promise<{ sessions: Session[] }> {
+  return request<{ sessions: Session[] }>('/auth/sessions')
+}
+
+
+// ==================== Experiment Management ====================
+
+export async function getExperiment(experimentId: string): Promise<Experiment> {
+  return request<Experiment>(`/experiments/${experimentId}`)
+}
+
+export async function listExperiments(status?: string, limit = 50): Promise<Experiment[]> {
+  const params = new URLSearchParams()
+  if (status) params.set('status', status)
+  params.set('limit', limit.toString())
+  
+  const data = await request<ExperimentListResponse>(`/experiments?${params}`)
+  return data.experiments
+}
+
+export async function getExperimentByRun(runId: string): Promise<Experiment> {
+  return request<Experiment>(`/experiments/run/${runId}`)
+}
+
+export async function getFailedExperiments(limit = 20): Promise<Experiment[]> {
+  const data = await request<ExperimentListResponse>(`/experiments/failed?limit=${limit}`)
+  return data.experiments
+}
+
+
+// ==================== Audit Logging ====================
+
+export async function getAuditEvents(
+  startDate?: string,
+  endDate?: string,
+  eventType?: string,
+  limit = 100
+): Promise<AuditEvent[]> {
+  const params = new URLSearchParams()
+  if (startDate) params.set('start_date', startDate)
+  if (endDate) params.set('end_date', endDate)
+  if (eventType) params.set('event_type', eventType)
+  params.set('limit', limit.toString())
+  
+  const data = await request<AuditEventsResponse>(`/audit/events?${params}`)
+  return data.events
+}
+
+export async function getUserActivity(limit = 50): Promise<AuditEvent[]> {
+  const data = await request<AuditEventsResponse>(`/audit/activity?limit=${limit}`)
+  return data.events
+}
+
+export async function getSecurityEvents(limit = 50): Promise<AuditEvent[]> {
+  const data = await request<AuditEventsResponse>(`/audit/security?limit=${limit}`)
+  return data.events
+}
+
+
+// ==================== Analytics ====================
+
+export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
+  return request<AnalyticsSummary>('/analytics/summary')
+}
+
+export async function getHealthCheck(): Promise<HealthCheck> {
+  return request<HealthCheck>('/health')
+}
+
