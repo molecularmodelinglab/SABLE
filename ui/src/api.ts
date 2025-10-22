@@ -35,6 +35,7 @@ export type RunInfo = {
   user_id?: string | null
   username?: string | null
   session_id?: string | null
+  starting_molecules?: string[]
 }
 
 export type RunEvent = {
