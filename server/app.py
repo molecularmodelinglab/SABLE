@@ -173,6 +173,24 @@ def _run_workflow_background(
                 data=event
             )
 
+        # Capture starting molecules as soon as they're extracted
+        starting = None
+        data = event.get("data")
+        if isinstance(data, dict) and data.get("starting_molecules"):
+            starting = data.get("starting_molecules")
+        elif event.get("starting_molecules"):
+            starting = event.get("starting_molecules")
+
+        if starting:
+            if isinstance(starting, (list, tuple, set)):
+                normalized = [str(m) for m in starting]
+            else:
+                normalized = [str(starting)]
+            info = _RUNS.get(run_id)
+            if info:
+                info.starting_molecules = normalized
+                info.updated_at = datetime.now()
+
     try:
         # Run the workflow with event callback for streaming logs
         state = runner.run(
@@ -181,6 +199,10 @@ def _run_workflow_background(
             save_checkpoints=True,
             event_callback=emit
         )
+
+        starting_molecules = list(state.starting_molecules or [])
+        if starting_molecules:
+            experiment.metadata["starting_molecules"] = starting_molecules
         
         # Update experiment with results
         experiment.parsed_arguments = state.parsed_arguments
@@ -204,6 +226,7 @@ def _run_workflow_background(
         # Update run info
         info = _RUNS.get(run_id)
         if info:
+            info.starting_molecules = starting_molecules
             info.status = str(state.status)
             info.exit_reason = state.exit_reason
             info.updated_at = datetime.now()
@@ -265,6 +288,12 @@ def _run_workflow_background(
             info.status = "failed"
             info.exit_reason = str(e)
             info.updated_at = datetime.now()
+            if 'state' in locals() and getattr(state, "starting_molecules", None):
+                starting = getattr(state, "starting_molecules", [])
+                if isinstance(starting, (list, tuple, set)):
+                    info.starting_molecules = [str(m) for m in starting]
+                elif starting:
+                    info.starting_molecules = [str(starting)]
         
         _append_log(run_id, {
             "ts": datetime.now().isoformat(),
@@ -300,6 +329,7 @@ async def create_run(
         user_id=session.user_id,
         username=session.username,
         session_id=session.id,
+        starting_molecules=[],
     )
     _RUNS[run_id] = info
     

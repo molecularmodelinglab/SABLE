@@ -23,6 +23,10 @@ class RunInfo(BaseModel):
     user_id: Optional[str] = None
     username: Optional[str] = None
     session_id: Optional[str] = None
+    starting_molecules: List[str] = Field(
+        default_factory=list,
+        description="Initial list of molecules (SMILES) provided to the workflow."
+    )
 
 
 class RunList(BaseModel):
