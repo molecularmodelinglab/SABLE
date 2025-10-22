@@ -134,6 +134,8 @@ export function RunDetailPage() {
     return <div className="run-detail__placeholder">Run not found.</div>
   }
 
+  const startingMolecules = run.starting_molecules ?? []
+
   return (
     <div className="run-detail">
       <div className="run-detail__header">
@@ -172,7 +174,7 @@ export function RunDetailPage() {
               if (!window.confirm('Delete this run and all artifacts?')) return
               mutation.mutate()
             }}
-            disabled={mutation.isLoading}
+            disabled={mutation.isPending}
           >
             Delete
           </button>
@@ -259,6 +261,24 @@ export function RunDetailPage() {
       <section hidden={activeTab !== 'visualizations'}>
         <div className="run-detail__panel">
           <h2>Molecular visualizations</h2>
+          <div className="run-detail__visualization-section">
+            <h3>Starting molecules</h3>
+            {startingMolecules.length ? (
+              <div className="run-detail__molecule-grid">
+                {startingMolecules.map((smiles, index) => (
+                  <MoleculeViewer
+                    key={`${smiles}-${index}`}
+                    smiles={smiles}
+                    caption={`Seed ${index + 1}`}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="distribution-chart__empty">No starting molecules recorded for this run.</div>
+            )}
+          </div>
+          <div className="run-detail__visualization-section">
+            <h3>Evaluated molecules</h3>
           {moleculeRecords.length ? (
             <div className="run-detail__molecule-grid">
               {moleculeRecords.slice(0, 8).map((record) => (
@@ -266,8 +286,9 @@ export function RunDetailPage() {
               ))}
             </div>
           ) : (
-            <div>No molecular structures detected in results.</div>
+              <div>No molecular structures detected in results.</div>
           )}
+          </div>
           <div className="run-detail__charts">
             {chartSeries.length ? (
               chartSeries.map(([metric, values]) => (

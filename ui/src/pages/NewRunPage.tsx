@@ -57,8 +57,8 @@ export function NewRunPage() {
 
         <div className="new-run__actions">
           <button type="button" onClick={() => navigate(-1)} className="ghost">Cancel</button>
-          <button type="submit" className="primary" disabled={mutation.isLoading}>
-            {mutation.isLoading ? 'Launching...' : 'Launch optimization'}
+          <button type="submit" className="primary" disabled={mutation.isPending}>
+            {mutation.isPending ? 'Launching...' : 'Launch optimization'}
           </button>
         </div>
         {mutation.isError && (
