@@ -4,8 +4,17 @@ Extract and parse arguments from user prompt using hybrid LLM + rule-based appro
 
 import re
 import json
-from typing import Dict, Any, List, Optional, final
-from schemas.state import WorkflowState, TargetProperty, OptimizationMode, MoleculeSource
+from typing import Dict, Any, List, Optional
+
+from pydantic import ValidationError
+
+from schemas.state import (
+    WorkflowState,
+    TargetProperty,
+    OptimizationMode,
+    MoleculeSource,
+    ProteinTarget,
+)
 try:
     from rdkit import Chem  # type: ignore
     _RDKit_AVAILABLE = True
@@ -61,6 +70,8 @@ class HybridArgumentExtractor:
         'binding_affinity': (0.0, 20.0),  # pIC50 scale
         'permeability': (0.0, 1000.0)  # nm/s
     }
+
+    AMINO_ACIDS = set("ACDEFGHIKLMNPQRSTVWYBXZJUO")
     
     def __init__(self, llm_client=None):
         self.llm_client = llm_client
@@ -78,6 +89,7 @@ User Request: "{prompt}"
 Extract the following information and respond with a JSON object:
 - starting_molecules: List of SMILES strings or molecule names mentioned
 - target_properties: List of objects with property_name, optimization_mode (MAX/MIN/MATCH), weight, bounds (tuple)
+- proteins: List of objects describing protein chains with chain_id (A, B, ...), and either sequence or uniprot_id (optional fields: msa, cyclic, modifications)
 - molecule_source: How to obtain molecules (generated/provided/enumerated/external_library)
 - max_iterations: Number of optimization rounds (default 10, max 100)
 - batch_size: Molecules per iteration (default 5, max 50)
@@ -201,6 +213,56 @@ Respond with valid JSON only.
                 parsed.setdefault('starting_molecules', [])
                 if smiles not in parsed['starting_molecules']:
                     parsed['starting_molecules'].append(smiles)
+
+        # Extract protein targets (sequences or UniProt IDs)
+        proteins: List[Dict[str, Any]] = []
+        seen_keys: set[str] = set()
+
+        # UniProt ID patterns (capture tokens like P12345, Q8N158, etc.)
+        uniprot_pattern = re.compile(r"uniprot(?:\s+id)?[\s:=]+([A-Za-z0-9\-]{5,12})", re.IGNORECASE)
+        for match in uniprot_pattern.findall(prompt):
+            uid = match.strip().upper()
+            if re.fullmatch(r"[A-Z0-9\-]{5,12}", uid) and uid not in seen_keys:
+                seen_keys.add(uid)
+                proteins.append({'chain_id': None, 'uniprot_id': uid})
+
+        # Sequence blocks following keywords like "protein sequence"
+        sequence_pattern = re.compile(
+            r"(?:(protein|target)\s*)?(sequence|seq)\s*(?:for\s*chain\s*([A-Za-z0-9]+))?\s*[:=\-]\s*([A-Za-z\s]{20,})",
+            re.IGNORECASE,
+        )
+        for match in sequence_pattern.finditer(prompt):
+            chain_hint = match.group(3)
+            seq_raw = match.group(4)
+            seq = ''.join(seq_raw.split()).upper()
+            if len(seq) < 20 or not set(seq) <= self.AMINO_ACIDS:
+                continue
+            key = f"SEQ:{seq}"
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            proteins.append({
+                'chain_id': chain_hint.upper() if chain_hint else None,
+                'sequence': seq
+            })
+
+        # Assign default chain IDs and filter out empty entries
+        normalized_proteins: List[Dict[str, Any]] = []
+        for idx, protein in enumerate(proteins):
+            if not protein.get('sequence') and not protein.get('uniprot_id'):
+                continue
+            chain_id = protein.get('chain_id')
+            if not chain_id:
+                chain_id = chr(ord('A') + idx)
+            normalized = {
+                'chain_id': chain_id,
+                'sequence': protein.get('sequence'),
+                'uniprot_id': protein.get('uniprot_id')
+            }
+            normalized_proteins.append(normalized)
+
+        if normalized_proteins:
+            parsed['proteins'] = normalized_proteins
         
         # Extract target properties
         property_keywords = {
@@ -290,6 +352,8 @@ Respond with valid JSON only.
             rule_confidence += 0.15
         if parsed.get('target_properties') and len(parsed['target_properties']) > 0:
             rule_confidence += 0.15
+        if parsed.get('proteins'):
+            rule_confidence += 0.1
         if iteration_match:  # Explicitly mentioned iterations
             rule_confidence += 0.05
         if batch_match:  # Explicitly mentioned batch size
@@ -349,6 +413,31 @@ Respond with valid JSON only.
             supplements.append(f"{rule_smiles_added} SMILES from rules")
         
         merged['starting_molecules'] = validated_smiles
+
+        # Normalize and merge protein targets
+        llm_proteins = self._normalize_protein_list(merged.get('proteins'))
+        rule_proteins = self._normalize_protein_list(rule_result.get('proteins'))
+
+        if not llm_proteins and rule_proteins:
+            merged['proteins'] = rule_proteins
+            supplements.append("proteins from rules")
+        elif llm_proteins:
+            supplemented = 0
+            existing_keys = {
+                ('SEQ', p['sequence']) if p.get('sequence') else ('UNIPROT', p.get('uniprot_id'))
+                for p in llm_proteins
+            }
+            for protein in rule_proteins:
+                key = ('SEQ', protein.get('sequence')) if protein.get('sequence') else ('UNIPROT', protein.get('uniprot_id'))
+                if key not in existing_keys:
+                    llm_proteins.append(protein)
+                    existing_keys.add(key)
+                    supplemented += 1
+            if supplemented:
+                supplements.append(f"{supplemented} proteins from rules")
+            merged['proteins'] = llm_proteins
+        else:
+            merged['proteins'] = []
         
         # Cross-validate and supplement target properties
         if not merged.get('target_properties') and rule_result.get('target_properties'):
@@ -446,6 +535,72 @@ Respond with valid JSON only.
         }
         return molecule_names.get(name.lower())
 
+    def _normalize_protein_list(self, proteins: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        """Normalize protein entries ensuring valid sequences/IDs and unique chain IDs."""
+
+        if not proteins:
+            return []
+
+        normalized: List[Dict[str, Any]] = []
+        seen_keys: set[tuple[str, str]] = set()
+
+        for protein in proteins:
+            if not isinstance(protein, dict):
+                continue
+
+            chain_id_raw = protein.get('chain_id')
+            if isinstance(chain_id_raw, list):
+                chain_id_raw = next((str(cid).strip() for cid in chain_id_raw if cid), None)
+            chain_id = str(chain_id_raw).strip() if chain_id_raw else None
+
+            sequence = protein.get('sequence')
+            if sequence:
+                sequence = ''.join(str(sequence).split()).upper()
+                if len(sequence) < 10 or not set(sequence) <= self.AMINO_ACIDS:
+                    sequence = None
+
+            uniprot_id = protein.get('uniprot_id')
+            if uniprot_id:
+                uniprot_id = str(uniprot_id).strip().upper()
+                if not re.fullmatch(r'[A-Z0-9\-]{5,12}', uniprot_id):
+                    uniprot_id = None
+
+            if not sequence and not uniprot_id:
+                continue
+
+            key = ('SEQ', sequence) if sequence else ('UNIPROT', uniprot_id or '')
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+
+            entry: Dict[str, Any] = {
+                'chain_id': chain_id,
+                'sequence': sequence,
+                'uniprot_id': uniprot_id,
+            }
+
+            for optional_key in ('msa', 'cyclic', 'modifications'):
+                if optional_key in protein:
+                    entry[optional_key] = protein[optional_key]
+
+            normalized.append(entry)
+
+        used_ids: set[str] = set()
+        for idx, entry in enumerate(normalized):
+            cid = entry.get('chain_id')
+            if not cid:
+                cid = chr(ord('A') + idx)
+            cid = str(cid)
+            base_cid = cid
+            suffix = 1
+            while cid in used_ids:
+                cid = f"{base_cid}{suffix}"
+                suffix += 1
+            entry['chain_id'] = cid
+            used_ids.add(cid)
+
+        return normalized
+
 def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
     """
     Extract arguments using hybrid LLM + rule-based approach.
@@ -469,9 +624,48 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
     # Update state with extracted arguments
     state.parsed_arguments = final_result
     state.starting_molecules = final_result.get('starting_molecules', [])
+
+    # Normalize and persist protein targets
+    raw_proteins = final_result.get('proteins', []) or []
+    validated_proteins: List[ProteinTarget] = []
+    serialized_proteins: List[Dict[str, Any]] = []
+
+    for idx, protein in enumerate(raw_proteins):
+        try:
+            protein_target = ProteinTarget(**protein)
+            validated_proteins.append(protein_target)
+            serialized_proteins.append(protein_target.model_dump(exclude_none=True))
+        except ValidationError as exc:
+            print(f"⚠️  Skipping protein target {idx} due to validation error: {exc}")
+
+    state.protein_targets = validated_proteins
+    final_result['proteins'] = serialized_proteins
     
     # Convert target properties to TargetProperty objects
-    if final_result.get('target_properties'):
+    target_dicts = final_result.get('target_properties', []) or []
+
+    if state.protein_targets:
+        has_affinity = any(
+            tp.get('property_name', '').lower() == 'binding_affinity'
+            for tp in target_dicts
+        )
+        if not has_affinity:
+            target_dicts.append({
+                'property_name': 'binding_affinity',
+                'optimization_mode': OptimizationMode.MAXIMIZE.value,
+                'bounds': extractor.PROPERTY_BOUNDS.get('binding_affinity'),
+                'transformation': 'LINEAR',
+                'weight': 0.0,
+                'source': 'auto_boltz'
+            })
+            final_result['target_properties'] = target_dicts
+            final_result.setdefault('auto_added_targets', []).append('binding_affinity')
+
+    if target_dicts:
+        equal_weight = 1.0 / len(target_dicts)
+        for target in target_dicts:
+            target['weight'] = equal_weight
+
         state.targets = [
             TargetProperty(
                 name=tp['property_name'],
@@ -479,9 +673,13 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
                 weight=tp['weight'],
                 bounds=tuple(tp['bounds']) if tp.get('bounds') else None,
                 transformation=tp.get('transformation')
-            ) for tp in final_result['target_properties']
+            ) for tp in target_dicts
         ]
-    
+    else:
+        state.targets = []
+
+    final_result['target_properties'] = target_dicts
+
     # Set molecule source
     if final_result.get('molecule_source'):
         state.molecule_source = MoleculeSource(final_result['molecule_source'])
@@ -496,7 +694,8 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
     
     confidence_details = {
         'overall_confidence': confidence,
-        'method': method
+        'method': method,
+        'proteins_detected': len(state.protein_targets)
     }
     
     if method == 'llm':
@@ -513,10 +712,20 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
     print(f"   Method: {method.upper()}")
     print(f"   Overall Confidence: {confidence:.2f}")
     if method == 'llm':
-        print(f"   LLM Self-Confidence: {confidence_details.get('llm_self_confidence', 'N/A')}")
-        print(f"   Extraction Quality: {confidence_details.get('extraction_quality', 'N/A'):.2f}")
+        llm_self_conf = confidence_details.get('llm_self_confidence')
+        print(f"   LLM Self-Confidence: {llm_self_conf if llm_self_conf is not None else 'N/A'}")
+        extraction_quality = confidence_details.get('extraction_quality')
+        if extraction_quality is not None:
+            print(f"   Extraction Quality: {extraction_quality:.2f}")
+        else:
+            print("   Extraction Quality: N/A")
     elif method == 'rule_based':
-        print(f"   Rule Confidence: {confidence_details.get('rule_confidence', 'N/A'):.2f}")
+        rule_confidence = confidence_details.get('rule_confidence')
+        if rule_confidence is not None:
+            print(f"   Rule Confidence: {rule_confidence:.2f}")
+        else:
+            print("   Rule Confidence: N/A")
+    print(f"   Proteins Detected: {confidence_details.get('proteins_detected', 0)}")
     
     state.log("extract_arguments_completed", {
         **final_result,
