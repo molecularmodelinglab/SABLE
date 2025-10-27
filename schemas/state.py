@@ -6,8 +6,8 @@ of the molecular optimization workflow as it flows through a LangGraph graph.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple, Callable
-from pydantic import BaseModel, Field, PrivateAttr
+from typing import Any, Dict, List, Optional, Tuple, Callable, Union
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 
 class OptimizationMode(str, Enum):
@@ -80,6 +80,65 @@ class ExperimentResult(BaseModel):
     )
 
 
+class ProteinTarget(BaseModel):
+    """Describes a protein chain target for affinity predictions."""
+
+    chain_id: Union[str, List[str]] = Field(
+        default="A",
+        description="Chain identifier(s) associated with this protein target.",
+    )
+    sequence: Optional[str] = Field(
+        default=None,
+        description="Amino acid sequence using single-letter codes.",
+    )
+    uniprot_id: Optional[str] = Field(
+        default=None,
+        description="UniProt accession identifier for fetching the protein sequence.",
+    )
+    msa: Optional[str] = Field(
+        default=None,
+        description="Optional path to a multiple sequence alignment file.",
+    )
+    cyclic: Optional[bool] = Field(
+        default=None,
+        description="Whether the protein chain should be treated as cyclic.",
+    )
+    modifications: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Post-translational or residue-level modifications.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_and_normalize(self) -> "ProteinTarget":
+        """Ensure either a sequence or UniProt ID is present and normalize values."""
+
+        if isinstance(self.chain_id, str):
+            self.chain_id = self.chain_id.strip() or "A"
+        else:
+            cleaned_ids = [cid.strip() for cid in self.chain_id if cid and cid.strip()]
+            self.chain_id = cleaned_ids or "A"
+
+        if self.sequence:
+            normalized_seq = "".join(self.sequence.split()).upper()
+            if normalized_seq:
+                allowed = set("ACDEFGHIKLMNPQRSTVWYBXZJUO")
+                if not set(normalized_seq) <= allowed:
+                    raise ValueError(
+                        "Protein sequences must contain valid amino-acid one-letter codes."
+                    )
+                self.sequence = normalized_seq
+            else:
+                self.sequence = None
+
+        if self.uniprot_id:
+            self.uniprot_id = self.uniprot_id.strip().upper()
+
+        if not (self.sequence or self.uniprot_id):
+            raise ValueError("ProteinTarget requires a sequence and/or UniProt ID.")
+
+        return self
+
+
 class WorkflowState(BaseModel):
     """
     The complete, self-contained state for the molecular optimization workflow.
@@ -125,6 +184,11 @@ class WorkflowState(BaseModel):
     experimental_results: List[ExperimentResult] = Field(default_factory=list)
     best_molecules: List[Tuple[str, float]] = Field(
         default_factory=list, description="Top molecules found so far (SMILES, score)."
+    )
+
+    protein_targets: List[ProteinTarget] = Field(
+        default_factory=list,
+        description="Protein chains provided for affinity predictions.",
     )
 
     # === Workflow Control & Status ===
