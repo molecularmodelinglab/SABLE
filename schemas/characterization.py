@@ -8,6 +8,7 @@ class CharacterizationTool(str, Enum):
     """Enumeration for the available molecular characterization tools."""
     RDKIT = "rdkit"
     STOPLIGHT = "stoplight"
+    BOLTZ = "boltz"
     COMBINED = "combined"    # Use both RDKit and Stoplight
     AUTO = "auto"          # Automatically decide the best tool
 
@@ -34,6 +35,12 @@ STOPLIGHT_PROPERTIES = {
     "redox_interference", "solubility_water", "thiol_interference"
 }
 
+BOLTZ_PROPERTIES = {"binding_affinity", "affinity"}
+
+PROPERTY_ALIASES = {
+    "affinity": "binding_affinity",
+}
+
 # Dictionary to map common aliases to standardized property names.
 # Format: "standardized_name": (RDKit internal name, Stoplight internal name)
 PROPERTY_MAPPINGS = {
@@ -53,6 +60,8 @@ PROPERTY_MAPPINGS = {
     "solubility": (None, "Solubility in Water (mg/L)"),
     "ring_count": ("Ring_Count", "Number of Rings"),
     "heavy_atoms": ("Heavy_Atom_Count", "Num Heavy Atoms"),
+    "binding_affinity": (None, None),
+    "affinity": (None, None),
 }
 
 
@@ -103,19 +112,24 @@ def determine_best_tool(properties: List[str]) -> CharacterizationTool:
     """
     normalized_props = {normalize_property_name(p) for p in properties}
 
+    requires_boltz = any(prop in BOLTZ_PROPERTIES for prop in normalized_props)
+    remaining_props = {prop for prop in normalized_props if prop not in BOLTZ_PROPERTIES}
+
     # Check if all requested properties can be fulfilled by RDKit.
     can_use_rdkit = all(
         p in RDKIT_PROPERTIES or (p in PROPERTY_MAPPINGS and PROPERTY_MAPPINGS[p][0])
-        for p in normalized_props
+        for p in remaining_props
     )
 
     # Check if all requested properties can be fulfilled by Stoplight.
     can_use_stoplight = all(
         p in STOPLIGHT_PROPERTIES or (p in PROPERTY_MAPPINGS and PROPERTY_MAPPINGS[p][1])
-        for p in normalized_props
+        for p in remaining_props
     )
 
     # Decision logic based on tool capabilities.
+    if not remaining_props and requires_boltz:
+        return CharacterizationTool.BOLTZ
     if can_use_rdkit:
         # Prefer RDKit if it can handle all properties, as it's local and faster.
         return CharacterizationTool.RDKIT
@@ -138,4 +152,5 @@ def normalize_property_name(prop: str) -> str:
     Returns:
         The normalized property name string.
     """
-    return prop.lower().replace(" ", "_").replace("-", "_")
+    normalized = prop.lower().replace(" ", "_").replace("-", "_")
+    return PROPERTY_ALIASES.get(normalized, normalized)
