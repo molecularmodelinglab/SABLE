@@ -206,10 +206,40 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                         affinity = info.get('affinity')
                         if affinity is None:
                             continue
+                        
+                        # Handle affinity as dict (Boltz returns multiple prediction values)
+                        if isinstance(affinity, dict):
+                            # Extract primary affinity value (use affinity_pred_value as primary metric)
+                            affinity_value = affinity.get('affinity_pred_value')
+                            if affinity_value is None:
+                                # Fallback to first numeric value if primary key not found
+                                for v in affinity.values():
+                                    if isinstance(v, (int, float)):
+                                        affinity_value = v
+                                        break
+                            if affinity_value is None:
+                                continue
+                        else:
+                            affinity_value = affinity
+                        
                         results.setdefault(ligand_id, {})
-                        results[ligand_id]['binding_affinity'] = float(affinity)
+                        results[ligand_id]['binding_affinity'] = float(affinity_value)
+                        
+                        # Store full affinity dict in metadata
+                        if isinstance(affinity, dict):
+                            results[ligand_id]['binding_affinity_details'] = affinity
+                        
                         if info.get('confidence') is not None:
-                            results[ligand_id]['binding_affinity_confidence'] = float(info['confidence'])
+                            confidence = info['confidence']
+                            # Handle confidence as dict
+                            if isinstance(confidence, dict):
+                                conf_value = confidence.get('confidence_score') or confidence.get('ptm')
+                                if conf_value is not None:
+                                    results[ligand_id]['binding_affinity_confidence'] = float(conf_value)
+                                results[ligand_id]['binding_affinity_confidence_details'] = confidence
+                            else:
+                                results[ligand_id]['binding_affinity_confidence'] = float(confidence)
+                        
                         boltz_metadata[ligand_id] = info
 
                     missing_affinity = set(ligands_map.keys()) - set(per_ligand.keys())
