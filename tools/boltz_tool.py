@@ -76,7 +76,7 @@ class BoltzTool(BaseTool):
 
     _base_url: str = PrivateAttr("")
     _api_token: str = PrivateAttr("")
-    _timeout: float = PrivateAttr(300.0)
+    _timeout: float = PrivateAttr(900.0)  # Default 15min for synchronous server
     _max_retries: int = PrivateAttr(1)
     _session: Optional[requests.Session] = PrivateAttr(default=None)
     _fetch_cif: bool = PrivateAttr(True)
@@ -90,7 +90,7 @@ class BoltzTool(BaseTool):
         self,
         base_url: Optional[str] = None,
         api_token: Optional[str] = None,
-        timeout: float = 300.0,
+        timeout: float = 900.0,  # Increased: server runs Boltz synchronously (up to 600s)
         max_retries: int = 1,
         session: Optional[requests.Session] = None,
         fetch_cif: bool = True,
@@ -130,9 +130,12 @@ class BoltzTool(BaseTool):
             except ValueError:
                 poll_attempts = None
 
-        self.latency_seconds = latency_seconds if latency_seconds is not None else 45.0
-        self.poll_interval = poll_interval if poll_interval is not None else 6.0
-        self.poll_attempts = poll_attempts if poll_attempts is not None else 8
+        # Enable polling by default now that server is async.
+        # Jobs return immediately with status="queued", then we poll for completion.
+        # Boltz calculations typically take 2-10 minutes per ligand depending on complexity.
+        self.latency_seconds = latency_seconds if latency_seconds is not None else 5.0
+        self.poll_interval = poll_interval if poll_interval is not None else 5.0
+        self.poll_attempts = poll_attempts if poll_attempts is not None else 120  # 10min total
 
         if not self.base_url or not self.api_token:
             raise ToolException("Missing BOLTZ_BASE_URL and/or BOLTZ_API_TOKEN configuration.")
@@ -233,7 +236,7 @@ class BoltzTool(BaseTool):
         try:
             print("Fetching UniProt sequence for ID:", uid)
             resp = self.session.get(url, timeout=timeout)
-            
+            print("UniProt response status:", resp.status_code)
         except Exception as e:
             raise ToolException(f"UniProt request failed for '{uid}': {e}")
         if resp.status_code != 200 or not resp.text:
@@ -270,7 +273,6 @@ class BoltzTool(BaseTool):
         url = self._build_url(path)
         headers = {
             "Authorization": f"Bearer {self.api_token}",
-            "Content-Type": "application/json",
         }
         try:
             resp = self.session.get(url, headers=headers, timeout=self.timeout)
@@ -293,29 +295,42 @@ class BoltzTool(BaseTool):
 
     def _maybe_wait_for_result(self, initial_payload: Dict[str, Any]) -> Dict[str, Any]:
         if initial_payload.get("affinity") is not None:
+            print("[BoltzTool] Received affinity in initial response, skipping poll.")
             return initial_payload
 
         job_id = initial_payload.get("job_id")
         last_payload = dict(initial_payload)
 
         if self.latency_seconds > 0:
+            print(
+                f"[BoltzTool] Waiting {self.latency_seconds}s before polling job {job_id or '<unknown>'}."
+            )
             time.sleep(self.latency_seconds)
 
         if not job_id or self.poll_attempts <= 0:
+            print("[BoltzTool] No job_id returned or polling disabled; returning last payload.")
             return last_payload
 
         for attempt in range(self.poll_attempts):
+            print(f"[BoltzTool] Poll attempt {attempt + 1}/{self.poll_attempts} for job {job_id}.")
             try:
                 refreshed = self._get_json(f"/jobs/{job_id}")
             except ToolException:
+                print(f"[BoltzTool] Poll attempt {attempt + 1} failed to fetch job {job_id} status.")
                 refreshed = None
 
             if isinstance(refreshed, dict):
                 last_payload.update({k: v for k, v in refreshed.items() if v is not None})
                 if last_payload.get("affinity") is not None:
+                    print(
+                        f"[BoltzTool] Affinity received on poll attempt {attempt + 1} for job {job_id}."
+                    )
                     break
 
             time.sleep(self.poll_interval)
+
+        if last_payload.get("affinity") is None:
+            print(f"[BoltzTool] Polling finished for job {job_id} without affinity result.")
 
         return last_payload
 
@@ -382,8 +397,14 @@ class BoltzTool(BaseTool):
         last_exc: Optional[Exception] = None
         while attempt <= self.max_retries:
             try:
-                resp = self.session.post(url, headers=headers, data=json.dumps(body), timeout=self.timeout)
+                payload_str = json.dumps(body)
+                print(
+                    f"[BoltzTool] POST {url} (attempt {attempt + 1}/{self.max_retries + 1}) "
+                    f"payload_len={len(payload_str)}"
+                )
+                resp = self.session.post(url, headers=headers, data=payload_str, timeout=self.timeout)
                 if resp.status_code // 100 == 2:
+                    print(f"[BoltzTool] POST {url} succeeded with status {resp.status_code}")
                     return resp.json()
                 try:
                     payload = resp.json()
@@ -395,6 +416,7 @@ class BoltzTool(BaseTool):
                 )
             except Exception as e:
                 last_exc = e
+                print(f"[BoltzTool] POST {url} failed on attempt {attempt + 1}: {e}")
                 if attempt == self.max_retries:
                     break
                 time.sleep(0.6 * (attempt + 1))
@@ -426,6 +448,7 @@ class BoltzTool(BaseTool):
 
         per_ligand: Dict[str, Any] = {}
         for ligand_id, smiles in data.ligands.items():
+            print(f"[BoltzTool] Preparing submission for ligand '{ligand_id}'.")
             yaml_text = self._affinity_yaml(
                 protein_sequences=protein_entries,
                 ligand_smiles=smiles,
@@ -433,20 +456,56 @@ class BoltzTool(BaseTool):
                 constraints=data.constraints,
                 templates=data.templates,
             )
+            print(
+                f"[BoltzTool] Submitting ligand '{ligand_id}' to /submit_yaml_text with chain '{ligand_chain_id}'."
+            )
             resp = self._post_json("/submit_yaml_text", {"yaml_text": yaml_text})
             if isinstance(resp, dict):
                 resp = self._maybe_wait_for_result(resp)
 
             saved_cif = self._download_cif_if_wanted(resp.get("cif_url"), job_id=resp.get("job_id", ""))
 
-            per_ligand[ligand_id] = {
-                "job_id": resp.get("job_id"),
+            job_id = resp.get("job_id")
+            affinity = resp.get("affinity")
+            confidence = resp.get("confidence")
+
+            print(
+                f"[BoltzTool] Completed ligand '{ligand_id}' job_id={job_id} "
+                f"affinity={affinity} confidence={confidence}"
+            )
+
+            entry: Dict[str, Any] = {
+                "job_id": job_id,
                 "outputs_dir": resp.get("outputs_dir"),
-                "affinity": resp.get("affinity"),
-                "confidence": resp.get("confidence"),
+                "affinity": affinity,
+                "confidence": confidence,
                 "cif_url": resp.get("cif_url"),
                 "cif_file": saved_cif,
             }
+
+            # If the service did not return an affinity score
+            if affinity is None:
+                # Try to gather a helpful server-side message from known keys
+                server_msg = None
+                for k in ("error", "message", "stderr", "stdout", "status"):
+                    v = resp.get(k) if isinstance(resp, dict) else None
+                    if v:
+                        server_msg = v
+                        break
+
+                payload_summary = {}
+                if isinstance(resp, dict):
+                    for k in ("job_id", "status", "outputs_dir", "cif_url"):
+                        if resp.get(k) is not None:
+                            payload_summary[k] = resp.get(k)
+
+                entry["error"] = (
+                    f"No affinity score returned for ligand '{ligand_id}'"
+                    f" (job_id={job_id}). Server message: {server_msg!r}."
+                    f" Payload summary: {json.dumps(payload_summary, ensure_ascii=False)}"
+                )
+
+            per_ligand[ligand_id] = entry
 
         return json.dumps(
             {"count": len(per_ligand), "base_url": self.base_url, "ligand_chain_id": ligand_chain_id, "per_ligand": per_ligand},
