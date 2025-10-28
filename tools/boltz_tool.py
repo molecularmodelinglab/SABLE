@@ -294,43 +294,57 @@ class BoltzTool(BaseTool):
             raise ToolException(f"Failed to parse JSON from {url}: {exc}")
 
     def _maybe_wait_for_result(self, initial_payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Poll for job completion. If affinity already present, return immediately.
+        Otherwise poll indefinitely until job completes or fails.
+        """
         if initial_payload.get("affinity") is not None:
             print("[BoltzTool] Received affinity in initial response, skipping poll.")
             return initial_payload
 
         job_id = initial_payload.get("job_id")
+        if not job_id:
+            print("[BoltzTool] No job_id returned; cannot poll.")
+            return initial_payload
+
         last_payload = dict(initial_payload)
 
         if self.latency_seconds > 0:
-            print(
-                f"[BoltzTool] Waiting {self.latency_seconds}s before polling job {job_id or '<unknown>'}."
-            )
+            print(f"[BoltzTool] Waiting {self.latency_seconds}s before polling job {job_id}.")
             time.sleep(self.latency_seconds)
 
-        if not job_id or self.poll_attempts <= 0:
-            print("[BoltzTool] No job_id returned or polling disabled; returning last payload.")
-            return last_payload
-
-        for attempt in range(self.poll_attempts):
-            print(f"[BoltzTool] Poll attempt {attempt + 1}/{self.poll_attempts} for job {job_id}.")
+        # Poll indefinitely until completion or failure
+        attempt = 0
+        while True:
+            attempt += 1
+            print(f"[BoltzTool] Poll attempt {attempt} for job {job_id}.")
+            
             try:
                 refreshed = self._get_json(f"/jobs/{job_id}")
-            except ToolException:
-                print(f"[BoltzTool] Poll attempt {attempt + 1} failed to fetch job {job_id} status.")
-                refreshed = None
+            except ToolException as e:
+                print(f"[BoltzTool] Poll attempt {attempt} failed to fetch job {job_id} status: {e}")
+                time.sleep(self.poll_interval)
+                continue
 
             if isinstance(refreshed, dict):
                 last_payload.update({k: v for k, v in refreshed.items() if v is not None})
-                if last_payload.get("affinity") is not None:
-                    print(
-                        f"[BoltzTool] Affinity received on poll attempt {attempt + 1} for job {job_id}."
-                    )
+                
+                status = last_payload.get("status")
+                
+                # Job completed successfully
+                if last_payload.get("affinity") is not None or status == "completed":
+                    print(f"[BoltzTool] Job {job_id} completed on attempt {attempt}.")
                     break
+                
+                # Job failed
+                if status == "failed":
+                    print(f"[BoltzTool] Job {job_id} failed: {last_payload.get('error')}")
+                    break
+                
+                # Still running, keep polling
+                print(f"[BoltzTool] Job {job_id} status: {status}, continuing to poll...")
 
             time.sleep(self.poll_interval)
-
-        if last_payload.get("affinity") is None:
-            print(f"[BoltzTool] Polling finished for job {job_id} without affinity result.")
 
         return last_payload
 
