@@ -15,6 +15,18 @@ from server.schemas.run import (
     RunInfo,
     RunList,
 )
+from server.schemas.conversation import (
+    ConversationState,
+    OptimizationMode,
+    TargetProperty,
+    ConversationContext,
+    ConversationStartRequest,
+    ConversationMessageRequest,
+    ConversationResponse,
+    ConversationConfirmRequest,
+    ConversationCreateRunResponse,
+    ConversationListResponse,
+)
 
 __all__ = [
     "LoginRequest",
@@ -28,4 +40,14 @@ __all__ = [
     "RunCreateRequest",
     "RunInfo",
     "RunList",
+    "ConversationState",
+    "OptimizationMode",
+    "TargetProperty",
+    "ConversationContext",
+    "ConversationStartRequest",
+    "ConversationMessageRequest",
+    "ConversationResponse",
+    "ConversationConfirmRequest",
+    "ConversationCreateRunResponse",
+    "ConversationListResponse",
 ]
