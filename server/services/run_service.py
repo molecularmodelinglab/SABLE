@@ -1,0 +1,309 @@
+"""Run service for managing optimization runs in the database."""
+
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+from sqlalchemy.orm import Session
+from sqlalchemy import desc
+
+from server.models.run import Run as RunModel, RunLog
+from server.schemas.run import RunInfo
+
+
+class RunService:
+    """Service for managing optimization runs."""
+
+    def create_run(
+        self,
+        db: Session,
+        run_id: str,
+        user_id: str,
+        prompt: str,
+        max_iterations: Optional[int] = None,
+        batch_size: Optional[int] = None,
+        note: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> RunModel:
+        """Create a new run in the database.
+
+        Args:
+            db: Database session
+            run_id: Unique run identifier
+            user_id: User UUID
+            prompt: Optimization prompt
+            max_iterations: Maximum iterations
+            batch_size: Batch size
+            note: Optional note
+            metadata: Additional metadata
+
+        Returns:
+            Created run model
+        """
+        run = RunModel(
+            id=run_id,
+            user_id=user_id,
+            prompt=prompt,
+            max_iterations=max_iterations,
+            batch_size=batch_size,
+            status="pending",
+            note=note,
+            metadata=metadata or {}
+        )
+
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+
+        return run
+
+    def get_run(
+        self,
+        db: Session,
+        run_id: str,
+        user_id: Optional[str] = None
+    ) -> Optional[RunModel]:
+        """Get a run by ID.
+
+        Args:
+            db: Database session
+            run_id: Run identifier
+            user_id: Optional user ID filter
+
+        Returns:
+            Run model or None
+        """
+        query = db.query(RunModel).filter(RunModel.id == run_id)
+
+        if user_id:
+            query = query.filter(RunModel.user_id == user_id)
+
+        return query.first()
+
+    def list_runs(
+        self,
+        db: Session,
+        user_id: str,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[RunModel]:
+        """List runs for a user.
+
+        Args:
+            db: Database session
+            user_id: User UUID
+            limit: Maximum number of runs to return
+            offset: Offset for pagination
+
+        Returns:
+            List of run models
+        """
+        return db.query(RunModel).filter(
+            RunModel.user_id == user_id
+        ).order_by(
+            desc(RunModel.created_at)
+        ).limit(limit).offset(offset).all()
+
+    def update_run_status(
+        self,
+        db: Session,
+        run_id: str,
+        status: str,
+        exit_reason: Optional[str] = None
+    ) -> Optional[RunModel]:
+        """Update run status.
+
+        Args:
+            db: Database session
+            run_id: Run identifier
+            status: New status
+            exit_reason: Optional exit reason
+
+        Returns:
+            Updated run model or None
+        """
+        run = db.query(RunModel).filter(RunModel.id == run_id).first()
+
+        if run:
+            run.status = status
+            run.updated_at = datetime.now()
+
+            if exit_reason:
+                run.exit_reason = exit_reason
+
+            if status == "completed":
+                run.completed_at = datetime.now()
+
+            db.commit()
+            db.refresh(run)
+
+        return run
+
+    def update_run_molecules(
+        self,
+        db: Session,
+        run_id: str,
+        starting_molecules: List[str]
+    ) -> Optional[RunModel]:
+        """Update run's starting molecules.
+
+        Args:
+            db: Database session
+            run_id: Run identifier
+            starting_molecules: List of SMILES strings
+
+        Returns:
+            Updated run model or None
+        """
+        run = db.query(RunModel).filter(RunModel.id == run_id).first()
+
+        if run:
+            run.starting_molecules = starting_molecules
+            run.updated_at = datetime.now()
+            db.commit()
+            db.refresh(run)
+
+        return run
+
+    def add_run_log(
+        self,
+        db: Session,
+        run_id: str,
+        level: str,
+        message: str,
+        data: Optional[Dict[str, Any]] = None,
+        node: Optional[str] = None,
+        iteration: Optional[int] = None
+    ) -> RunLog:
+        """Add a log entry for a run.
+
+        Args:
+            db: Database session
+            run_id: Run identifier
+            level: Log level (INFO, ERROR, etc.)
+            message: Log message
+            data: Additional log data
+            node: Node name
+            iteration: Iteration number
+
+        Returns:
+            Created log entry
+        """
+        log = RunLog(
+            run_id=run_id,
+            level=level,
+            message=message,
+            data=data or {},
+            node=node,
+            iteration=iteration
+        )
+
+        db.add(log)
+        db.commit()
+        db.refresh(log)
+
+        return log
+
+    def get_run_logs(
+        self,
+        db: Session,
+        run_id: str,
+        limit: Optional[int] = None,
+        level: Optional[str] = None
+    ) -> List[RunLog]:
+        """Get logs for a run.
+
+        Args:
+            db: Database session
+            run_id: Run identifier
+            limit: Optional limit
+            level: Optional level filter
+
+        Returns:
+            List of log entries
+        """
+        query = db.query(RunLog).filter(RunLog.run_id == run_id)
+
+        if level:
+            query = query.filter(RunLog.level == level)
+
+        query = query.order_by(RunLog.timestamp)
+
+        if limit:
+            query = query.limit(limit)
+
+        return query.all()
+
+    def run_to_info(
+        self,
+        run: RunModel,
+        summary_available: bool = False,
+        results_available: bool = False,
+        paths: Optional[Dict[str, str]] = None
+    ) -> RunInfo:
+        """Convert run model to RunInfo schema.
+
+        Args:
+            run: Run model
+            summary_available: Whether summary is available
+            results_available: Whether results are available
+            paths: File paths
+
+        Returns:
+            RunInfo schema
+        """
+        from server.models.user import User
+
+        # Get user info if available
+        username = None
+        if hasattr(run, 'user') and run.user:
+            username = run.user.username
+
+        return RunInfo(
+            id=run.id,
+            status=run.status,
+            created_at=run.created_at,
+            updated_at=run.updated_at,
+            exit_reason=run.exit_reason,
+            summary_available=summary_available,
+            results_available=results_available,
+            paths=paths or {},
+            note=run.note,
+            user_id=str(run.user_id),
+            username=username,
+            session_id=None,  # Deprecated
+            starting_molecules=run.starting_molecules or []
+        )
+
+    def delete_run(
+        self,
+        db: Session,
+        run_id: str,
+        user_id: str
+    ) -> bool:
+        """Delete a run.
+
+        Args:
+            db: Database session
+            run_id: Run identifier
+            user_id: User UUID (for authorization)
+
+        Returns:
+            True if deleted, False if not found
+        """
+        run = db.query(RunModel).filter(
+            RunModel.id == run_id,
+            RunModel.user_id == user_id
+        ).first()
+
+        if run:
+            # Delete associated logs
+            db.query(RunLog).filter(RunLog.run_id == run_id).delete()
+            # Delete run
+            db.delete(run)
+            db.commit()
+            return True
+
+        return False
+
+
+# Global run service instance
+run_service = RunService()
