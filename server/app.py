@@ -22,8 +22,12 @@ from server.experiment_logger import experiment_logger, ExperimentStatus, Experi
 from server.audit import audit_logger, AuditEventType, AuditSeverity
 from run_workflow import WorkflowRunner
 
-# Import and mount auth router
+# Import and mount routers
 from server.routers.auth import router as auth_router
+from server.routers.conversations import router as conversations_router
+
+# Import services
+from server.services.run_service import run_service
 
 
 app = FastAPI(
@@ -49,8 +53,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount authentication router
+# Mount routers
 app.include_router(auth_router)
+app.include_router(conversations_router)
 
 # In-memory storage (TODO: migrate to database in Phase 5)
 _RUNS: Dict[str, RunInfo] = {}
@@ -146,11 +151,16 @@ def _run_workflow_background(
     username: str
 ):
     """Run workflow in background."""
+    from server.database import get_db_context
+
     experiment = experiment_logger.get_experiment(experiment_id)
     if not experiment:
         return
 
     runner = WorkflowRunner(checkpoint_dir=str(run_dir(run_id) / "checkpoints"))
+
+    # Get database context for updates
+    db_context = get_db_context()
 
     # Mark experiment as started
     experiment.mark_started()
@@ -194,6 +204,12 @@ def _run_workflow_background(
                 normalized = [str(m) for m in starting]
             else:
                 normalized = [str(starting)]
+
+            # Update database
+            with db_context as db:
+                run_service.update_run_molecules(db, run_id, normalized)
+
+            # Update in-memory dict
             info = _RUNS.get(run_id)
             if info:
                 info.starting_molecules = normalized
@@ -231,7 +247,13 @@ def _run_workflow_background(
             s_path.write_text(state.summary)
             experiment.summary = state.summary
 
-        # Update run info
+        # Update database
+        with db_context as db:
+            run_service.update_run_status(db, run_id, str(state.status), state.exit_reason)
+            if starting_molecules:
+                run_service.update_run_molecules(db, run_id, starting_molecules)
+
+        # Update run info in memory
         info = _RUNS.get(run_id)
         if info:
             info.starting_molecules = starting_molecules
@@ -333,17 +355,26 @@ async def create_run(
     if note:
         (Path(paths["inputs"]) / "note.txt").write_text(note)
 
-    info = RunInfo(
-        id=run_id,
-        status="running",
-        created_at=datetime.now(),
-        updated_at=datetime.now(),
-        paths=paths,
-        note=note,
+    # Create run in database
+    run_model = run_service.create_run(
+        db=db,
+        run_id=run_id,
         user_id=str(current_user.id),
-        username=current_user.username,
-        starting_molecules=[],
+        prompt=req.prompt,
+        max_iterations=req.max_iterations,
+        batch_size=req.batch_size,
+        note=note,
+        metadata={"paths": paths}
     )
+
+    # Update status to running
+    run_service.update_run_status(db, run_id, "running")
+
+    # Create RunInfo for response
+    info = run_service.run_to_info(run_model, paths=paths)
+    info.username = current_user.username
+
+    # Keep in-memory dict for backward compatibility (temporary)
     _RUNS[run_id] = info
 
     # Create experiment record
@@ -386,13 +417,31 @@ async def create_run(
 
 
 @app.get("/runs", response_model=RunList)
-def list_runs(current_user: User = Depends(get_current_user)):
+def list_runs(
+    current_user: User = Depends(get_current_user),
+    db: DBSession = Depends(get_db),
+    limit: int = 100,
+    offset: int = 0
+):
     """List all runs for the current user."""
-    # Filter runs to only show user's own runs
-    user_runs = [
-        run for run in _RUNS.values()
-        if run.user_id == str(current_user.id)
-    ]
+    # Get runs from database
+    db_runs = run_service.list_runs(db, str(current_user.id), limit=limit, offset=offset)
+
+    # Convert to RunInfo
+    user_runs = []
+    for run_model in db_runs:
+        paths = run_model.metadata.get("paths", {}) if run_model.metadata else {}
+        info = run_service.run_to_info(
+            run_model,
+            summary_available=Path(summary_txt_path(run_model.id)).exists() if paths else False,
+            results_available=Path(results_json_path(run_model.id)).exists() if paths else False,
+            paths=paths
+        )
+        info.username = current_user.username
+        user_runs.append(info)
+
+        # Update in-memory dict for backward compatibility
+        _RUNS[run_model.id] = info
     return RunList(runs=sorted(user_runs, key=lambda r: r.created_at, reverse=True))
 
 
