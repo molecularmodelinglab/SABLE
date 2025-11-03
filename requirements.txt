@@ -26,7 +26,6 @@ greenlet==3.2.4
 grpcio==1.74.0
 grpcio-status==1.71.2
 h11==0.16.0
--e git+https://github.com/eneskelestemur/healer.git@b577947680d060a580756fc0cd7a1b8f317c9f31#egg=healer
 httpcore==1.0.9
 httplib2==0.30.0
 httpx==0.28.1
@@ -131,3 +130,13 @@ wheel==0.45.1
 xxhash==3.5.0
 zipp==3.23.0
 zstandard==0.24.0
+alembic==1.17.1
+psycopg2-binary==2.9.11
+asyncpg==0.30.0
+redis==7.0.1
+passlib==1.7.4
+bcrypt==3.2.2
+python-jose[cryptography]==3.5.0
+python-multipart==0.0.20
+email-validator==2.3.0
+authlib==1.6.5
