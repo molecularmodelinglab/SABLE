@@ -5,6 +5,23 @@ from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
+# Simple legacy schemas for backward compatibility
+class LoginRequest(BaseModel):
+    """Simple login request (legacy)."""
+    username: str
+    email: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class LoginResponse(BaseModel):
+    """Simple login response (legacy)."""
+    session_id: str
+    token: str
+    user_id: str
+    username: str
+    expires_at: datetime
+
+
 class UserRegisterRequest(BaseModel):
     """Request schema for user registration."""
 
