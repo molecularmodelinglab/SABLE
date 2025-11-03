@@ -67,7 +67,7 @@ class HybridArgumentExtractor:
         'fsp3': (0.0, 1.0),
         'cns_activity': (0.0, 1.0),
         'toxicity': (0.0, 1.0),
-        'binding_affinity': (0.0, 20.0),  # pIC50 scale
+        'binding_affinity': (-20, 20.0),
         'permeability': (0.0, 1000.0)  # nm/s
     }
 
