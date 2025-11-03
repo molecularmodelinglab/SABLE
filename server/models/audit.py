@@ -1,6 +1,6 @@
 """Audit event models for security and compliance tracking."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 import uuid
 
@@ -18,7 +18,7 @@ class AuditEvent(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
-    timestamp = Column(DateTime, nullable=False, default=datetime.now(datetime.timezone.utc), index=True)
+    timestamp = Column(DateTime, nullable=False, default=datetime.now(timezone.utc), index=True)
     event_type = Column(String(100), nullable=False, index=True)
     # Event types: USER_LOGIN, USER_LOGOUT, USER_REGISTER, EXPERIMENT_CREATED,
     # EXPERIMENT_STARTED, EXPERIMENT_COMPLETED, EXPERIMENT_FAILED,

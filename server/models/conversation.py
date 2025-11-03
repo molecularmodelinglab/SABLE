@@ -1,6 +1,6 @@
 """Conversation models for interactive dialogue-based optimization setup."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 import uuid
 
@@ -36,8 +36,8 @@ class Conversation(Base):
     #   "current_state": str  # conversation state
     # }
 
-    created_at = Column(DateTime, nullable=False, default=datetime.now(datetime.timezone.utc))
-    updated_at = Column(DateTime, nullable=False, default=datetime.now(datetime.timezone.utc), onupdate=datetime.now(datetime.timezone.utc))
+    created_at = Column(DateTime, nullable=False, default=datetime.now(timezone.utc))
+    updated_at = Column(DateTime, nullable=False, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
     completed_at = Column(DateTime, nullable=True)
 
     # Relationships
@@ -83,7 +83,7 @@ class ConversationMessage(Base):
     role = Column(String(20), nullable=False)  # 'user' or 'assistant'
     content = Column(Text, nullable=False)
 
-    metadata = Column(JSON, nullable=False, default=dict)
+    extra_metadata = Column(JSON, nullable=False, default=dict)
     # Can store: extracted_info, confidence, intent, etc.
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
@@ -106,6 +106,6 @@ class ConversationMessage(Base):
             "conversation_id": str(self.conversation_id),
             "role": self.role,
             "content": self.content,
-            "metadata": self.metadata,
+            "metadata": self.extra_metadata,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

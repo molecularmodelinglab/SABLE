@@ -1,6 +1,6 @@
 """Session models for authentication and session management."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import uuid
 
@@ -23,12 +23,12 @@ class Session(Base):
     ip_address = Column(INET, nullable=True)
     user_agent = Column(String, nullable=True)
 
-    created_at = Column(DateTime, nullable=False, default=datetime.now(datetime.timezone.utc))
-    last_activity = Column(DateTime, nullable=False, default=datetime.now(datetime.timezone.utc), onupdate=datetime.now(datetime.timezone.utc))
+    created_at = Column(DateTime, nullable=False, default=datetime.now(timezone.utc))
+    last_activity = Column(DateTime, nullable=False, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
     expires_at = Column(DateTime, nullable=False, index=True)
 
     is_active = Column(Boolean, nullable=False, default=True)
-    metadata = Column(JSON, nullable=False, default=dict)
+    extra_metadata = Column(JSON, nullable=False, default=dict)
 
     # Relationships
     user = relationship("User", back_populates="sessions")
@@ -66,7 +66,7 @@ class Session(Base):
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "is_active": self.is_active,
             "is_expired": self.is_expired(),
-            "metadata": self.metadata,
+            "extra_metadata": self.extra_metadata,
         }
 
 

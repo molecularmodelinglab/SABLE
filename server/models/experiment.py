@@ -1,6 +1,6 @@
 """Experiment models for scientific tracking and reproducibility."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 import uuid
 
@@ -41,11 +41,11 @@ class Experiment(Base):
     notes = Column(Text, nullable=True)
     parent_experiment_id = Column(String(100), nullable=True)
 
-    created_at = Column(DateTime, nullable=False, default=datetime.now(datetime.timezone.utc), index=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
 
-    metadata = Column(JSON, nullable=False, default=dict)
+    extra_metadata = Column(JSON, nullable=False, default=dict)
 
     # Relationships
     user = relationship("User", back_populates="experiments")
@@ -88,7 +88,7 @@ class Experiment(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
-            "metadata": self.metadata,
+            "metadata": self.extra_metadata,
         }
 
 
@@ -100,7 +100,7 @@ class ExperimentLog(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     experiment_id = Column(String(100), ForeignKey("experiments.id", ondelete="CASCADE"), nullable=False, index=True)
 
-    timestamp = Column(DateTime, nullable=False, default=datetime.now(datetime.timezone.utc), index=True)
+    timestamp = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
     level = Column(String(20), nullable=False, default="INFO", index=True)
     message = Column(Text, nullable=False)
     node = Column(String(100), nullable=True)
