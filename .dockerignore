@@ -4,6 +4,8 @@ __pycache__/
 *.pyo
 *.pyd
 *.pkl
+*.egg-info/
+**/*.egg-info/
 
 # VCS
 .git
