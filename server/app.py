@@ -8,7 +8,7 @@ import os
 import platform
 import subprocess
 
-from server.models import RunCreateRequest, RunInfo, RunList
+from server.schemas import RunCreateRequest, RunInfo, RunList
 from server.storage import ensure_run_dirs, results_json_path, summary_txt_path, run_dir
 from server.session import session_manager, Session
 from server.experiment_logger import experiment_logger, ExperimentStatus, ExperimentError
@@ -537,7 +537,7 @@ def get_logs(run_id: str, limit: int = Query(200, ge=1, le=2000), session: Sessi
 @app.post("/auth/login", response_model=Dict[str, Any])
 async def login(req: Dict[str, Any], request: Request):
     """Create a new session for a user."""
-    from server.models import LoginResponse
+    from server.schemas import LoginResponse
     
     username = req.get("username", f"user_{datetime.now().strftime('%Y%m%d%H%M%S')}")
     user_id = req.get("user_id", username)
