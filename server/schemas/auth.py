@@ -2,6 +2,7 @@
 
 from typing import Optional, Dict, Any
 from datetime import datetime
+from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
@@ -65,7 +66,7 @@ class UserLoginRequest(BaseModel):
 class UserResponse(BaseModel):
     """Response schema for user information."""
 
-    id: str = Field(..., description="User UUID")
+    id: UUID = Field(..., description="User UUID")
     email: str = Field(..., description="User email address")
     username: str = Field(..., description="Username")
     auth_provider: str = Field(..., description="Authentication provider (local, auth0)")
@@ -93,8 +94,8 @@ class UserResponse(BaseModel):
 class SessionResponse(BaseModel):
     """Response schema for session information."""
 
-    id: str = Field(..., description="Session UUID")
-    user_id: str = Field(..., description="User UUID")
+    id: UUID = Field(..., description="Session UUID")
+    user_id: UUID = Field(..., description="User UUID")
     created_at: datetime = Field(..., description="Session creation timestamp")
     last_activity: datetime = Field(..., description="Last activity timestamp")
     expires_at: datetime = Field(..., description="Session expiration timestamp")
