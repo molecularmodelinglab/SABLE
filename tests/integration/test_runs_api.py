@@ -74,25 +74,40 @@ class TestRunsEndpoints:
         assert "status" in data
         assert "prompt" in data
     
-    def test_get_run_unauthorized(self, client, auth_headers, another_user):
+    def test_get_run_unauthorized(self, client, auth_headers, another_user, db_session):
         """Test accessing another user's run (should fail)."""
         from server.models.run import Run
-        from server.database import get_db_context
+        from server.models.session import Session as SessionModel
+        from datetime import datetime, timedelta, timezone
+        
+        # Create a session for the other user
+        other_session = SessionModel(
+            user_id=another_user.id,
+            token="other-user-run-session-token",
+            ip_address=None,
+            user_agent="test-client",
+            created_at=datetime.now(timezone.utc),
+            last_activity=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            is_active=True
+        )
+        db_session.add(other_session)
+        db_session.flush()
         
         # Create run for another user
-        with get_db_context() as db:
-            other_run = Run(
-                id="other-run-123",
-                user_id=another_user.id,
-                prompt="Test",
-                status="pending",
-                max_iterations=10,
-                batch_size=5,
-                metadata={}
-            )
-            db.add(other_run)
-            db.commit()
-            other_run_id = other_run.id
+        other_run = Run(
+            id="other-run-123",
+            user_id=another_user.id,
+            session_id=other_session.id,
+            prompt="Test",
+            status="pending",
+            starting_molecules=["CC(=O)O"],
+            extra_metadata={"max_iterations": 10, "batch_size": 5}
+        )
+        db_session.add(other_run)
+        db_session.commit()
+        db_session.refresh(other_run)
+        other_run_id = other_run.id
         
         # Try to access with test_user's token
         response = client.get(

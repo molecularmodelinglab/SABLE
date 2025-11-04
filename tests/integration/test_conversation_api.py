@@ -58,23 +58,38 @@ class TestConversationEndpoints:
         assert "messages" in data
     
     def test_get_conversation_unauthorized(
-        self, client, auth_headers, test_conversation, another_user
+        self, client, auth_headers, test_conversation, another_user, db_session
     ):
         """Test accessing another user's conversation."""
         # Create conversation for another user
         from server.models.conversation import Conversation
-        from server.database import get_db_context
+        from server.models.session import Session as SessionModel
+        from datetime import datetime, timedelta, timezone
         
-        with get_db_context() as db:
-            other_conv = Conversation(
-                user_id=another_user.id,
-                state="greeting",
-                context={},
-                messages=[]
-            )
-            db.add(other_conv)
-            db.commit()
-            other_conv_id = other_conv.id
+        # Create a session for the other user
+        other_session = SessionModel(
+            user_id=another_user.id,
+            token="other-user-session-token",
+            ip_address=None,
+            user_agent="test-client",
+            created_at=datetime.now(timezone.utc),
+            last_activity=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            is_active=True
+        )
+        db_session.add(other_session)
+        db_session.flush()
+        
+        other_conv = Conversation(
+            user_id=another_user.id,
+            session_id=other_session.id,
+            status="active",
+            context={}
+        )
+        db_session.add(other_conv)
+        db_session.commit()
+        db_session.refresh(other_conv)
+        other_conv_id = other_conv.id
         
         # Try to access with test_user's token
         response = client.get(

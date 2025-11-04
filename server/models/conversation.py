@@ -50,6 +50,17 @@ class Conversation(Base):
         Index('idx_conversations_status', 'status'),
     )
 
+    # Property to provide backward compatibility with 'state' name used in API
+    @property
+    def state(self):
+        """Alias for status to match API schema."""
+        return self.status
+    
+    @state.setter
+    def state(self, value):
+        """Set status through state property."""
+        self.status = value
+
     def __repr__(self):
         return f"<Conversation(id={self.id}, user_id={self.user_id}, status={self.status})>"
 

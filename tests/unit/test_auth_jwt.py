@@ -17,8 +17,8 @@ class TestAccessToken:
     
     def test_create_access_token(self):
         """Test access token creation."""
-        user_id = "user-123"
-        token = create_access_token(user_id)
+        data = {"sub": "user@example.com", "user_id": "user-123"}
+        token = create_access_token(data)
         
         assert token is not None
         assert isinstance(token, str)
@@ -26,22 +26,23 @@ class TestAccessToken:
     
     def test_decode_access_token(self):
         """Test access token decoding."""
-        user_id = "user-123"
-        token = create_access_token(user_id)
+        data = {"sub": "user@example.com", "user_id": "user-123"}
+        token = create_access_token(data)
         
         payload = decode_token(token)
         
         assert payload is not None
-        assert payload["sub"] == user_id
+        assert payload["sub"] == "user@example.com"
+        assert payload["user_id"] == "user-123"
         assert payload["type"] == "access"
         assert "exp" in payload
     
     def test_access_token_with_custom_expiry(self):
         """Test access token with custom expiration."""
-        user_id = "user-123"
+        data = {"sub": "user@example.com", "user_id": "user-123"}
         expires_delta = timedelta(minutes=15)
         
-        token = create_access_token(user_id, expires_delta=expires_delta)
+        token = create_access_token(data, expires_delta=expires_delta)
         payload = decode_token(token)
         
         assert payload is not None
@@ -73,21 +74,21 @@ class TestRefreshToken:
     
     def test_create_refresh_token(self):
         """Test refresh token creation."""
-        user_id = "user-123"
-        token = create_refresh_token(user_id)
+        data = {"sub": "user@example.com", "user_id": "user-123"}
+        token = create_refresh_token(data)
         
         assert token is not None
         assert isinstance(token, str)
     
     def test_decode_refresh_token(self):
         """Test refresh token decoding."""
-        user_id = "user-123"
-        token = create_refresh_token(user_id)
+        data = {"sub": "user@example.com", "user_id": "user-123"}
+        token = create_refresh_token(data)
         
         payload = decode_token(token)
         
         assert payload is not None
-        assert payload["sub"] == user_id
+        assert payload["sub"] == "user@example.com"
         assert payload["type"] == "refresh"
 
 
@@ -119,8 +120,8 @@ class TestTokenExpiration:
     
     def test_token_not_expired(self):
         """Test that fresh token is not expired."""
-        user_id = "user-123"
-        token = create_access_token(user_id)
+        data = {"sub": "user@example.com", "user_id": "user-123"}
+        token = create_access_token(data)
         payload = decode_token(token)
         
         assert is_token_expired(payload) is False
@@ -129,8 +130,8 @@ class TestTokenExpiration:
         """Test expired token detection."""
         # Create token that expired 1 hour ago
         expires_delta = timedelta(hours=-1)
-        user_id = "user-123"
-        token = create_access_token(user_id, expires_delta=expires_delta)
+        data = {"sub": "user@example.com", "user_id": "user-123"}
+        token = create_access_token(data, expires_delta=expires_delta)
         payload = decode_token(token)
         
         assert is_token_expired(payload) is True
@@ -138,8 +139,8 @@ class TestTokenExpiration:
     def test_token_expiration_edge_case(self):
         """Test token expiring in 1 second."""
         expires_delta = timedelta(seconds=1)
-        user_id = "user-123"
-        token = create_access_token(user_id, expires_delta=expires_delta)
+        data = {"sub": "user@example.com", "user_id": "user-123"}
+        token = create_access_token(data, expires_delta=expires_delta)
         payload = decode_token(token)
         
         # Should not be expired yet
