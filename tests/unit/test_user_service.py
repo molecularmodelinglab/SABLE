@@ -16,7 +16,7 @@ class TestUserService:
         """Test user creation."""
         email = "newuser@example.com"
         username = "newuser"
-        password = "NewPassword123!"
+        password = "NewP@ssw0rd9!"
         
         user, error = user_service.create_user(
             db_session, email, username, password
@@ -33,7 +33,7 @@ class TestUserService:
     def test_create_user_duplicate_email(self, db_session, test_user):
         """Test creating user with duplicate email."""
         user, error = user_service.create_user(
-            db_session, test_user.email, "different", "Password123!"
+            db_session, test_user.email, "different", "P@ssw0rd9!"
         )
         
         assert user is None
@@ -43,7 +43,7 @@ class TestUserService:
     def test_create_user_duplicate_username(self, db_session, test_user):
         """Test creating user with duplicate username."""
         user, error = user_service.create_user(
-            db_session, "different@example.com", test_user.username, "Password123!"
+            db_session, "different@example.com", test_user.username, "P@ssw0rd9!"
         )
         
         assert user is None
@@ -143,7 +143,7 @@ class TestUserService:
     
     def test_change_password(self, db_session, test_user):
         """Test password change."""
-        new_password = "NewSecurePassword456!"
+        new_password = "N3wS3cur3!"
         
         user = user_service.change_password(
             db_session, test_user, new_password

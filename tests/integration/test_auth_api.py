@@ -17,11 +17,11 @@ class TestAuthRegistration:
             json={
                 "email": "newuser@example.com",
                 "username": "newuser",
-                "password": "SecurePassword123!"
+                "password": "S3cur3P@ss!"
             }
         )
         
-        assert response.status_code == 200
+        assert response.status_code == 201
         data = response.json()
         assert data["email"] == "newuser@example.com"
         assert data["username"] == "newuser"
@@ -36,7 +36,7 @@ class TestAuthRegistration:
             json={
                 "email": test_user.email,
                 "username": "different",
-                "password": "SecurePassword123!"
+                "password": "S3cur3P@ss!"
             }
         )
         
@@ -50,7 +50,7 @@ class TestAuthRegistration:
             json={
                 "email": "different@example.com",
                 "username": test_user.username,
-                "password": "SecurePassword123!"
+                "password": "S3cur3P@ss!"
             }
         )
         
@@ -78,7 +78,7 @@ class TestAuthRegistration:
             json={
                 "email": "not-an-email",
                 "username": "username",
-                "password": "SecurePassword123!"
+                "password": "S3cur3P@ss!"
             }
         )
         
@@ -114,7 +114,7 @@ class TestAuthLogin:
             "/auth/login",
             json={
                 "email": test_user.email,
-                "password": "WrongPassword123!"
+                "password": "WrongP@ssw0rd9!"
             }
         )
         
@@ -127,7 +127,7 @@ class TestAuthLogin:
             "/auth/login",
             json={
                 "email": "nonexistent@example.com",
-                "password": "Password123!"
+                "password": "P@ssw0rd9!"
             }
         )
         
@@ -139,7 +139,7 @@ class TestAuthLogin:
             "/auth/login",
             json={
                 "email": inactive_user.email,
-                "password": "InactivePassword123!"
+                "password": "InactiveP@ssw0rd9!"
             }
         )
         
@@ -156,7 +156,7 @@ class TestAuthLogin:
                 "/auth/login",
                 json={
                     "email": email,
-                    "password": "WrongPassword123!"
+                    "password": "WrongP@ssw0rd9!"
                 }
             )
         
@@ -165,7 +165,7 @@ class TestAuthLogin:
             "/auth/login",
             json={
                 "email": email,
-                "password": "WrongPassword123!"
+                "password": "WrongP@ssw0rd9!"
             }
         )
         
@@ -239,7 +239,7 @@ class TestPasswordChange:
             headers=auth_headers,
             json={
                 "current_password": test_user_data["password"],
-                "new_password": "NewSecurePassword456!"
+                "new_password": "N3wS3cur3!"
             }
         )
         
@@ -251,8 +251,8 @@ class TestPasswordChange:
             "/auth/change-password",
             headers=auth_headers,
             json={
-                "current_password": "WrongPassword123!",
-                "new_password": "NewSecurePassword456!"
+                "current_password": "WrongP@ssw0rd9!",
+                "new_password": "N3wS3cur3!"
             }
         )
         

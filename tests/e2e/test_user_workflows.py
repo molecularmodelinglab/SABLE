@@ -16,17 +16,17 @@ class TestCompleteUserJourney:
             json={
                 "email": "e2euser@example.com",
                 "username": "e2euser",
-                "password": "E2EPassword123!"
+                "password": "E2eUs3r!@#"
             }
         )
-        assert register_response.status_code == 200
+        assert register_response.status_code == 201
         
         # Step 2: Login
         login_response = client.post(
             "/auth/login",
             json={
                 "email": "e2euser@example.com",
-                "password": "E2EPassword123!"
+                "password": "E2eUs3r!@#"
             }
         )
         assert login_response.status_code == 200
@@ -110,12 +110,12 @@ class TestMultiUserIsolation:
             json={
                 "email": "usera@example.com",
                 "username": "usera",
-                "password": "PasswordA123!"
+                "password": "P@ssw0rdA!"
             }
         )
         login_a = client.post(
             "/auth/login",
-            json={"email": "usera@example.com", "password": "PasswordA123!"}
+            json={"email": "usera@example.com", "password": "P@ssw0rdA!"}
         )
         token_a = login_a.json()["access_token"]
         headers_a = {"Authorization": f"Bearer {token_a}"}
@@ -126,12 +126,12 @@ class TestMultiUserIsolation:
             json={
                 "email": "userb@example.com",
                 "username": "userb",
-                "password": "PasswordB123!"
+                "password": "P@ssw0rdB!"
             }
         )
         login_b = client.post(
             "/auth/login",
-            json={"email": "userb@example.com", "password": "PasswordB123!"}
+            json={"email": "userb@example.com", "password": "P@ssw0rdB!"}
         )
         token_b = login_b.json()["access_token"]
         headers_b = {"Authorization": f"Bearer {token_b}"}

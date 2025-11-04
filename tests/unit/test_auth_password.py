@@ -15,7 +15,7 @@ class TestPasswordHashing:
     
     def test_hash_password(self):
         """Test password hashing."""
-        password = "SecurePassword123!"
+        password = "S3cur3P@ss!"
         hashed = hash_password(password)
         
         assert hashed is not None
@@ -24,7 +24,7 @@ class TestPasswordHashing:
     
     def test_hash_password_different_hashes(self):
         """Test that same password generates different hashes (salt)."""
-        password = "SecurePassword123!"
+        password = "S3cur3P@ss!"
         hash1 = hash_password(password)
         hash2 = hash_password(password)
         
@@ -32,22 +32,22 @@ class TestPasswordHashing:
     
     def test_verify_password_correct(self):
         """Test password verification with correct password."""
-        password = "SecurePassword123!"
+        password = "S3cur3P@ss!"
         hashed = hash_password(password)
         
         assert verify_password(password, hashed) is True
     
     def test_verify_password_incorrect(self):
         """Test password verification with incorrect password."""
-        password = "SecurePassword123!"
-        wrong_password = "WrongPassword456!"
+        password = "S3cur3P@ss!"
+        wrong_password = "Wr0ngP@ss!"
         hashed = hash_password(password)
         
         assert verify_password(wrong_password, hashed) is False
     
     def test_verify_password_empty(self):
         """Test password verification with empty password."""
-        hashed = hash_password("SecurePassword123!")
+        hashed = hash_password("S3cur3P@ss!")
         
         assert verify_password("", hashed) is False
 
@@ -57,7 +57,7 @@ class TestPasswordStrength:
     
     def test_valid_strong_password(self):
         """Test validation of strong password."""
-        password = "SecurePassword123!"
+        password = "S3cur3P@ss!"
         is_valid, message = validate_password_strength(password)
         
         assert is_valid is True
@@ -73,7 +73,7 @@ class TestPasswordStrength:
     
     def test_password_no_uppercase(self):
         """Test password without uppercase letter."""
-        password = "password123!"
+        password = "p@ssw0rd!"
         is_valid, message = validate_password_strength(password)
         
         assert is_valid is False
@@ -81,7 +81,7 @@ class TestPasswordStrength:
     
     def test_password_no_lowercase(self):
         """Test password without lowercase letter."""
-        password = "PASSWORD123!"
+        password = "P@SSW0RD!"
         is_valid, message = validate_password_strength(password)
         
         assert is_valid is False
@@ -105,7 +105,7 @@ class TestPasswordStrength:
     
     def test_password_common_pattern_sequential(self):
         """Test password with sequential numbers."""
-        password = "Password123456!"
+        password = "P@ssw0rd89!"
         is_valid, message = validate_password_strength(password)
         
         assert is_valid is False
@@ -121,7 +121,7 @@ class TestPasswordStrength:
     
     def test_password_common_word(self):
         """Test password with common word."""
-        password = "Password123!"
+        password = "P@ssw0rd9!"
         is_valid, message = validate_password_strength(password)
         
         assert is_valid is False
