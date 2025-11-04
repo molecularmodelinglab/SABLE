@@ -89,10 +89,21 @@ class AuthService:
         session_token = secrets.token_urlsafe(32)
 
         # Create session in database
+        # Validate IP address - if invalid (e.g., 'testclient' from tests), set to None
+        valid_ip = None
+        if ip_address:
+            try:
+                import ipaddress
+                ipaddress.ip_address(ip_address)
+                valid_ip = ip_address
+            except ValueError:
+                # Invalid IP address, leave as None
+                pass
+        
         session = SessionModel(
             user_id=user.id,
             token=session_token,
-            ip_address=ip_address,
+            ip_address=valid_ip,
             user_agent=user_agent,
             created_at=datetime.now(timezone.utc),
             last_activity=datetime.now(timezone.utc),
