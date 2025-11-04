@@ -61,7 +61,7 @@ class TestPasswordStrength:
         is_valid, message = validate_password_strength(password)
         
         assert is_valid is True
-        assert message is None
+        assert message == ""  # Empty string for valid password
     
     def test_password_too_short(self):
         """Test password that's too short."""
