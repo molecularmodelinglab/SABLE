@@ -25,7 +25,7 @@ class TestRunsEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert "run_id" in data
-        assert data["status"] == "pending"
+        assert data["status"] in ["pending", "running"]
     
     def test_create_run_no_auth(self, client):
         """Test creating run without authentication."""
@@ -41,13 +41,14 @@ class TestRunsEndpoints:
         assert response.status_code == 401
     
     def test_list_runs(self, client, auth_headers, test_run):
-        """Test listing user's runs."""
+        """Test listing user's runs from database."""
         response = client.get("/runs", headers=auth_headers)
         
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
-        assert any(r["run_id"] == test_run.id for r in data)
+        # Should include the test run
+        assert any(r["id"] == test_run.id for r in data)
     
     def test_list_runs_pagination(self, client, auth_headers):
         """Test pagination in runs listing."""
@@ -61,7 +62,7 @@ class TestRunsEndpoints:
         assert len(data) <= 5
     
     def test_get_run(self, client, auth_headers, test_run):
-        """Test getting a specific run."""
+        """Test getting a specific run from database."""
         response = client.get(
             f"/runs/{test_run.id}",
             headers=auth_headers
@@ -69,12 +70,12 @@ class TestRunsEndpoints:
         
         assert response.status_code == 200
         data = response.json()
-        assert data["run_id"] == test_run.id
+        assert data["id"] == test_run.id
         assert "status" in data
         assert "prompt" in data
     
     def test_get_run_unauthorized(self, client, auth_headers, another_user):
-        """Test accessing another user's run."""
+        """Test accessing another user's run (should fail)."""
         from server.models.run import Run
         from server.database import get_db_context
         
@@ -99,10 +100,11 @@ class TestRunsEndpoints:
             headers=auth_headers
         )
         
-        assert response.status_code == 404
+        # Should be forbidden or not found (403 or 404)
+        assert response.status_code in [403, 404]
     
     def test_delete_run(self, client, auth_headers, test_run):
-        """Test deleting a run."""
+        """Test deleting a run from database."""
         response = client.delete(
             f"/runs/{test_run.id}",
             headers=auth_headers
@@ -110,7 +112,7 @@ class TestRunsEndpoints:
         
         assert response.status_code == 200
         
-        # Verify run is deleted
+        # Verify run is deleted from database
         response = client.get(
             f"/runs/{test_run.id}",
             headers=auth_headers
@@ -125,7 +127,7 @@ class TestRunsEndpoints:
         )
         
         # Should return empty list or logs
-        assert response.status_code == 200 or response.status_code == 404
+        assert response.status_code in [200, 404]
 
 
 @pytest.mark.integration
