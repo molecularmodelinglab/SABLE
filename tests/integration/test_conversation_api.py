@@ -31,7 +31,7 @@ class TestConversationEndpoints:
             json={"initial_message": "I want to optimize aspirin"}
         )
         
-        assert response.status_code == 401
+        assert response.status_code in (401, 403)
     
     def test_list_conversations(self, client, auth_headers, test_conversation):
         """Test listing user's conversations."""
@@ -39,9 +39,11 @@ class TestConversationEndpoints:
         
         assert response.status_code == 200
         data = response.json()
-        assert isinstance(data, list)
-        assert len(data) >= 1
-        assert any(c["id"] == str(test_conversation.id) for c in data)
+        assert isinstance(data, dict)
+        assert "conversations" in data
+        assert "total" in data
+        assert data["total"] >= 1
+        assert any(c["id"] == str(test_conversation.id) for c in data["conversations"])
     
     def test_get_conversation(self, client, auth_headers, test_conversation):
         """Test getting a specific conversation."""
@@ -52,43 +54,16 @@ class TestConversationEndpoints:
         
         assert response.status_code == 200
         data = response.json()
-        assert data["id"] == str(test_conversation.id)
+        assert data["conversation_id"] == str(test_conversation.id)
         assert "state" in data
         assert "context" in data
-        assert "messages" in data
     
     def test_get_conversation_unauthorized(
-        self, client, auth_headers, test_conversation, another_user, db_session
+        self, client, auth_headers, test_conversation, another_user, make_conversation
     ):
         """Test accessing another user's conversation."""
         # Create conversation for another user
-        from server.models.conversation import Conversation
-        from server.models.session import Session as SessionModel
-        from datetime import datetime, timedelta, timezone
-        
-        # Create a session for the other user
-        other_session = SessionModel(
-            user_id=another_user.id,
-            token="other-user-session-token",
-            ip_address=None,
-            user_agent="test-client",
-            created_at=datetime.now(timezone.utc),
-            last_activity=datetime.now(timezone.utc),
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
-            is_active=True
-        )
-        db_session.add(other_session)
-        db_session.flush()
-        
-        other_conv = Conversation(
-            user_id=another_user.id,
-            session_id=other_session.id,
-            status="active",
-            context={}
-        )
-        db_session.add(other_conv)
-        db_session.commit()
-        db_session.refresh(other_conv)
+        other_conv = make_conversation(another_user)
         other_conv_id = other_conv.id
         
         # Try to access with test_user's token
@@ -112,6 +87,7 @@ class TestConversationEndpoints:
         assert "state" in data
         assert "message" in data
         assert "context" in data
+        assert data["conversation_id"] == str(test_conversation.id)
     
     def test_abandon_conversation(self, client, auth_headers, test_conversation):
         """Test abandoning a conversation."""

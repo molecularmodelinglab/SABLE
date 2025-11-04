@@ -7,10 +7,15 @@ all necessary information for starting an optimization run.
 import json
 import re
 from typing import Optional, Tuple, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 from sqlalchemy.orm import Session
 
-from server.models.conversation import Conversation as ConversationModel
+from server.models.conversation import (
+    Conversation as ConversationModel,
+    ConversationMessage,
+)
+from server.models.session import Session as SessionModel
 from server.schemas.conversation import (
     ConversationState,
     ConversationContext,
@@ -33,7 +38,7 @@ class ConversationService:
     def start_conversation(
         self,
         db: Session,
-        user_id: str,
+        user_id,
         initial_message: Optional[str] = None
     ) -> Tuple[ConversationModel, str, List[str]]:
         """Start a new conversation.
@@ -46,26 +51,54 @@ class ConversationService:
         Returns:
             Tuple of (conversation, response_message, suggestions)
         """
+        # Ensure we have an active session to associate
+        session = db.query(SessionModel).filter(
+            SessionModel.user_id == user_id,
+            SessionModel.is_active == True
+        ).order_by(SessionModel.created_at.desc()).first()
+
+        now = datetime.now(timezone.utc)
+        if not session:
+            session = SessionModel(
+                user_id=user_id,
+                token=f"conv-session-{uuid4().hex}",
+                ip_address=None,
+                user_agent="conversation-service",
+                created_at=now,
+                last_activity=now,
+                expires_at=now + timedelta(hours=24),
+                is_active=True,
+                extra_metadata={"source": "conversation_service"},
+            )
+            db.add(session)
+            db.flush()
+
         # Create conversation
         conversation = ConversationModel(
             user_id=user_id,
-            state=ConversationState.GREETING,
+            session_id=session.id,
+            status=ConversationState.GREETING.value,
             context=ConversationContext().model_dump()
         )
         db.add(conversation)
-        db.commit()
-        db.refresh(conversation)
+        db.flush()
 
         # Parse initial message if provided
         if initial_message:
             context = ConversationContext(**conversation.context)
             context, new_state = self._parse_initial_message(initial_message, context)
             conversation.context = context.model_dump()
-            conversation.state = new_state
-            db.commit()
+            conversation.state = new_state.value
 
         # Generate response
-        message, suggestions = self._generate_response(conversation.state, conversation.context)
+        conversation.updated_at = now
+        db.commit()
+        db.refresh(conversation)
+
+        message, suggestions = self._generate_response(
+            ConversationState(conversation.state),
+            conversation.context
+        )
 
         return conversation, message, suggestions
 
@@ -88,35 +121,37 @@ class ConversationService:
         context = ConversationContext(**conversation.context)
         current_state = ConversationState(conversation.state)
 
+        # Record user message
+        user_message = ConversationMessage(
+            conversation_id=conversation.id,
+            role="user",
+            content=message,
+            extra_metadata={},
+        )
+        db.add(user_message)
+
         # Parse message based on current state
         context, new_state = self._parse_message(message, context, current_state)
 
         # Update conversation
         conversation.context = context.model_dump()
-        conversation.state = new_state
-        conversation.updated_at = datetime.now()
-
-        # Add message to history
-        if not conversation.message_history:
-            conversation.message_history = []
-        conversation.message_history.append({
-            "role": "user",
-            "message": message,
-            "timestamp": datetime.now().isoformat()
-        })
-
-        db.commit()
+        conversation.state = new_state.value
+        conversation.updated_at = datetime.now(timezone.utc)
 
         # Generate response
-        response, suggestions = self._generate_response(new_state, context.model_dump())
+        response, suggestions = self._generate_response(new_state, conversation.context)
 
-        # Add system response to history
-        conversation.message_history.append({
-            "role": "system",
-            "message": response,
-            "timestamp": datetime.now().isoformat()
-        })
+        # Record assistant response
+        assistant_message = ConversationMessage(
+            conversation_id=conversation.id,
+            role="assistant",
+            content=response,
+            extra_metadata={},
+        )
+        db.add(assistant_message)
+
         db.commit()
+        db.refresh(conversation)
 
         return response, new_state, suggestions
 

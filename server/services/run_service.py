@@ -16,12 +16,13 @@ class RunService:
         self,
         db: Session,
         run_id: str,
-        user_id: str,
+        user_id,
+        session_id,
         prompt: str,
-        max_iterations: Optional[int] = None,
-        batch_size: Optional[int] = None,
+        starting_molecules: Optional[List[str]] = None,
         note: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        extra_metadata: Optional[Dict[str, Any]] = None,
+        status: str = "pending"
     ) -> RunModel:
         """Create a new run in the database.
 
@@ -41,12 +42,14 @@ class RunService:
         run = RunModel(
             id=run_id,
             user_id=user_id,
+            session_id=session_id,
             prompt=prompt,
-            max_iterations=max_iterations,
-            batch_size=batch_size,
-            status="pending",
+            status=status,
             note=note,
-            metadata=metadata or {}
+            starting_molecules=starting_molecules or [],
+            summary_available=False,
+            results_available=False,
+            extra_metadata=extra_metadata or {}
         )
 
         db.add(run)
@@ -257,6 +260,8 @@ class RunService:
         if hasattr(run, 'user') and run.user:
             username = run.user.username
 
+        metadata = run.extra_metadata if isinstance(run.extra_metadata, dict) else {}
+
         return RunInfo(
             id=run.id,
             status=run.status,
@@ -265,7 +270,7 @@ class RunService:
             exit_reason=run.exit_reason,
             summary_available=summary_available,
             results_available=results_available,
-            paths=paths or {},
+            paths=paths or metadata.get("paths", {}),
             note=run.note,
             user_id=str(run.user_id),
             username=username,

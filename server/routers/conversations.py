@@ -94,9 +94,9 @@ async def list_conversations(
                 {
                     "id": str(c.id),
                     "state": c.state,
-                    "created_at": c.created_at.isoformat(),
-                    "updated_at": c.updated_at.isoformat(),
-                    "run_id": c.run_id
+                    "created_at": c.created_at.isoformat() if c.created_at else None,
+                    "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+                    "run_id": getattr(c, "run_id", None)
                 }
                 for c in conversations
             ],

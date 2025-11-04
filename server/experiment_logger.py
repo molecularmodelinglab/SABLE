@@ -4,6 +4,7 @@ Tracks all experiments, prompts, results, errors, and user actions to ensure
 full auditability and reproducibility of scientific workflows.
 """
 
+import os
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from enum import Enum
@@ -193,7 +194,8 @@ class ExperimentLogger:
     """Manages experiment logging and persistence."""
     
     def __init__(self, data_root: Optional[Path] = None):
-        self.data_root = data_root or Path("data")
+        default_root = Path(os.getenv("LIZARD_DATA_ROOT", "data"))
+        self.data_root = data_root or default_root
         self.experiments_dir = self.data_root / "experiments"
         self.experiments_dir.mkdir(parents=True, exist_ok=True)
         
