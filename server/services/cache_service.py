@@ -202,6 +202,146 @@ class CacheService:
             print(f"Error invalidating user: {e}")
             return False
 
+    # ==================== Run Caching ====================
+
+    def cache_run(self, run_id: str, run_data: Dict[str, Any], ttl_minutes: int = 10) -> bool:
+        """
+        Cache complete run information.
+
+        Args:
+            run_id: Run identifier
+            run_data: Complete run information
+            ttl_minutes: Time to live in minutes
+
+        Returns:
+            True if cached successfully
+        """
+        if not self.is_connected():
+            return False
+
+        try:
+            key = f"run:{run_id}"
+            value = json.dumps(run_data, default=str)
+            ttl = timedelta(minutes=ttl_minutes)
+            self.redis.setex(key, ttl, value)
+            return True
+        except RedisError as e:
+            print(f"Error caching run: {e}")
+            return False
+
+    def get_cached_run(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve cached run information.
+
+        Args:
+            run_id: Run identifier
+
+        Returns:
+            Run data if found, None otherwise
+        """
+        if not self.is_connected():
+            return None
+
+        try:
+            key = f"run:{run_id}"
+            value = self.redis.get(key)
+            if value:
+                return json.loads(value)
+            return None
+        except (RedisError, json.JSONDecodeError) as e:
+            print(f"Error retrieving cached run: {e}")
+            return None
+
+    def invalidate_run(self, run_id: str) -> bool:
+        """
+        Remove run from cache.
+
+        Args:
+            run_id: Run identifier
+
+        Returns:
+            True if deleted
+        """
+        if not self.is_connected():
+            return False
+
+        try:
+            key = f"run:{run_id}"
+            self.redis.delete(key)
+            return True
+        except RedisError as e:
+            print(f"Error invalidating run cache: {e}")
+            return False
+
+    def cache_user_runs_list(self, user_id: str, runs_data: List[Dict[str, Any]], ttl_minutes: int = 5) -> bool:
+        """
+        Cache user's runs list.
+
+        Args:
+            user_id: User UUID
+            runs_data: List of run data
+            ttl_minutes: Time to live in minutes
+
+        Returns:
+            True if cached successfully
+        """
+        if not self.is_connected():
+            return False
+
+        try:
+            key = f"user:{user_id}:runs"
+            value = json.dumps(runs_data, default=str)
+            ttl = timedelta(minutes=ttl_minutes)
+            self.redis.setex(key, ttl, value)
+            return True
+        except RedisError as e:
+            print(f"Error caching user runs list: {e}")
+            return False
+
+    def get_cached_user_runs_list(self, user_id: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        Retrieve cached user runs list.
+
+        Args:
+            user_id: User UUID
+
+        Returns:
+            List of run data if found, None otherwise
+        """
+        if not self.is_connected():
+            return None
+
+        try:
+            key = f"user:{user_id}:runs"
+            value = self.redis.get(key)
+            if value:
+                return json.loads(value)
+            return None
+        except (RedisError, json.JSONDecodeError) as e:
+            print(f"Error retrieving cached user runs list: {e}")
+            return None
+
+    def invalidate_user_runs_list(self, user_id: str) -> bool:
+        """
+        Invalidate cached user runs list.
+
+        Args:
+            user_id: User UUID
+
+        Returns:
+            True if deleted
+        """
+        if not self.is_connected():
+            return False
+
+        try:
+            key = f"user:{user_id}:runs"
+            self.redis.delete(key)
+            return True
+        except RedisError as e:
+            print(f"Error invalidating user runs list: {e}")
+            return False
+
     # ==================== Run Status Caching ====================
 
     def cache_run_status(self, run_id: str, status_data: Dict[str, Any], ttl_minutes: int = 5) -> bool:

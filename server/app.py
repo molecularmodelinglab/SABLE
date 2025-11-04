@@ -246,10 +246,20 @@ async def health_check(db: DBSession = Depends(get_db)):
     # Check Redis
     redis_healthy = cache_service.is_connected()
 
+    # Count active runs from database
+    active_runs_count = 0
+    try:
+        from server.models.run import Run as RunModel
+        active_runs_count = db.query(RunModel).filter(
+            RunModel.status == "running"
+        ).count()
+    except Exception:
+        pass
+
     return {
         "status": "healthy" if (db_healthy and redis_healthy) else "degraded",
         "timestamp": datetime.now().isoformat(),
         "database": "connected" if db_healthy else "disconnected",
         "redis": "connected" if redis_healthy else "disconnected",
-        "active_runs": len([r for r in _RUNS.values() if r.status == "running"]),
+        "active_runs": active_runs_count,
     }

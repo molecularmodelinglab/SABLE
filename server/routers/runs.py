@@ -18,14 +18,14 @@ from server.auth.dependencies import get_current_user, get_current_active_user
 from server.schemas import RunCreateRequest, RunInfo, RunList
 from server.storage import ensure_run_dirs, results_json_path, summary_txt_path, run_dir
 from server.services.run_service import run_service
+from server.services.cache_service import cache_service
 from server.experiment_logger import experiment_logger, ExperimentError
 from server.audit import audit_logger, AuditEventType, AuditSeverity
 from run_workflow import WorkflowRunner
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
-# In-memory storage (TODO: fully migrate to database)
-_RUNS: Dict[str, RunInfo] = {}
+# Subscribers for Server-Sent Events
 _SUBSCRIBERS: Dict[str, list[Callable[[Dict[str, Any]], None]]] = {}
 
 
@@ -62,6 +62,8 @@ def check_run_authorization(run_id: str, user: User, db: DBSession) -> RunInfo:
     """
     Check if user has access to a run.
 
+    Uses Redis cache with database fallback for performance.
+
     Args:
         run_id: Run identifier
         user: Current authenticated user
@@ -73,41 +75,46 @@ def check_run_authorization(run_id: str, user: User, db: DBSession) -> RunInfo:
     Raises:
         HTTPException: If not authorized
     """
-    # Try in-memory cache first
-    info = _RUNS.get(run_id)
-
-    # If not in cache, try database
-    if not info:
-        run_model = run_service.get_run(db, run_id, str(user.id))
-        if run_model:
-            paths = run_model.metadata.get("paths", {}) if run_model.metadata else {}
-            info = run_service.run_to_info(
-                run_model,
-                summary_available=Path(summary_txt_path(run_model.id)).exists() if paths else False,
-                results_available=Path(results_json_path(run_model.id)).exists() if paths else False,
-                paths=paths
-            )
+    # Try cache first for performance
+    cached_run = cache_service.get_cached_run(run_id)
+    if cached_run:
+        # Verify user ownership from cache
+        if cached_run.get("user_id") == str(user.id):
+            # Convert dict back to RunInfo
+            info = RunInfo(**cached_run)
             info.username = user.username
-            # Cache it
-            _RUNS[run_id] = info
+            return info
+        else:
+            # Unauthorized access attempt
+            audit_logger.log(
+                event_type=AuditEventType.UNAUTHORIZED_ACCESS,
+                message=f"User {user.username} attempted to access run {run_id}",
+                user_id=str(user.id),
+                username=user.username,
+                run_id=run_id,
+                severity=AuditSeverity.WARNING,
+                success=False,
+                details={"owner_user_id": cached_run.get("user_id")}
+            )
+            raise HTTPException(403, "Access denied: You can only access your own runs")
 
-    if not info:
+    # Cache miss - fetch from database
+    run_model = run_service.get_run(db, run_id, str(user.id))
+    if not run_model:
         raise HTTPException(404, "Run not found")
 
-    # Check if user owns this run
-    if info.user_id != str(user.id):
-        # Log unauthorized access attempt
-        audit_logger.log(
-            event_type=AuditEventType.UNAUTHORIZED_ACCESS,
-            message=f"User {user.username} attempted to access run {run_id}",
-            user_id=str(user.id),
-            username=user.username,
-            run_id=run_id,
-            severity=AuditSeverity.WARNING,
-            success=False,
-            details={"owner_user_id": info.user_id}
-        )
-        raise HTTPException(403, "Access denied: You can only access your own runs")
+    # Convert to RunInfo
+    paths = run_model.metadata.get("paths", {}) if run_model.metadata else {}
+    info = run_service.run_to_info(
+        run_model,
+        summary_available=Path(summary_txt_path(run_model.id)).exists() if paths else False,
+        results_available=Path(results_json_path(run_model.id)).exists() if paths else False,
+        paths=paths
+    )
+    info.username = user.username
+
+    # Cache for future requests
+    cache_service.cache_run(run_id, info.model_dump())
 
     return info
 
@@ -193,11 +200,9 @@ def _run_workflow_background(
             with db_context as db:
                 run_service.update_run_molecules(db, run_id, normalized)
 
-            # Update in-memory dict
-            info = _RUNS.get(run_id)
-            if info:
-                info.starting_molecules = normalized
-                info.updated_at = datetime.now()
+            # Invalidate cache since run data changed
+            cache_service.invalidate_run(run_id)
+            cache_service.invalidate_user_runs_list(user_id)
 
     try:
         # Run the workflow
@@ -237,20 +242,15 @@ def _run_workflow_background(
             if starting_molecules:
                 run_service.update_run_molecules(db, run_id, starting_molecules)
 
-        # Update run info in memory
-        info = _RUNS.get(run_id)
-        if info:
-            info.starting_molecules = starting_molecules
-            info.status = str(state.status)
-            info.exit_reason = state.exit_reason
-            info.updated_at = datetime.now()
-            info.summary_available = state.summary is not None
-            info.results_available = results_path.exists()
-            _append_log(run_id, {
-                "timestamp": datetime.now().isoformat(),
-                "message": f"Workflow completed with status {state.status}",
-                "level": "INFO",
-            })
+        # Invalidate cache since run data changed
+        cache_service.invalidate_run(run_id)
+        cache_service.invalidate_user_runs_list(user_id)
+
+        _append_log(run_id, {
+            "timestamp": datetime.now().isoformat(),
+            "message": f"Workflow completed with status {state.status}",
+            "level": "INFO",
+        })
 
         # Mark experiment as completed
         experiment.mark_completed()
@@ -284,12 +284,9 @@ def _run_workflow_background(
         with db_context as db:
             run_service.update_run_status(db, run_id, "failed", str(e))
 
-        # Update in-memory info
-        info = _RUNS.get(run_id)
-        if info:
-            info.status = "failed"
-            info.exit_reason = str(e)
-            info.updated_at = datetime.now()
+        # Invalidate cache
+        cache_service.invalidate_run(run_id)
+        cache_service.invalidate_user_runs_list(user_id)
 
         # Log error
         _append_log(run_id, {
@@ -353,8 +350,8 @@ async def create_run(
     info = run_service.run_to_info(run_model, paths=paths)
     info.username = current_user.username
 
-    # Keep in-memory dict for backward compatibility (temporary)
-    _RUNS[run_id] = info
+    # Cache the run for fast subsequent access
+    cache_service.cache_run(run_id, info.model_dump())
 
     # Create experiment record
     experiment = experiment_logger.create_experiment(
@@ -402,9 +399,19 @@ def list_runs(
     limit: int = 100,
     offset: int = 0
 ):
-    """List all runs for the current user."""
-    # Get runs from database
-    db_runs = run_service.list_runs(db, str(current_user.id), limit=limit, offset=offset)
+    """List all runs for the current user with Redis caching."""
+    user_id = str(current_user.id)
+
+    # Try cache first (only for first page with default limit)
+    if offset == 0 and limit == 100:
+        cached_runs = cache_service.get_cached_user_runs_list(user_id)
+        if cached_runs:
+            # Convert cached data back to RunInfo objects
+            user_runs = [RunInfo(**run_data) for run_data in cached_runs]
+            return RunList(runs=user_runs)
+
+    # Cache miss or non-default pagination - fetch from database
+    db_runs = run_service.list_runs(db, user_id, limit=limit, offset=offset)
 
     # Convert to RunInfo
     user_runs = []
@@ -419,9 +426,16 @@ def list_runs(
         info.username = current_user.username
         user_runs.append(info)
 
-        # Update in-memory dict for backward compatibility
-        _RUNS[run_model.id] = info
-    return RunList(runs=sorted(user_runs, key=lambda r: r.created_at, reverse=True))
+    sorted_runs = sorted(user_runs, key=lambda r: r.created_at, reverse=True)
+
+    # Cache the result for first page
+    if offset == 0 and limit == 100:
+        cache_service.cache_user_runs_list(
+            user_id,
+            [run.model_dump() for run in sorted_runs]
+        )
+
+    return RunList(runs=sorted_runs)
 
 
 @router.get("/{run_id}", response_model=RunInfo)
@@ -490,8 +504,9 @@ def delete_run(
     # Delete from database
     run_service.delete_run(db, run_id, str(current_user.id))
 
-    # Delete from memory
-    _RUNS.pop(run_id, None)
+    # Invalidate caches
+    cache_service.invalidate_run(run_id)
+    cache_service.invalidate_user_runs_list(str(current_user.id))
 
     # Delete files
     base = run_dir(run_id)
