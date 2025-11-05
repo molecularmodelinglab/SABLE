@@ -60,6 +60,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: lizard-api
+    profiles: ["dev", "prod"]
     entrypoint: ["bash", "-lc"]
     command: ["micromamba run -n lizard uvicorn server.app:app --host 0.0.0.0 --port 8000 --reload"]
     ports:
@@ -90,6 +91,46 @@ services:
         condition: service_completed_successfully
     networks:
       - lizard-network
+    restart: unless-stopped
+
+  # Frontend development server (Vite)
+  ui:
+    image: node:20-alpine
+    container_name: lizard-ui
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE=${VITE_API_BASE:-http://localhost:8000}
+      - CHOKIDAR_USEPOLLING=1
+    volumes:
+      - ./ui:/app
+      - ui_node_modules:/app/node_modules
+    depends_on:
+      api:
+        condition: service_started
+    networks:
+      - lizard-network
+    profiles: ["dev"]
+    restart: unless-stopped
+
+  # Production frontend served via Nginx with static build
+  frontend:
+    build:
+      context: .
+      dockerfile: ui/Dockerfile
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-/api}
+    container_name: lizard-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_started
+    networks:
+      - lizard-network
+    profiles: ["prod"]
     restart: unless-stopped
 
   # CLI/Workflow Runner (original lizard service)
@@ -127,3 +168,4 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  ui_node_modules:
