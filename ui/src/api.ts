@@ -12,6 +12,13 @@ import {
   PasswordResetConfirmRequest,
   ApiMessageResponse,
 } from './types/session'
+import {
+  ConversationConfirmRequest,
+  ConversationCreateRunResponse,
+  ConversationMessageRequest,
+  ConversationResponse,
+  ConversationStartRequest,
+} from './types/conversation'
 import { Experiment, ExperimentListResponse } from './types/experiment'
 import { AuditEvent, AuditEventsResponse } from './types/audit'
 import { AnalyticsSummary, HealthCheck } from './types/analytics'
@@ -202,6 +209,44 @@ export async function confirmPasswordReset(req: PasswordResetConfirmRequest): Pr
   })
   clearAccessToken()
   return response
+}
+
+// ==================== Conversation Assistant ====================
+
+export async function startConversation(req?: ConversationStartRequest): Promise<ConversationResponse> {
+  return request<ConversationResponse>('/conversations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req ?? {}),
+  })
+}
+
+export async function sendConversationMessage(
+  conversationId: string,
+  req: ConversationMessageRequest
+): Promise<ConversationResponse> {
+  return request<ConversationResponse>(`/conversations/${conversationId}/message`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+}
+
+export async function confirmConversation(
+  conversationId: string,
+  req: ConversationConfirmRequest
+): Promise<ConversationCreateRunResponse> {
+  return request<ConversationCreateRunResponse>(`/conversations/${conversationId}/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+}
+
+export async function abandonConversation(conversationId: string): Promise<{ message: string }> {
+  return request<{ message: string }>(`/conversations/${conversationId}`, {
+    method: 'DELETE',
+  })
 }
 
 export async function getCurrentUser(): Promise<AuthUser> {
