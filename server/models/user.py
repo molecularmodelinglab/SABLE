@@ -61,3 +61,12 @@ class User(Base):
             "last_login": self.last_login.isoformat() if self.last_login else None,
             "extra_metadata": self.extra_metadata,
         }
+
+    @property
+    def last_login_at(self) -> Optional[datetime]:
+        """Compatibility alias for legacy attribute name used in tests."""
+        return self.last_login
+
+    @last_login_at.setter
+    def last_login_at(self, value: Optional[datetime]) -> None:
+        self.last_login = value
