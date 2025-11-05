@@ -3,6 +3,7 @@
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import DetachedInstanceError
 from sqlalchemy import desc
 
 from server.models.run import Run as RunModel, RunLog
@@ -257,8 +258,15 @@ class RunService:
 
         # Get user info if available
         username = None
-        if hasattr(run, 'user') and run.user:
-            username = run.user.username
+        user_obj = None
+        if isinstance(getattr(run, "__dict__", {}), dict):
+            user_obj = run.__dict__.get("user")
+
+        if user_obj is not None:
+            try:
+                username = user_obj.username
+            except DetachedInstanceError:
+                username = None
 
         metadata = run.extra_metadata if isinstance(run.extra_metadata, dict) else {}
 
