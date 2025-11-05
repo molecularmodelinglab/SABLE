@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { login, getAccessToken } from '../api'
 import '../index.css'
 
@@ -218,8 +218,10 @@ export function LoginPage() {
           </p>
           <ul style={{ margin: 0, paddingLeft: '1.5rem' }}>
             <li>Sessions expire after 24 hours of inactivity</li>
-            <li>Use your email and password to access the dashboard</li>
           </ul>
+          <p style={{ marginTop: '1rem', fontSize: '0.85rem' }}>
+            Need an account? <Link to="/register">Create one here</Link>.
+          </p>
         </div>
       </div>
 
