@@ -16,7 +16,7 @@ class TestUserService:
         """Test user creation."""
         email = "newuser@example.com"
         username = "newuser"
-        password = "NewP@ssw0rd9!"
+        password = "NewP@ssw0JIrd9YAY!"
         
         user, error = user_service.create_user(
             db_session, email, username, password

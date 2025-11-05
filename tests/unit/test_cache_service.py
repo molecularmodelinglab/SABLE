@@ -43,8 +43,8 @@ class TestCacheService:
     
     def test_cache_user(self, test_user):
         """Test user caching."""
-        cache_service.cache_user(test_user)
-        
+        cache_service.cache_user(str(test_user.id), test_user.to_dict())
+
         cached = cache_service.get_cached_user(str(test_user.id))
         
         assert cached is not None
@@ -54,7 +54,7 @@ class TestCacheService:
     
     def test_invalidate_user(self, test_user):
         """Test user cache invalidation."""
-        cache_service.cache_user(test_user)
+        cache_service.cache_user(str(test_user.id), test_user.to_dict())
         cache_service.invalidate_user(str(test_user.id))
         
         cached = cache_service.get_cached_user(str(test_user.id))
@@ -83,14 +83,15 @@ class TestCacheService:
         
         # First 3 attempts should succeed
         for i in range(max_attempts):
-            allowed, remaining = cache_service.check_rate_limit(
+            allowed, count, remaining = cache_service.check_rate_limit(
                 key, max_attempts, window_seconds
             )
             assert allowed is True
-            assert remaining == max_attempts - i - 1
+            assert count == i + 1
+            assert remaining == max_attempts - count
         
         # 4th attempt should fail
-        allowed, remaining = cache_service.check_rate_limit(
+        allowed, count, remaining = cache_service.check_rate_limit(
             key, max_attempts, window_seconds
         )
         assert allowed is False
@@ -109,8 +110,9 @@ class TestCacheService:
         cache_service.reset_rate_limit(key)
         
         # Should be allowed again
-        allowed, remaining = cache_service.check_rate_limit(key, max_attempts, 60)
+        allowed, count, remaining = cache_service.check_rate_limit(key, max_attempts, 60)
         assert allowed is True
+        assert count == 1
     
     def test_delete_pattern(self):
         """Test pattern-based deletion."""
