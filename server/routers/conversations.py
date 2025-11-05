@@ -218,11 +218,20 @@ async def confirm_and_create_run(
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Check if in confirmation state
-    if conversation.state != ConversationState.CONFIRMATION:
+    conversation_state = ConversationState(conversation.state)
+
+    # Allow confirmations when conversation is still on confirmation step or already marked completed without a run
+    if conversation_state not in {ConversationState.CONFIRMATION, ConversationState.COMPLETED}:
         raise HTTPException(
             status_code=400,
             detail="Conversation must be in confirmation state"
+        )
+
+    # If a run has already been created, return existing metadata instead of duplicating work
+    if conversation.run_id:
+        return ConversationCreateRunResponse(
+            run_id=conversation.run_id,
+            message=f"Optimization already started for run {conversation.run_id}."
         )
 
     # Handle non-confirmation

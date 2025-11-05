@@ -268,6 +268,10 @@ class ConversationService:
         batch_match = re.search(r'batch(?:\s+size)?\s*of\s*(\d+)', message, re.IGNORECASE)
         if not batch_match:
             batch_match = re.search(r'(\d+)\s*(?:molecules?|compounds?)\s+per\s+batch', message, re.IGNORECASE)
+        if not batch_match:
+            batch_match = re.search(r'batch(?:\s+size)?\s*[:=]?\s*(\d+)', message, re.IGNORECASE)
+        if not batch_match:
+            batch_match = re.search(r'(\d+)\s*per\s+batch', message, re.IGNORECASE)
         if batch_match:
             context.batch_size = int(batch_match.group(1))
 
