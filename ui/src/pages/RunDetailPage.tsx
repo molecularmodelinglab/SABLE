@@ -9,7 +9,7 @@ import {
   getRunLogs,
   getRunResults,
   getRunSummary,
-  getSessionToken,
+  getAccessToken,
   type RunEvent,
   type RunInfo,
   type RunResults,
@@ -28,10 +28,10 @@ type TabKey = (typeof TABS)[number]
 
 // Helper function to download file with authentication
 async function downloadFile(url: string, filename: string) {
-  const token = getSessionToken()
+  const token = getAccessToken()
   const headers: HeadersInit = {}
   if (token) {
-    headers['X-Session-Token'] = token
+    headers['Authorization'] = `Bearer ${token}`
   }
   
   const response = await fetch(url, { headers })

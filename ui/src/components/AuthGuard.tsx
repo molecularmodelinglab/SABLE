@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getCurrentSession, getSessionToken } from '../api'
+import { clearAccessToken, getAccessToken, getAuthProfile } from '../api'
 
 interface AuthGuardProps {
   children: React.ReactNode
@@ -16,7 +16,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
   }, [])
 
   async function checkAuth() {
-    const token = getSessionToken()
+    const token = getAccessToken()
     
     if (!token) {
       setIsChecking(false)
@@ -27,10 +27,11 @@ export function AuthGuard({ children }: AuthGuardProps) {
 
     try {
       // Validate token with server
-      await getCurrentSession()
+      await getAuthProfile()
       setIsAuthenticated(true)
     } catch (error) {
       // Token invalid or expired
+      clearAccessToken()
       setIsAuthenticated(false)
       navigate('/login', { replace: true })
     } finally {

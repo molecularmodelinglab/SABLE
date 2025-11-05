@@ -1,7 +1,7 @@
 import { ReactNode, useEffect, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { getCurrentSession, logout } from '../api'
-import type { Session } from '../types/session'
+import { getAuthProfile, logout } from '../api'
+import type { AuthProfile } from '../types/session'
 
 const navLinks = [
   { to: '/', label: 'Dashboard', icon: '📊', end: true },
@@ -11,7 +11,7 @@ const navLinks = [
 export function AppShell({ header, children }: { header: ReactNode; children: ReactNode }) {
   const location = useLocation()
   const navigate = useNavigate()
-  const [session, setSession] = useState<Session | null>(null)
+  const [profile, setProfile] = useState<AuthProfile | null>(null)
   const [showUserMenu, setShowUserMenu] = useState(false)
 
   useEffect(() => {
@@ -20,8 +20,8 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
 
   async function loadSession() {
     try {
-      const sess = await getCurrentSession()
-      setSession(sess)
+      const authProfile = await getAuthProfile()
+      setProfile(authProfile)
     } catch (error) {
       // Session invalid, user will be redirected by AuthGuard
     }
@@ -69,7 +69,7 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
           ))}
         </nav>
         
-        {session && (
+        {profile && (
           <div style={{
             padding: '1rem',
             borderTop: '1px solid rgba(255, 255, 255, 0.1)',
@@ -100,7 +100,7 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
                 fontWeight: 'bold',
                 fontSize: '0.9rem'
               }}>
-                {session.username.charAt(0).toUpperCase()}
+                {profile.user.username.charAt(0).toUpperCase()}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{
@@ -111,7 +111,7 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap'
                 }}>
-                  {session.username}
+                  {profile.user.username}
                 </div>
                 <div style={{
                   fontSize: '0.75rem',
@@ -120,7 +120,7 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap'
                 }}>
-                  {session.email || session.user_id}
+                  {profile.user.email}
                 </div>
               </div>
               <div style={{ color: 'rgba(255, 255, 255, 0.6)' }}>

@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Session, LoginRequest } from '../types/session'
-import { login, logout, getCurrentSession } from '../api'
+import { AuthProfile, AuthUser, Session, LoginRequest } from '../types/session'
+import { clearAccessToken, getAuthProfile, login, logout } from '../api'
 
 export function useSession() {
+  const [user, setUser] = useState<AuthUser | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -14,11 +15,12 @@ export function useSession() {
   async function loadSession() {
     try {
       setLoading(true)
-      const sess = await getCurrentSession()
-      setSession(sess)
+      const profile = await getAuthProfile()
+      applyProfile(profile)
       setError(null)
     } catch (err) {
       setError((err as Error).message)
+      setUser(null)
       setSession(null)
     } finally {
       setLoading(false)
@@ -30,7 +32,7 @@ export function useSession() {
       setLoading(true)
       setError(null)
       const response = await login(req)
-      await loadSession()
+      applyProfile({ user: response.user, session: response.session })
       return response
     } catch (err) {
       setError((err as Error).message)
@@ -43,13 +45,21 @@ export function useSession() {
   async function handleLogout() {
     try {
       await logout()
+      clearAccessToken()
+      setUser(null)
       setSession(null)
     } catch (err) {
       setError((err as Error).message)
     }
   }
 
+  function applyProfile(profile: AuthProfile) {
+    setUser(profile.user)
+    setSession(profile.session)
+  }
+
   return {
+    user,
     session,
     loading,
     error,

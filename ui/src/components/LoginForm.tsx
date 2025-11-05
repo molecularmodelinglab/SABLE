@@ -8,13 +8,13 @@ interface LoginFormProps {
 
 export function LoginForm({ onSuccess }: LoginFormProps) {
   const { login, loading, error } = useSession()
-  const [username, setUsername] = React.useState('')
   const [email, setEmail] = React.useState('')
+  const [password, setPassword] = React.useState('')
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     try {
-      await login({ username: username || undefined, email: email || undefined })
+      await login({ email, password })
       onSuccess?.()
     } catch (err) {
       // Error is handled by useSession
@@ -35,13 +35,13 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
       <form onSubmit={handleSubmit}>
         <div style={{ marginBottom: '1rem' }}>
           <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-            Username
+            Email
           </label>
           <input
-            type="text"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Enter your username"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
             style={{
               width: '100%',
               padding: '0.5rem',
@@ -55,13 +55,13 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
 
         <div style={{ marginBottom: '1.5rem' }}>
           <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-            Email (optional)
+            Password
           </label>
           <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="Enter your email"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Enter your password"
             style={{
               width: '100%',
               padding: '0.5rem',
@@ -69,6 +69,7 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
               borderRadius: '4px',
               fontSize: '1rem'
             }}
+            required
           />
         </div>
 
