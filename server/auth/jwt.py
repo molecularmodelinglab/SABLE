@@ -15,7 +15,8 @@ ACCESS_TOKEN_EXPIRE_HOURS = int(os.getenv("ACCESS_TOKEN_EXPIRE_HOURS", "24"))
 
 def create_access_token(
     data: Dict[str, Any],
-    expires_delta: Optional[timedelta] = None
+    expires_delta: Optional[timedelta] = None,
+    token_type: str = "access"
 ) -> str:
     """
     Create a JWT access token.
@@ -43,7 +44,7 @@ def create_access_token(
     to_encode.update({
         "exp": expire,
         "iat": datetime.now(timezone.utc),  # Issued at
-        "type": "access"
+        "type": token_type
     })
 
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
@@ -164,7 +165,7 @@ def verify_refresh_token(token: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_token_expiration(token: str) -> Optional[datetime]:
+def get_token_expiration(token_or_payload: Any) -> Optional[datetime]:
     """
     Extract expiration time from token.
 
@@ -174,13 +175,27 @@ def get_token_expiration(token: str) -> Optional[datetime]:
     Returns:
         Expiration datetime if valid, None otherwise
     """
-    payload = decode_token(token)
-    if payload and "exp" in payload:
-        return datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
-    return None
+    if isinstance(token_or_payload, dict):
+        payload = token_or_payload
+    elif isinstance(token_or_payload, str):
+        payload = decode_token(token_or_payload)
+    else:
+        return None
+
+    if not payload or "exp" not in payload:
+        return None
+
+    exp_value = payload["exp"]
+    if isinstance(exp_value, datetime):
+        return exp_value if exp_value.tzinfo else exp_value.replace(tzinfo=timezone.utc)
+
+    try:
+        return datetime.fromtimestamp(exp_value, tz=timezone.utc)
+    except (TypeError, ValueError):
+        return None
 
 
-def is_token_expired(token: str) -> bool:
+def is_token_expired(token_or_payload: Any) -> bool:
     """
     Check if token is expired.
 
@@ -190,7 +205,7 @@ def is_token_expired(token: str) -> bool:
     Returns:
         True if expired or invalid, False if still valid
     """
-    expiration = get_token_expiration(token)
+    expiration = get_token_expiration(token_or_payload)
     if expiration:
         return datetime.now(timezone.utc) > expiration
     return True
@@ -211,7 +226,11 @@ def create_email_verification_token(email: str) -> str:
         "type": "email_verification"
     }
     # Email verification tokens expire in 24 hours
-    return create_access_token(data, expires_delta=timedelta(hours=24))
+    return create_access_token(
+        data,
+        expires_delta=timedelta(hours=24),
+        token_type="email_verification"
+    )
 
 
 def verify_email_verification_token(token: str) -> Optional[str]:

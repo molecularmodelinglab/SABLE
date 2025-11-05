@@ -12,11 +12,11 @@ from server.auth.jwt import verify_access_token
 from server.services.cache_service import cache_service
 
 # Security scheme for Swagger UI
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db)
 ) -> User:
     """
@@ -45,6 +45,9 @@ async def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
+    if not credentials or not credentials.credentials:
+        raise credentials_exception
+
     # Extract token
     token = credentials.credentials
 
@@ -53,9 +56,23 @@ async def get_current_user(
     if payload is None:
         raise credentials_exception
 
-    # Extract user identifier
+    # Extract identifiers
     user_id: str = payload.get("user_id")
-    if user_id is None:
+    session_id: str | None = payload.get("session_id")
+    if user_id is None or session_id is None:
+        raise credentials_exception
+
+    # Validate session to enforce logout/invalidation semantics
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if (
+        session is None
+        or str(session.user_id) != user_id
+        or not session.is_active
+        or session.is_expired()
+    ):
+        # Ensure any cached session entry is cleared
+        if session and session.token:
+            cache_service.invalidate_session(session.token)
         raise credentials_exception
 
     # Try to get user from cache first
