@@ -19,6 +19,7 @@ class Conversation(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.id"), nullable=False)
+    run_id = Column(String(100), ForeignKey("runs.id", ondelete="SET NULL"), nullable=True, index=True)
 
     status = Column(String(50), nullable=False, default="active", index=True)
     # Status values: active, completed, abandoned
@@ -43,11 +44,13 @@ class Conversation(Base):
     # Relationships
     user = relationship("User", back_populates="conversations")
     session = relationship("Session", back_populates="conversations")
+    run = relationship("Run", back_populates="conversation", uselist=False)
     messages = relationship("ConversationMessage", back_populates="conversation", cascade="all, delete-orphan", order_by="ConversationMessage.created_at")
 
     __table_args__ = (
         Index('idx_conversations_user_id', 'user_id'),
         Index('idx_conversations_status', 'status'),
+        Index('idx_conversations_run_id', 'run_id'),
     )
 
     # Property to provide backward compatibility with 'state' name used in API

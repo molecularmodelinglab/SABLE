@@ -40,6 +40,7 @@ class Run(Base):
     session = relationship("Session", back_populates="runs")
     experiments = relationship("Experiment", back_populates="run", cascade="all, delete-orphan")
     logs = relationship("RunLog", back_populates="run", cascade="all, delete-orphan")
+    conversation = relationship("Conversation", back_populates="run", uselist=False)
 
     __table_args__ = (
         Index('idx_runs_user_id', 'user_id'),
