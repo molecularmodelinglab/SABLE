@@ -223,7 +223,12 @@ export function NewRunPage() {
     return Array.from(new Set(context.needs_clarification))
   }, [context])
 
-  const canLaunch = canProceed && state === 'confirmation' && !isInitializing && !isSending && !isConfirming
+  const canLaunch =
+    canProceed &&
+    (state === 'confirmation' || state === 'completed') &&
+    !isInitializing &&
+    !isSending &&
+    !isConfirming
   const inputDisabled = isInitializing || isConfirming || state === 'completed'
 
   return (
