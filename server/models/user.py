@@ -38,6 +38,7 @@ class User(Base):
     experiments = relationship("Experiment", back_populates="user", cascade="all, delete-orphan")
     conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")
     audit_events = relationship("AuditEvent", back_populates="user", cascade="all, delete-orphan")
+    password_reset_tokens = relationship("PasswordResetToken", back_populates="user", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index('idx_users_email', 'email'),
