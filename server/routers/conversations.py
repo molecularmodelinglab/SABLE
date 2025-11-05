@@ -1,14 +1,19 @@
 """Conversation API endpoints for interactive optimization setup."""
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from sqlalchemy.orm import Session as DBSession
-from typing import List
 
 from server.database import get_db
 from server.models.user import User
 from server.models.conversation import Conversation as ConversationModel
+from server.models.session import Session as SessionModel
 from server.auth.dependencies import get_current_active_user
 from server.services.conversation_service import ConversationService
+from server.services.run_service import run_service
+from server.services.cache_service import cache_service
 from server.schemas.conversation import (
     ConversationStartRequest,
     ConversationMessageRequest,
@@ -19,8 +24,10 @@ from server.schemas.conversation import (
     ConversationContext,
     ConversationState,
 )
-from server.schemas.run import RunCreateRequest, RunInfo
 from server.audit import audit_logger, AuditEventType
+from server.experiment_logger import experiment_logger
+from server.storage import ensure_run_dirs
+from server.routers.runs import _run_workflow_background
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -191,8 +198,9 @@ async def send_message(
 @router.post("/{conversation_id}/confirm", response_model=ConversationCreateRunResponse)
 async def confirm_and_create_run(
     conversation_id: str,
-    request: ConversationConfirmRequest,
+    payload: ConversationConfirmRequest,
     background: BackgroundTasks,
+    http_request: Request,
     current_user: User = Depends(get_current_active_user),
     db: DBSession = Depends(get_db)
 ):
@@ -218,7 +226,7 @@ async def confirm_and_create_run(
         )
 
     # Handle non-confirmation
-    if not request.confirmed:
+    if not payload.confirmed:
         # TODO: Parse requested changes and update context
         raise HTTPException(
             status_code=400,
@@ -237,36 +245,103 @@ async def confirm_and_create_run(
         prompt = conversation_service.build_run_prompt(conversation.context)
         context = ConversationContext(**conversation.context)
 
-        # Create run request
-        run_request = RunCreateRequest(
+        note = context.notes.strip() if context.notes else None
+
+        # Generate run identifier and persist prompt assets
+        run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+        paths = ensure_run_dirs(run_id)
+        (Path(paths["inputs"]) / "prompt.txt").write_text(prompt)
+        if note:
+            (Path(paths["inputs"]) / "note.txt").write_text(note)
+
+        # Ensure an active session exists for the user
+        session = db.query(SessionModel).filter(
+            SessionModel.user_id == current_user.id,
+            SessionModel.is_active == True
+        ).order_by(SessionModel.created_at.desc()).first()
+
+        now_utc = datetime.now(timezone.utc)
+        if not session:
+            session = SessionModel(
+                user_id=current_user.id,
+                token=f"conversation-run-{datetime.now().strftime('%Y%m%d%H%M%S%f')}",
+                ip_address=http_request.client.host if http_request.client else None,
+                user_agent=http_request.headers.get("user-agent"),
+                created_at=now_utc,
+                last_activity=now_utc,
+                expires_at=now_utc + timedelta(hours=24),
+                is_active=True,
+                extra_metadata={"source": "conversation"},
+            )
+            db.add(session)
+            db.flush()
+        else:
+            session.last_activity = now_utc
+            db.flush()
+
+        # Capture starting molecule if provided
+        starting_molecules = []
+        if context.starting_molecule:
+            starting_molecules = [context.starting_molecule]
+
+        extra_metadata = {
+            "paths": paths,
+            "max_iterations": context.max_iterations,
+            "batch_size": context.batch_size,
+            "conversation_id": conversation_id,
+        }
+
+        run_model = run_service.create_run(
+            db=db,
+            run_id=run_id,
+            user_id=current_user.id,
+            session_id=session.id,
             prompt=prompt,
-            max_iterations=context.max_iterations,
-            batch_size=context.batch_size,
-            note=context.notes
+            starting_molecules=starting_molecules,
+            note=note,
+            extra_metadata=extra_metadata,
         )
 
-        # Import here to avoid circular import
-        from server.app import create_run
+        run_model = run_service.update_run_status(db, run_id, "running") or run_model
 
-        # Create the run (this will handle the actual creation logic)
-        # We'll need to refactor server.app.create_run to be callable as a function
-        # For now, let's create the run info directly
-        from server.storage import ensure_run_dirs
-        from uuid import uuid4
-        from datetime import datetime
+        info = run_service.run_to_info(run_model, paths=paths)
+        info.username = current_user.username
 
-        run_id = f"run_{uuid4().hex[:12]}"
-        ensure_run_dirs(run_id)
+        cache_service.cache_run(run_id, info.model_dump())
+        cache_service.invalidate_user_runs_list(str(current_user.id))
 
-        # TODO: Integrate with actual run creation from server.app
-        # This is a placeholder - we need to refactor the run creation logic
+        experiment = experiment_logger.create_experiment(
+            run_id=run_id,
+            session_id=str(session.id),
+            user_id=str(current_user.id),
+            username=current_user.username,
+            prompt=prompt,
+            parameters={
+                "max_iterations": context.max_iterations,
+                "batch_size": context.batch_size,
+            },
+            notes=note,
+        )
 
-        # Update conversation
-        conversation.state = ConversationState.COMPLETED
+        background.add_task(
+            _run_workflow_background,
+            run_id,
+            prompt,
+            context.max_iterations,
+            context.batch_size,
+            experiment.id,
+            str(current_user.id),
+            current_user.username,
+        )
+
+        # Update conversation to reflect run creation
+        conversation.state = ConversationState.COMPLETED.value
         conversation.run_id = run_id
+        conversation.completed_at = now_utc
+        conversation.updated_at = now_utc
+        conversation.context = context.model_dump()
         db.commit()
 
-        # Log event
         audit_logger.log(
             event_type=AuditEventType.RUN_CREATED,
             message=f"Created run {run_id} from conversation {conversation_id}",
