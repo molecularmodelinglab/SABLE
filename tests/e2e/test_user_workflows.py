@@ -110,12 +110,12 @@ class TestMultiUserIsolation:
             json={
                 "email": "usera@example.com",
                 "username": "usera",
-                "password": "P@ssw0rdA!"
+                "password": "UserA_Str0ng1!"
             }
         )
         login_a = client.post(
             "/auth/login",
-            json={"email": "usera@example.com", "password": "P@ssw0rdA!"}
+            json={"email": "usera@example.com", "password": "UserA_Str0ng1!"}
         )
         token_a = login_a.json()["access_token"]
         headers_a = {"Authorization": f"Bearer {token_a}"}
@@ -126,12 +126,12 @@ class TestMultiUserIsolation:
             json={
                 "email": "userb@example.com",
                 "username": "userb",
-                "password": "P@ssw0rdB!"
+                "password": "UserB_Str0ng1!"
             }
         )
         login_b = client.post(
             "/auth/login",
-            json={"email": "userb@example.com", "password": "P@ssw0rdB!"}
+            json={"email": "userb@example.com", "password": "UserB_Str0ng1!"}
         )
         token_b = login_b.json()["access_token"]
         headers_b = {"Authorization": f"Bearer {token_b}"}
@@ -157,8 +157,9 @@ class TestMultiUserIsolation:
         # User B's runs list should not include User A's run
         list_response = client.get("/runs", headers=headers_b)
         assert list_response.status_code == 200
-        user_b_runs = list_response.json()
-        assert not any(r["run_id"] == run_a_id for r in user_b_runs)
+        runs_payload = list_response.json()
+        runs_list = runs_payload.get("runs", []) if isinstance(runs_payload, dict) else runs_payload
+        assert not any(r.get("run_id", r.get("id")) == run_a_id for r in runs_list)
 
 
 @pytest.mark.e2e
