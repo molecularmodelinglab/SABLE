@@ -109,11 +109,14 @@ async def login(
     )
 
     if error:
-        # Record failed attempt
-        auth_service.record_failed_login(request.email, client_ip)
+        # Record failed attempt unless account is inactive (to avoid penalizing locked accounts)
+        if "inactive" not in error.lower():
+            auth_service.record_failed_login(request.email, client_ip)
+
+        status_code = status.HTTP_403_FORBIDDEN if "inactive" in error.lower() else status.HTTP_401_UNAUTHORIZED
 
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=status_code,
             detail=error
         )
 
@@ -178,7 +181,7 @@ async def logout_all(
     count = auth_service.invalidate_all_user_sessions(db, current_user)
 
     return MessageResponse(
-        message=f"Logged out from {count} device(s)",
+        message=f"Logged out from all devices ({count} session(s) invalidated)",
         success=True
     )
 
@@ -252,17 +255,17 @@ async def change_password(
         )
 
     # Change password
-    user, error = user_service.change_password(
-        db=db,
-        user=current_user,
-        new_password=request.new_password
-    )
-
-    if error:
+    try:
+        user_service.change_password(
+            db=db,
+            user=current_user,
+            new_password=request.new_password
+        )
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error
-        )
+            detail=str(exc)
+        ) from exc
 
     # Invalidate all other sessions for security
     auth_service.invalidate_all_user_sessions(db, current_user)
