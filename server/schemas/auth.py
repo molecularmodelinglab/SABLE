@@ -196,6 +196,7 @@ class PasswordResetConfirm(BaseModel):
         }
     )
 
+
 class MessageResponse(BaseModel):
     """Generic message response."""
 
@@ -207,6 +208,24 @@ class MessageResponse(BaseModel):
             "example": {
                 "message": "Operation completed successfully",
                 "success": True
+            }
+        }
+    )
+
+class PasswordResetInitiateResponse(MessageResponse):
+    """Response schema for initiating password reset."""
+
+    reset_token: Optional[str] = Field(
+        default=None,
+        description="Password reset token (returned only in development/testing environments)"
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra = {
+            "example": {
+                "message": "If an account exists for that email, password reset instructions have been sent.",
+                "success": True,
+                "reset_token": "d4b5c6..."
             }
         }
     )
