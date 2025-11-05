@@ -51,6 +51,13 @@ class UserService:
         if len(username) > 50:
             return (None, "Username must be less than 50 characters")
 
+        # Enforce uniqueness before attempting insert for clearer errors
+        if self.get_user_by_email(db, email):
+            return (None, "Email address already registered")
+
+        if self.get_user_by_username(db, username):
+            return (None, "Username already taken")
+
         # Validate password strength for local auth
         if auth_provider == "local":
             is_valid, error_msg = validate_password_strength(password)
@@ -81,10 +88,22 @@ class UserService:
 
         except IntegrityError as e:
             db.rollback()
-            if "email" in str(e).lower():
+
+            detail = str(e).lower()
+            constraint_name = None
+            if hasattr(e, "orig") and hasattr(e.orig, "diag") and getattr(e.orig.diag, "constraint_name", None):
+                constraint_name = e.orig.diag.constraint_name.lower()
+
+            if constraint_name and "email" in constraint_name:
                 return (None, "Email address already registered")
-            elif "username" in str(e).lower():
+            if "email" in detail:
+                return (None, "Email address already registered")
+
+            if constraint_name and "username" in constraint_name:
                 return (None, "Username already taken")
+            if "username" in detail:
+                return (None, "Username already taken")
+
             return (None, "Failed to create user account")
 
     def get_user_by_id(self, db: Session, user_id: str) -> Optional[User]:
@@ -141,21 +160,48 @@ class UserService:
         self,
         db: Session,
         user: User,
+        updates: Optional[dict] = None,
         **kwargs
-    ) -> tuple[Optional[User], Optional[str]]:
+    ) -> User:
         """
         Update user fields.
 
         Args:
             db: Database session
             user: User object to update
-            **kwargs: Fields to update
+            updates: Optional dictionary of fields to update
+            **kwargs: Additional fields to update
 
         Returns:
-            Tuple of (updated User, error message)
+            Updated User object
+
+        Raises:
+            ValueError: If an update violates uniqueness or other constraints
         """
+        changes: dict = {}
+        if updates:
+            changes.update(updates)
+        if kwargs:
+            changes.update(kwargs)
+
+        if not changes:
+            return user
+
+        # Normalize and validate email/username updates before applying
+        if "email" in changes and changes["email"]:
+            new_email = changes["email"].lower()
+            existing = self.get_user_by_email(db, new_email)
+            if existing and existing.id != user.id:
+                raise ValueError("Email address already registered")
+            changes["email"] = new_email
+
+        if "username" in changes and changes["username"]:
+            existing = self.get_user_by_username(db, changes["username"])
+            if existing and existing.id != user.id:
+                raise ValueError("Username already taken")
+
         try:
-            for key, value in kwargs.items():
+            for key, value in changes.items():
                 if hasattr(user, key):
                     setattr(user, key, value)
 
@@ -163,14 +209,19 @@ class UserService:
             db.commit()
             db.refresh(user)
 
-            # Invalidate cache
-            cache_service.invalidate_user(str(user.id))
-
-            return (user, None)
-
-        except IntegrityError as e:
+        except IntegrityError as exc:
             db.rollback()
-            return (None, "Update failed: duplicate value")
+            detail = str(exc).lower()
+            if "email" in detail:
+                raise ValueError("Email address already registered") from exc
+            if "username" in detail:
+                raise ValueError("Username already taken") from exc
+            raise ValueError("Update failed: duplicate value") from exc
+
+        # Invalidate cache so subsequent reads see fresh data
+        cache_service.invalidate_user(str(user.id))
+
+        return user
 
     def verify_email(self, db: Session, user: User) -> User:
         """
@@ -260,7 +311,7 @@ class UserService:
         db: Session,
         user: User,
         new_password: str
-    ) -> tuple[Optional[User], Optional[str]]:
+    ) -> User:
         """
         Change user's password.
 
@@ -270,12 +321,15 @@ class UserService:
             new_password: New plain text password
 
         Returns:
-            Tuple of (updated User, error message)
+            Updated User instance
+
+        Raises:
+            ValueError: If the new password does not meet strength requirements
         """
         # Validate new password
         is_valid, error_msg = validate_password_strength(new_password)
         if not is_valid:
-            return (None, error_msg)
+            raise ValueError(error_msg)
 
         # Hash and update
         user.password_hash = hash_password(new_password)
@@ -286,7 +340,7 @@ class UserService:
         # Invalidate cache
         cache_service.invalidate_user(str(user.id))
 
-        return (user, None)
+        return user
 
     def delete_user(self, db: Session, user: User) -> bool:
         """
