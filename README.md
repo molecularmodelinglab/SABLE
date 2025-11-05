@@ -86,10 +86,22 @@ docker compose up
 # Or override the command
 docker compose run --rm lizard run "Optimize ibuprofen for lower TPSA"
 
-# Run the API service (port 8000) and UI dev server (port 5173)
-docker compose up api
-# In another terminal
-cd ui && npm install && npm run dev
+# Start the full developer stack (API + Vite dev server)
+docker compose --profile dev up api ui
+
+# The UI is available at http://localhost:5173 and proxies API calls to http://localhost:8000.
+
+# Run only the API (useful if you want to point an existing frontend at it)
+docker compose --profile dev up api
+
+# Build production images (FastAPI API + Nginx static frontend)
+docker compose --profile prod build api frontend
+
+# Run the production stack locally
+docker compose --profile prod up api frontend
+
+# Override the frontend API base (defaults to /api when building the prod image)
+VITE_API_BASE=https://your-api.example.com docker compose --profile prod build frontend
 ```
 
 ### Mounting configuration and API keys
