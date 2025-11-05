@@ -6,6 +6,7 @@ from server.models.run import Run, RunLog
 from server.models.experiment import Experiment, ExperimentLog
 from server.models.conversation import Conversation, ConversationMessage
 from server.models.audit import AuditEvent
+from server.models.password_reset import PasswordResetToken
 
 __all__ = [
     "User",
@@ -18,4 +19,5 @@ __all__ = [
     "Conversation",
     "ConversationMessage",
     "AuditEvent",
+    "PasswordResetToken",
 ]
