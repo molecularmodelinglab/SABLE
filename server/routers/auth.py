@@ -1,6 +1,7 @@
 """Authentication API endpoints."""
 
 from typing import Optional
+import os
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 
@@ -15,6 +16,9 @@ from server.schemas.auth import (
     SessionListResponse,
     PasswordChangeRequest,
     MessageResponse,
+    PasswordResetRequest,
+    PasswordResetConfirm,
+    PasswordResetInitiateResponse,
 )
 from server.services.auth_service import auth_service
 from server.services.user_service import user_service
@@ -314,16 +318,55 @@ async def delete_account(
 #     """Verify user email with token."""
 #     pass
 
-# TODO: Password reset endpoints
-# @router.post("/forgot-password")
-# async def forgot_password(email: str, db: Session = Depends(get_db)):
-#     """Initiate password reset flow."""
-#     pass
-#
-# @router.post("/reset-password")
-# async def reset_password(token: str, new_password: str, db: Session = Depends(get_db)):
-#     """Reset password with token."""
-#     pass
+@router.post("/forgot-password", response_model=PasswordResetInitiateResponse)
+async def forgot_password(
+    request: PasswordResetRequest,
+    db: Session = Depends(get_db)
+):
+    """Initiate password reset flow."""
+    environment = os.getenv("ENVIRONMENT", "development")
+    reset_token_value: Optional[str] = None
+
+    user = user_service.get_user_by_email(db, request.email)
+
+    if user and user.auth_provider == "local":
+        token = auth_service.create_password_reset_token(db, user)
+        # TODO: Integrate email delivery service
+        if environment in {"development", "testing"}:
+            reset_token_value = token.token
+
+    return PasswordResetInitiateResponse(
+        message="If an account exists for that email, password reset instructions have been sent.",
+        success=True,
+        reset_token=reset_token_value
+    )
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+async def confirm_password_reset(
+    request: PasswordResetConfirm,
+    db: Session = Depends(get_db)
+):
+    """Reset password using a token generated via forgot-password flow."""
+    token, error = auth_service.validate_password_reset_token(db, request.token)
+    if error or token is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error or "Invalid password reset token"
+        )
+
+    try:
+        auth_service.reset_password_with_token(db, token, request.new_password)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc)
+        ) from exc
+
+    return MessageResponse(
+        message="Password updated successfully. You can now log in.",
+        success=True
+    )
 
 # TODO: Auth0 OAuth endpoints
 # @router.get("/auth0/login")
