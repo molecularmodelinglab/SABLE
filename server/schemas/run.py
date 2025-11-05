@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from typing import Optional, List, Dict
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class RunCreateRequest(BaseModel):
@@ -31,6 +31,11 @@ class RunInfo(BaseModel):
         default_factory=list,
         description="Initial list of molecules (SMILES) provided to the workflow."
     )
+
+    @computed_field(return_type=str, alias="run_id")
+    def computed_run_id(self) -> str:
+        """Provide backward-compatible `run_id` field in serialized output."""
+        return self.id
 
 
 class RunList(BaseModel):
