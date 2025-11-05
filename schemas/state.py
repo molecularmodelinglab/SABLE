@@ -7,7 +7,7 @@ of the molecular optimization workflow as it flows through a LangGraph graph.
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple, Callable, Union
-from pydantic import BaseModel, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator, ConfigDict
 
 
 class OptimizationMode(str, Enum):
@@ -266,8 +266,9 @@ class WorkflowState(BaseModel):
 
         return not (is_terminated or is_max_iterations_reached)
 
-    class Config:
-        """Pydantic model configuration."""
-        validate_assignment = True
-        use_enum_values = True
+    model_config = ConfigDict(
+        # """Pydantic model configuration."""
+        validate_assignment = True,
+        use_enum_values = True,
         arbitrary_types_allowed = True
+    )

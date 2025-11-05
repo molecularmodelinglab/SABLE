@@ -3,8 +3,7 @@
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
-from pydantic import BaseModel, Field
-
+from pydantic import BaseModel, Field, ConfigDict
 
 class ConversationState(str, Enum):
     """Conversation states in the optimization flow."""
@@ -31,7 +30,7 @@ class TargetProperty(BaseModel):
     target_value: Optional[float] = Field(None, description="Target value for match mode")
     weight: float = Field(1.0, ge=0, description="Property weight/priority")
 
-    class Config:
+    model_config = ConfigDict(
         json_schema_extra = {
             "example": {
                 "name": "QED",
@@ -39,7 +38,7 @@ class TargetProperty(BaseModel):
                 "weight": 1.0
             }
         }
-
+    )
 
 class ConversationContext(BaseModel):
     """Collected context during conversation."""
@@ -64,7 +63,7 @@ class ConversationContext(BaseModel):
     needs_clarification: List[str] = Field(default_factory=list, description="Items needing clarification")
     clarifications_asked: List[str] = Field(default_factory=list, description="Already asked clarifications")
 
-    class Config:
+    model_config = ConfigDict(
         json_schema_extra = {
             "example": {
                 "starting_molecule": "CC(=O)Oc1ccccc1C(=O)O",
@@ -79,31 +78,31 @@ class ConversationContext(BaseModel):
                 "notes": "Exploring aspirin analogs"
             }
         }
-
+    )
 
 class ConversationStartRequest(BaseModel):
     """Request to start a new conversation."""
     initial_message: Optional[str] = Field(None, description="Optional initial message from user")
 
-    class Config:
+    model_config = ConfigDict(
         json_schema_extra = {
             "example": {
                 "initial_message": "I want to optimize aspirin for better drug-likeness"
             }
         }
-
+    )
 
 class ConversationMessageRequest(BaseModel):
     """Request to send a message in conversation."""
     message: str = Field(..., min_length=1, description="User message")
 
-    class Config:
+    model_config = ConfigDict(
         json_schema_extra = {
             "example": {
                 "message": "I want to maximize QED and keep logP around 2.5"
             }
         }
-
+    )
 
 class ConversationResponse(BaseModel):
     """Response from conversation system."""
@@ -114,7 +113,7 @@ class ConversationResponse(BaseModel):
     suggestions: List[str] = Field(default_factory=list, description="Suggested responses")
     can_proceed: bool = Field(False, description="Whether run can be started")
 
-    class Config:
+    model_config = ConfigDict(
         json_schema_extra = {
             "example": {
                 "conversation_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -133,41 +132,41 @@ class ConversationResponse(BaseModel):
                 "can_proceed": False
             }
         }
-
+    )
 
 class ConversationConfirmRequest(BaseModel):
     """Request to confirm and create run."""
     confirmed: bool = Field(..., description="Whether user confirms the configuration")
     changes: Optional[str] = Field(None, description="Requested changes if not confirmed")
 
-    class Config:
+    model_config = ConfigDict(
         json_schema_extra = {
             "example": {
                 "confirmed": True
             }
         }
-
+    )
 
 class ConversationCreateRunResponse(BaseModel):
     """Response after creating run from conversation."""
     run_id: str = Field(..., description="Created run ID")
     message: str = Field(..., description="Success message")
 
-    class Config:
+    model_config = ConfigDict(
         json_schema_extra = {
             "example": {
                 "run_id": "run_abc123",
                 "message": "Optimization started! You can track progress at /runs/run_abc123"
             }
         }
-
+    )
 
 class ConversationListResponse(BaseModel):
     """Response for listing conversations."""
     conversations: List[Dict[str, Any]] = Field(..., description="List of conversations")
     total: int = Field(..., description="Total conversation count")
 
-    class Config:
+    model_config = ConfigDict(
         json_schema_extra = {
             "example": {
                 "conversations": [
@@ -182,3 +181,4 @@ class ConversationListResponse(BaseModel):
                 "total": 1
             }
         }
+    )

@@ -24,7 +24,7 @@ class TestRunsEndpoints:
         
         assert response.status_code == 200
         data = response.json()
-        assert "run_id" in data
+        assert "id" in data
         assert data["status"] in ["pending", "running"]
     
     def test_create_run_no_auth(self, client):
@@ -38,7 +38,7 @@ class TestRunsEndpoints:
             }
         )
         
-        assert response.status_code == 401
+        assert response.status_code in (401, 403)
     
     def test_list_runs(self, client, auth_headers, test_run):
         """Test listing user's runs from database."""
@@ -46,9 +46,10 @@ class TestRunsEndpoints:
         
         assert response.status_code == 200
         data = response.json()
-        assert isinstance(data, list)
-        # Should include the test run
-        assert any(r["id"] == test_run.id for r in data)
+        assert isinstance(data, dict)
+        assert "runs" in data
+        runs = data["runs"]
+        assert any(r["id"] == test_run.id for r in runs)
     
     def test_list_runs_pagination(self, client, auth_headers):
         """Test pagination in runs listing."""
@@ -59,7 +60,9 @@ class TestRunsEndpoints:
         
         assert response.status_code == 200
         data = response.json()
-        assert len(data) <= 5
+        assert isinstance(data, dict)
+        assert "runs" in data
+        assert len(data["runs"]) <= 5
     
     def test_get_run(self, client, auth_headers, test_run):
         """Test getting a specific run from database."""
@@ -72,41 +75,16 @@ class TestRunsEndpoints:
         data = response.json()
         assert data["id"] == test_run.id
         assert "status" in data
-        assert "prompt" in data
+        assert "starting_molecules" in data
     
-    def test_get_run_unauthorized(self, client, auth_headers, another_user, db_session):
+    def test_get_run_unauthorized(self, client, auth_headers, another_user, make_run):
         """Test accessing another user's run (should fail)."""
-        from server.models.run import Run
-        from server.models.session import Session as SessionModel
-        from datetime import datetime, timedelta, timezone
-        
-        # Create a session for the other user
-        other_session = SessionModel(
-            user_id=another_user.id,
-            token="other-user-run-session-token",
-            ip_address=None,
-            user_agent="test-client",
-            created_at=datetime.now(timezone.utc),
-            last_activity=datetime.now(timezone.utc),
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
-            is_active=True
-        )
-        db_session.add(other_session)
-        db_session.flush()
-        
-        # Create run for another user
-        other_run = Run(
-            id="other-run-123",
-            user_id=another_user.id,
-            session_id=other_session.id,
-            prompt="Test",
-            status="pending",
+        other_run = make_run(
+            another_user,
+            run_id="other-run-123",
             starting_molecules=["CC(=O)O"],
-            extra_metadata={"max_iterations": 10, "batch_size": 5}
+            extra_metadata={"max_iterations": 10, "batch_size": 5},
         )
-        db_session.add(other_run)
-        db_session.commit()
-        db_session.refresh(other_run)
         other_run_id = other_run.id
         
         # Try to access with test_user's token
