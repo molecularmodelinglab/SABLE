@@ -1,4 +1,17 @@
-import { AuthProfile, AuthUser, LoginRequest, LoginResponse, Session, SessionListResponse } from './types/session'
+import {
+  AuthProfile,
+  AuthUser,
+  LoginRequest,
+  LoginResponse,
+  RegisterRequest,
+  RegisterResponse,
+  Session,
+  SessionListResponse,
+  PasswordResetInitiateRequest,
+  PasswordResetInitiateResponse,
+  PasswordResetConfirmRequest,
+  ApiMessageResponse,
+} from './types/session'
 import { Experiment, ExperimentListResponse } from './types/experiment'
 import { AuditEvent, AuditEventsResponse } from './types/audit'
 import { AnalyticsSummary, HealthCheck } from './types/analytics'
@@ -157,9 +170,38 @@ export async function login(req: LoginRequest): Promise<LoginResponse> {
   return response
 }
 
+export async function registerUser(req: RegisterRequest): Promise<RegisterResponse> {
+  const response = await request<RegisterResponse>('/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  return response
+}
+
 export async function logout(): Promise<void> {
   await request('/auth/logout', { method: 'POST' })
   clearAccessToken()
+}
+
+export async function requestPasswordReset(
+  req: PasswordResetInitiateRequest
+): Promise<PasswordResetInitiateResponse> {
+  return request<PasswordResetInitiateResponse>('/auth/forgot-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+}
+
+export async function confirmPasswordReset(req: PasswordResetConfirmRequest): Promise<ApiMessageResponse> {
+  const response = await request<ApiMessageResponse>('/auth/reset-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  clearAccessToken()
+  return response
 }
 
 export async function getCurrentUser(): Promise<AuthUser> {

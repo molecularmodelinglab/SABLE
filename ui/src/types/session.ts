@@ -39,3 +39,31 @@ export interface AuthProfile {
   user: AuthUser;
   session: Session | null;
 }
+
+export interface RegisterRequest {
+  email: string;
+  username: string;
+  password: string;
+}
+
+export type RegisterResponse = AuthUser;
+
+export interface PasswordResetInitiateRequest {
+  email: string;
+}
+
+export interface PasswordResetInitiateResponse {
+  message: string;
+  success: boolean;
+  reset_token?: string | null;
+}
+
+export interface PasswordResetConfirmRequest {
+  token: string;
+  new_password: string;
+}
+
+export interface ApiMessageResponse {
+  message: string;
+  success: boolean;
+}
