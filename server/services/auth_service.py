@@ -7,10 +7,15 @@ from sqlalchemy.orm import Session
 
 from server.models.user import User
 from server.models.session import Session as SessionModel
-from server.auth.password import verify_password
+from server.auth.password import (
+    verify_password,
+    generate_password_reset_token,
+    validate_password_reset_token,
+)
 from server.auth.jwt import create_access_token
 from server.services.cache_service import cache_service
 from server.services.user_service import user_service
+from server.models.password_reset import PasswordResetToken
 
 
 class AuthService:
@@ -368,6 +373,93 @@ class AuthService:
                 return (False, f"Too many login attempts from this IP. Please try again in 5 minutes.")
 
         return (True, None)
+
+    # ------------------------------------------------------------------
+    # Password reset flows
+    # ------------------------------------------------------------------
+
+    def _generate_unique_reset_token(self, db: Session) -> str:
+        """Generate a unique password reset token."""
+        for _ in range(5):
+            token = generate_password_reset_token()
+            exists = db.query(PasswordResetToken).filter(PasswordResetToken.token == token).first()
+            if not exists:
+                return token
+        raise RuntimeError("Failed to generate unique password reset token")
+
+    def create_password_reset_token(
+        self,
+        db: Session,
+        user: User,
+        expiry_minutes: int = 60
+    ) -> PasswordResetToken:
+        """Create a password reset token for the given user."""
+        now = datetime.now(timezone.utc)
+
+        # Clean up expired tokens for user
+        db.query(PasswordResetToken).filter(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used_at.is_(None),
+            PasswordResetToken.expires_at < now
+        ).delete(synchronize_session=False)
+
+        token_value = self._generate_unique_reset_token(db)
+
+        reset_token = PasswordResetToken(
+            user_id=user.id,
+            token=token_value,
+            created_at=now,
+            expires_at=now + timedelta(minutes=expiry_minutes)
+        )
+
+        db.add(reset_token)
+        db.commit()
+        db.refresh(reset_token)
+
+        return reset_token
+
+    def validate_password_reset_token(
+        self,
+        db: Session,
+        token: str
+    ) -> tuple[Optional[PasswordResetToken], Optional[str]]:
+        """Validate and retrieve a password reset token."""
+        if not token or not validate_password_reset_token(token):
+            return (None, "Invalid password reset token")
+
+        reset_token = db.query(PasswordResetToken).filter(PasswordResetToken.token == token).first()
+        if not reset_token:
+            return (None, "Invalid or expired password reset token")
+
+        if reset_token.used_at is not None:
+            return (None, "Password reset token has already been used")
+
+        if reset_token.is_expired():
+            return (None, "Password reset token has expired")
+
+        return (reset_token, None)
+
+    def reset_password_with_token(
+        self,
+        db: Session,
+        reset_token: PasswordResetToken,
+        new_password: str
+    ) -> User:
+        """Reset a user's password using a valid reset token."""
+        user = reset_token.user
+        if user is None:
+            raise ValueError("Associated user account not found")
+
+        updated_user = user_service.change_password(db, user, new_password)
+
+        reset_token.mark_used()
+        db.add(reset_token)
+        db.commit()
+
+        # Invalidate all active sessions for security
+        self.invalidate_all_user_sessions(db, updated_user)
+
+        return updated_user
 
     def create_auth0_user(
         self,
