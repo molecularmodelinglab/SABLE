@@ -97,7 +97,7 @@ class ConversationMessage(Base):
     extra_metadata = Column(JSON, nullable=False, default=dict)
     # Can store: extracted_info, confidence, intent, etc.
 
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
 
     # Relationships
     conversation = relationship("Conversation", back_populates="messages")

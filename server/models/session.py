@@ -23,9 +23,9 @@ class Session(Base):
     ip_address = Column(INET, nullable=True)
     user_agent = Column(String, nullable=True)
 
-    created_at = Column(DateTime, nullable=False, default=datetime.now(timezone.utc))
-    last_activity = Column(DateTime, nullable=False, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
-    expires_at = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    last_activity = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
 
     is_active = Column(Boolean, nullable=False, default=True)
     extra_metadata = Column(JSON, nullable=False, default=dict)
@@ -48,12 +48,15 @@ class Session(Base):
 
     def is_expired(self) -> bool:
         """Check if session has expired."""
-        return datetime.utcnow() > self.expires_at
+        expires_at = self.expires_at
+        if expires_at and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) > expires_at if expires_at else True
 
     def refresh(self, hours: int = 24):
         """Refresh session expiration."""
-        self.last_activity = datetime.utcnow()
-        self.expires_at = datetime.utcnow() + timedelta(hours=hours)
+        self.last_activity = datetime.now(timezone.utc)
+        self.expires_at = datetime.now(timezone.utc) + timedelta(hours=hours)
 
     def to_dict(self):
         """Convert to dictionary for API responses."""
@@ -61,13 +64,21 @@ class Session(Base):
             "id": str(self.id),
             "user_id": str(self.user_id),
             "ip_address": str(self.ip_address) if self.ip_address else None,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "last_activity": self.last_activity.isoformat() if self.last_activity else None,
-            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "created_at": self._iso_or_none(self.created_at),
+            "last_activity": self._iso_or_none(self.last_activity),
+            "expires_at": self._iso_or_none(self.expires_at),
             "is_active": self.is_active,
             "is_expired": self.is_expired(),
             "extra_metadata": self.extra_metadata,
         }
+
+    @staticmethod
+    def _iso_or_none(value: Optional[datetime]) -> Optional[str]:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.isoformat()
 
 
 class SessionToken(Base):
@@ -79,8 +90,8 @@ class SessionToken(Base):
     token = Column(String(255), unique=True, nullable=False, index=True)
     session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False)
 
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True), nullable=False)
 
     def __repr__(self):
         return f"<SessionToken(session_id={self.session_id}, expires_at={self.expires_at})>"

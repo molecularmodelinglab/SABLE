@@ -2,7 +2,7 @@
 Unit tests for JWT token management.
 """
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from server.auth.jwt import (
     create_access_token,
     create_refresh_token,
@@ -47,8 +47,8 @@ class TestAccessToken:
         
         assert payload is not None
         # Check expiration is roughly 15 minutes from now
-        exp_time = datetime.fromtimestamp(payload["exp"])
-        expected_exp = datetime.utcnow() + expires_delta
+        exp_time = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+        expected_exp = datetime.now(timezone.utc) + expires_delta
         
         assert abs((exp_time - expected_exp).total_seconds()) < 5
     

@@ -30,8 +30,8 @@ class Run(Base):
     summary_available = Column(Boolean, nullable=False, default=False)
     results_available = Column(Boolean, nullable=False, default=False)
 
-    created_at = Column(DateTime, nullable=False, default=datetime.now(timezone.utc), index=True)
-    updated_at = Column(DateTime, nullable=False, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     extra_metadata = Column(JSON, nullable=False, default=dict)
 
@@ -77,7 +77,7 @@ class RunLog(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     run_id = Column(String(100), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True)
 
-    timestamp = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    timestamp = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
     event_type = Column(String(100), nullable=True)
     level = Column(String(20), nullable=False, default="INFO")
     message = Column(Text, nullable=True)
