@@ -1,34 +1,22 @@
 """LIZARD API with new database-backed authentication system."""
 
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Query, Request, Depends
+from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
-from typing import Dict, Any, Callable, Deque, Optional
-from pathlib import Path
+from typing import Optional
 from datetime import datetime
-import os
-import platform
-import subprocess
 
 from server.database import get_db
 from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import text
 
-from server.schemas import RunCreateRequest, RunInfo, RunList
-from server.storage import ensure_run_dirs, results_json_path, summary_txt_path, run_dir
 from server.models.user import User
-from server.auth.dependencies import get_current_user, get_current_active_user
-from server.experiment_logger import experiment_logger, ExperimentStatus, ExperimentError
+from server.auth.dependencies import get_current_user
+from server.experiment_logger import experiment_logger
 from server.audit import audit_logger, AuditEventType, AuditSeverity
-from run_workflow import WorkflowRunner
 
-# Import and mount routers
 from server.routers.auth import router as auth_router
 from server.routers.conversations import router as conversations_router
 from server.routers.runs import router as runs_router
-
-# Import services
-from server.services.run_service import run_service
 
 
 app = FastAPI(
