@@ -367,11 +367,12 @@ def cleanup_after_test(db_session):
     # Clean up all tables to prevent unique constraint violations
     try:
         db_session.query(Run).delete()
-        db_session.query(SessionModel).delete()
+        db_session.query(User).delete()
         db_session.query(Conversation).delete()
+        db_session.query(SessionModel).delete()
         db_session.query(PasswordResetToken).delete()
         # db_session.query(Run).delete()
-        db_session.query(User).delete()
+        # db_session.query(User).delete()
         db_session.commit()
     except Exception:
         db_session.rollback()
