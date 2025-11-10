@@ -46,6 +46,7 @@ class AuditEventType(str, Enum):
     WORKFLOW_MODIFIED = "workflow_modified"
     CHECKPOINT_CREATED = "checkpoint_created"
     CHECKPOINT_RESTORED = "checkpoint_restored"
+    RUN_CREATED = "run_created"
     
     # Security events
     UNAUTHORIZED_ACCESS = "unauthorized_access"
