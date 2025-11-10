@@ -11,7 +11,7 @@ class EnumeratorInput(BaseModel):
     """Input schema for the EnumeratorTool."""
     molecule: str = Field(..., description="SMILES string of the molecule to enumerate.")
     enumerator: Optional[Any] = Field(default=" MoleculeHEALER", description="Enumeration method to use (default: ' MoleculeHEALER').")
-    n_compositions: Optional[int] = Field(default=10, desscription="Number of compositions to enumerate (default: 10).")
+    n_compositions: Optional[int] = Field(default=10, description="Number of compositions to enumerate (default: 10).")
     sim_threshold: Optional[float] = Field(default=None, description="Similarity threshold for filtering results (default: 0.5).")
     reaction_tags: Optional[List[str]] = Field(default=None, description="List of reaction tags for enumeration (uses a default set if not provided).")
     bb_supplier: Optional[str] = Field(default="EU_stock", description="Building blocks source (default: 'EU_stock').")
