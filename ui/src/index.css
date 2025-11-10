@@ -479,6 +479,18 @@ button.danger:disabled {
   gap: 18px;
 }
 
+.run-detail__panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.run-detail__panel-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .run-detail__grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

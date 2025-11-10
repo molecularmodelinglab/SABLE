@@ -120,10 +120,14 @@ export function RunDetailPage() {
   }, [logsQuery.data, liveEvents])
 
   const moleculeRecords = useMemo(() => extractMoleculeRecords(resultsQuery.data ?? null), [resultsQuery.data])
-  const flatRows = useMemo(() => moleculeRecords.map((record) => ({ candidate: record.id, smiles: record.smiles, ...flattenRecord(record.data) })), [moleculeRecords])
+  const flatRows = useMemo(
+    () => moleculeRecords.map((record) => ({ candidate: record.id, smiles: record.smiles, ...flattenRecord(record.data) })),
+    [moleculeRecords]
+  )
   const numericSeries = useMemo(() => extractNumericSeries(flatRows), [flatRows])
   const numericEntries = useMemo(() => Object.entries(numericSeries).sort((a, b) => b[1].length - a[1].length), [numericSeries])
   const numericKeys = useMemo(() => numericEntries.slice(0, 3).map(([key]) => key), [numericEntries])
+  const columns = useMemo(() => buildColumns(numericKeys), [numericKeys])
   const chartSeries = useMemo(() => numericEntries.slice(0, 3), [numericEntries])
 
   if (isLoading) {
@@ -236,9 +240,24 @@ export function RunDetailPage() {
               {checkpointsQuery.data.map((name: string) => (
                 <li key={name}>
                   <span>{name}</span>
-                  {id && (
-                    <a href={`${apiBase}/runs/${id}/checkpoints/${encodeURIComponent(name)}`} target="_blank" rel="noreferrer">Download</a>
-                  )}
+                  <button
+                    className="ghost"
+                    disabled={!id}
+                    onClick={async () => {
+                      if (!id) return
+                      try {
+                        await downloadFile(
+                          `${apiBase}/runs/${id}/checkpoints/${encodeURIComponent(name)}`,
+                          name
+                        )
+                      } catch (error) {
+                        console.error('Failed to download checkpoint', error)
+                        window.alert('Failed to download checkpoint. Please try again.')
+                      }
+                    }}
+                  >
+                    Download
+                  </button>
                 </li>
               ))}
             </ul>
@@ -250,10 +269,21 @@ export function RunDetailPage() {
 
       <section hidden={activeTab !== 'results'}>
         <div className="run-detail__panel">
-          <h2>Results table</h2>
+          <div className="run-detail__panel-header">
+            <h2>Results table</h2>
+            <div className="run-detail__panel-actions">
+              <button
+                className="ghost"
+                disabled={!flatRows.length}
+                onClick={() => handleResultsDownloadCsv(id ?? run.id, columns, flatRows)}
+              >
+                Download CSV
+              </button>
+            </div>
+          </div>
           <ResultsTable
             rows={flatRows}
-            columns={buildColumns(numericKeys)}
+            columns={columns}
           />
         </div>
       </section>
@@ -327,4 +357,41 @@ function buildColumns(metricKeys: string[]): ResultsColumn[] {
   ]
   const metricColumns = metricKeys.map((key) => ({ key, label: key }))
   return [...base, ...metricColumns]
+}
+
+function escapeCsvValue(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? String(value) : ''
+  }
+  const serialized = typeof value === 'string' ? value : JSON.stringify(value)
+  const raw = serialized ?? String(value)
+  const escaped = raw.replace(/"/g, '""')
+  if (/[",\n\r]/.test(raw)) {
+    return `"${escaped}"`
+  }
+  return escaped
+}
+
+function handleResultsDownloadCsv(
+  runId: string,
+  columns: ResultsColumn[],
+  rows: Record<string, unknown>[]
+) {
+  if (!rows.length) return
+
+  const header = columns.map((col) => escapeCsvValue(col.label ?? col.key)).join(',')
+  const data = rows.map((row) =>
+    columns.map((col) => escapeCsvValue(row[col.key])).join(',')
+  )
+  const csvContent = [header, ...data].join('\n')
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${runId}_results.csv`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.URL.revokeObjectURL(url)
 }
