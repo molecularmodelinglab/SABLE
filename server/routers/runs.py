@@ -17,7 +17,14 @@ from server.database import get_db, get_db_context
 from server.models.user import User
 from server.auth.dependencies import get_current_user, get_current_active_user
 from server.schemas import RunCreateRequest, RunInfo, RunList
-from server.storage import ensure_run_dirs, results_json_path, summary_txt_path, run_dir
+from server.storage import (
+    ensure_run_dirs,
+    results_json_path,
+    summary_txt_path,
+    run_dir,
+    checkpoint_path,
+    list_run_checkpoints,
+)
 from server.services.run_service import run_service
 from server.services.cache_service import cache_service
 from server.experiment_logger import experiment_logger, ExperimentError
@@ -595,12 +602,7 @@ def list_checkpoints(
 ):
     """List all checkpoints for a run."""
     check_run_authorization(run_id, current_user, db)
-
-    base = run_dir(run_id) / "checkpoints"
-    if not base.exists():
-        return []
-    items = sorted([p.name for p in base.glob("*") if p.is_file()])
-    return items
+    return list_run_checkpoints(run_id)
 
 
 @router.get("/{run_id}/checkpoints/{filename:path}")
@@ -613,12 +615,12 @@ def download_checkpoint(
     """Download a specific checkpoint file."""
     check_run_authorization(run_id, current_user, db)
 
-    base = (run_dir(run_id) / "checkpoints").resolve()
-    target = (base / filename).resolve()
-    if not str(target).startswith(str(base)):
-        raise HTTPException(400, "Invalid checkpoint path")
-    if not target.exists() or not target.is_file():
+    try:
+        target = checkpoint_path(run_id, filename)
+    except FileNotFoundError:
         raise HTTPException(404, "Checkpoint not found")
+    except ValueError:
+        raise HTTPException(400, "Invalid checkpoint path")
 
     # Log checkpoint access
     audit_logger.log(
