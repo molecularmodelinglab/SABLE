@@ -54,6 +54,12 @@ class ConversationContext(BaseModel):
     # Parameters
     max_iterations: Optional[int] = Field(None, ge=1, le=100, description="Maximum iterations")
     batch_size: Optional[int] = Field(None, ge=1, le=50, description="Molecules per batch")
+    enumeration_size: Optional[int] = Field(
+        None,
+        ge=1,
+        le=1000,
+        description="Number of molecules to enumerate or screen"
+    )
 
     # Optional information
     notes: Optional[str] = Field(None, description="User notes")
@@ -62,6 +68,7 @@ class ConversationContext(BaseModel):
     # Tracking
     needs_clarification: List[str] = Field(default_factory=list, description="Items needing clarification")
     clarifications_asked: List[str] = Field(default_factory=list, description="Already asked clarifications")
+    full_prompt: str = Field("", description="Aggregated original prompt with all user messages")
 
     model_config = ConfigDict(
         json_schema_extra = {
@@ -75,7 +82,9 @@ class ConversationContext(BaseModel):
                 ],
                 "max_iterations": 10,
                 "batch_size": 5,
-                "notes": "Exploring aspirin analogs"
+                "enumeration_size": 200,
+                "notes": "Exploring aspirin analogs",
+                "full_prompt": "Starting from aspirin, maximize QED and match logP around 2.5 with 10 iterations and batch size 5"
             }
         }
     )

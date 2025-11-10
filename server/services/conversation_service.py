@@ -4,7 +4,7 @@ This service implements a state machine that guides users through collecting
 all necessary information for starting an optimization run.
 """
 
-import json
+import logging
 import re
 from typing import Optional, Tuple, List, Dict, Any
 from datetime import datetime, timedelta, timezone
@@ -22,6 +22,10 @@ from server.schemas.conversation import (
     OptimizationMode,
     TargetProperty,
 )
+from nodes.extract_arguments_hybrid import HybridArgumentExtractor
+
+
+logger = logging.getLogger(__name__)
 
 
 class ConversationService:
@@ -34,6 +38,585 @@ class ConversationService:
             llm_client: Optional LLM client for NLU parsing
         """
         self.llm_client = llm_client
+
+        self.field_question_prompts = {
+            "starting_molecule": (
+                "What molecule should we optimize? You can share a SMILES string or a common name."
+            ),
+            "targets": (
+                "Which properties should we optimize? For example, 'maximize QED and keep logP around 2.5'."
+            ),
+            "max_iterations": "How many iterations do you want to run this for?",
+            "batch_size": "How many molecules should we evaluate per iteration (batch size)?",
+            "enumeration_size": (
+                "How many molecules should I enumerate in the initial library? (Optional)"
+            ),
+        }
+
+        self.field_suggestions = {
+            "starting_molecule": [
+                "CC(=O)Oc1ccccc1C(=O)O",
+                "Aspirin",
+                "Caffeine",
+            ],
+            "targets": [
+                "Maximize QED",
+                "Minimize logP",
+                "Match logP around 2.5",
+            ],
+            "max_iterations": [
+                "10 iterations",
+                "12 iterations",
+                "Use 15 iterations",
+            ],
+            "batch_size": [
+                "Batch size 5",
+                "Batch size 8",
+                "Batch size 10",
+            ],
+            "enumeration_size": [
+                "Enumerate 100 molecules",
+                "Enumerate 200 molecules",
+                "Enumerate 500 molecules",
+            ],
+        }
+
+        self.property_keyword_map: Dict[str, List[str]] = {
+            "qed": ["qed", "drug-likeness", "drug likeness", "druglike"],
+            "logp": ["logp", "lipophilicity", "hydrophobicity", "partition"],
+            "tpsa": ["tpsa", "polar surface area", "psa"],
+            "molecular_weight": ["molecular weight", "mw", "weight", "mass"],
+            "sa_score": ["sa score", "synthetic accessibility", "synthetic-accessibility"],
+            "binding_affinity": ["binding", "affinity", "uniprot", "docking"],
+        }
+
+        self.argument_extractor = HybridArgumentExtractor(llm_client=llm_client)
+
+    def _append_to_full_prompt(self, current: Optional[str], message: Optional[str]) -> str:
+        """Append a new message to the accumulated prompt text."""
+        if not message:
+            return (current or "").strip()
+
+        message = message.strip()
+        if not message:
+            return (current or "").strip()
+
+        if not current:
+            return message
+
+        combined = f"{current.strip()}\n{message}"
+        # Limit stored prompt to avoid unbounded growth (keep last 4000 characters)
+        return combined[-4000:]
+
+    def _process_new_message(
+        self,
+        context: ConversationContext,
+        message: Optional[str],
+        current_state: Optional[ConversationState] = None
+    ) -> Tuple[ConversationContext, ConversationState]:
+        """Update context based on a new user message."""
+        context.full_prompt = self._append_to_full_prompt(context.full_prompt, message)
+
+        context = self._update_context_from_prompt(context)
+
+        required_missing, _ = self._determine_missing_fields(context)
+        context.needs_clarification = required_missing
+
+        # Track which clarifications have been requested, keeping order stable
+        context.clarifications_asked = [
+            field for field in context.clarifications_asked if field in required_missing
+        ]
+        for field in required_missing:
+            if field not in context.clarifications_asked:
+                context.clarifications_asked.append(field)
+
+        next_state = self._determine_state(context)
+
+        if current_state == ConversationState.CONFIRMATION:
+            transition = self._confirmation_transition(message or "", context)
+            if transition:
+                next_state = transition
+
+        return context, next_state
+
+    def _update_context_from_prompt(self, context: ConversationContext) -> ConversationContext:
+        """Extract structured data from the accumulated prompt."""
+        prompt_text = (context.full_prompt or "").strip()
+        if not prompt_text:
+            return context
+
+        extraction = self._parse_prompt(prompt_text)
+        if extraction:
+            context = self._apply_extraction_to_context(context, extraction, prompt_text)
+
+        notes = self._extract_notes(prompt_text)
+        if notes:
+            context.notes = notes
+
+        return context
+
+    def _parse_prompt(self, prompt_text: str) -> Dict[str, Any]:
+        """Run hybrid extraction pipeline against the prompt text."""
+        if not self.argument_extractor:
+            return {}
+
+        llm_result: Optional[Dict[str, Any]] = None
+        try:
+            llm_result = self.argument_extractor.extract_with_llm(prompt_text)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("LLM extraction failed: %s", exc)
+
+        rule_result: Dict[str, Any] = {}
+        try:
+            rule_result = self.argument_extractor.extract_with_rules(prompt_text)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Rule-based extraction failed: %s", exc)
+
+        try:
+            return self.argument_extractor.validate_and_merge(
+                llm_result,
+                rule_result,
+                prompt_text,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("Failed to merge extraction results: %s", exc)
+            return rule_result or {}
+
+    def _apply_extraction_to_context(
+        self,
+        context: ConversationContext,
+        extraction: Dict[str, Any],
+        prompt_text: str
+    ) -> ConversationContext:
+        """Populate conversation context from extracted information."""
+
+        starting_molecules = extraction.get("starting_molecules") or []
+        if starting_molecules:
+            smiles_candidate = next(
+                (item for item in starting_molecules if self._looks_like_smiles(item)),
+                None,
+            )
+            name_candidate = next(
+                (item for item in starting_molecules if not self._looks_like_smiles(item)),
+                None,
+            )
+
+            if smiles_candidate:
+                context.starting_molecule = smiles_candidate
+            if name_candidate:
+                context.molecule_name = name_candidate
+
+        molecule_source = extraction.get("molecule_source")
+        if molecule_source:
+            context.molecule_source = molecule_source
+
+        proteins = extraction.get("proteins") or []
+        if proteins:
+            context.protein_target = proteins[0]
+
+        max_iterations = extraction.get("max_iterations")
+        if max_iterations is not None:
+            context.max_iterations = int(max_iterations)
+
+        batch_size = extraction.get("batch_size")
+        if batch_size is not None:
+            context.batch_size = int(batch_size)
+
+        enumeration_size = extraction.get("enumeration_size")
+        if enumeration_size is not None:
+            context.enumeration_size = int(enumeration_size)
+
+        targets = self._convert_targets(
+            extraction.get("target_properties") or [],
+            prompt_text,
+        )
+        if targets:
+            context.targets = targets
+
+        return context
+
+    def _convert_targets(
+        self,
+        raw_targets: List[Dict[str, Any]],
+        prompt_text: str
+    ) -> List[TargetProperty]:
+        """Convert extracted target dictionaries to conversation models."""
+        converted: List[TargetProperty] = []
+
+        for target_data in raw_targets:
+            property_name = target_data.get("property_name") or target_data.get("name")
+            if not property_name:
+                continue
+
+            canonical = property_name.upper()
+            mode = self._normalize_mode(target_data.get("optimization_mode"))
+
+            snippet = self._find_property_snippet(prompt_text, property_name)
+            if snippet:
+                inferred_mode = self._infer_target_mode(snippet)
+                if inferred_mode != mode:
+                    mode = inferred_mode
+            else:
+                snippet = None
+
+            target_value = target_data.get("target_value")
+
+            inferred_value = self._infer_target_value(snippet, mode) if snippet else None
+            if target_value is None and inferred_value is not None:
+                target_value = inferred_value
+
+            if target_value is None and mode == OptimizationMode.MATCH:
+                bounds = target_data.get("bounds")
+                if isinstance(bounds, (list, tuple)) and len(bounds) == 2:
+                    lower, upper = bounds
+                    if lower is not None and upper is not None:
+                        target_value = round((float(lower) + float(upper)) / 2.0, 3)
+
+            weight = float(target_data.get("weight") or 1.0)
+
+            try:
+                converted.append(
+                    TargetProperty(
+                        name=canonical,
+                        mode=mode,
+                        target_value=target_value,
+                        weight=weight,
+                    )
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.debug("Skipping target %s due to validation error: %s", property_name, exc)
+
+        if converted:
+            equal_weight = 1.0 / len(converted)
+            for target in converted:
+                target.weight = equal_weight
+
+        return converted
+
+    def _normalize_mode(self, value: Optional[str]) -> OptimizationMode:
+        """Normalize optimization mode strings to enum values."""
+        if not value:
+            return OptimizationMode.MAXIMIZE
+
+        normalized = str(value).strip().lower()
+        if normalized in {"max", "maximize", "maximum", "increase"}:
+            return OptimizationMode.MAXIMIZE
+        if normalized in {"min", "minimize", "minimum", "decrease", "reduce"}:
+            return OptimizationMode.MINIMIZE
+        if normalized in {"match", "target", "equal", "maintain"}:
+            return OptimizationMode.MATCH
+
+        return OptimizationMode.MAXIMIZE
+
+    def _find_property_snippet(self, prompt_text: str, property_name: str) -> Optional[str]:
+        """Grab a clause around a property mention for heuristics."""
+        keywords = self.property_keyword_map.get(property_name.lower(), [property_name])
+        pattern = re.compile("|".join(re.escape(keyword) for keyword in keywords), re.IGNORECASE)
+        matches = list(pattern.finditer(prompt_text))
+        if not matches:
+            return None
+
+        match = matches[-1]
+
+        separators = [",", ";", ".", " and ", " but "]
+
+        # Determine clause start by looking backward for nearest separator
+        before_candidates = [
+            (prompt_text.rfind(sep, 0, match.start()), len(sep))
+            for sep in separators
+        ]
+        before_candidates = [item for item in before_candidates if item[0] != -1]
+        if before_candidates:
+            before_index, sep_len = max(before_candidates, key=lambda item: item[0])
+            clause_start = before_index + sep_len
+        else:
+            clause_start = 0
+
+        # Determine clause end by looking forward for nearest separator
+        after_candidates = [prompt_text.find(sep, match.end()) for sep in separators]
+        after_candidates = [idx for idx in after_candidates if idx != -1]
+        if after_candidates:
+            clause_end = min(after_candidates)
+        else:
+            clause_end = len(prompt_text)
+
+        snippet = prompt_text[clause_start:clause_end].strip()
+        if not snippet:
+            snippet = prompt_text[max(0, match.start() - 50):min(len(prompt_text), match.end() + 50)]
+        return snippet
+
+    def _has_explicit_iterations(self, prompt_text: str) -> bool:
+        patterns = [
+            r"\b\d+\s*(?:[A-Za-z][A-Za-z0-9\-]*\s+){0,2}?(?:iterations?|rounds?|cycles?)\b",
+            r"(?:iterations?|rounds?|cycles?)\s*(?:for|of|=|:)?\s*\d+",
+            r"run\s+\d+\s*(?:[A-Za-z][A-Za-z0-9\-]*\s+){0,2}?(?:iterations?|rounds?|cycles?)",
+        ]
+        return any(re.search(pattern, prompt_text, re.IGNORECASE) for pattern in patterns)
+
+    def _has_explicit_batch_size(self, prompt_text: str) -> bool:
+        patterns = [
+            r"batch(?:\s+size)?\s*(?:of|=|:)?\s*\d+",
+            r"\b\d+\s*(?:molecules?|compounds?)\s+per\s+(?:batch|iteration)\b",
+            r"\b\d+\s*per\s+(?:batch|iteration)\b",
+        ]
+        return any(re.search(pattern, prompt_text, re.IGNORECASE) for pattern in patterns)
+
+    def _has_explicit_enumeration_size(self, prompt_text: str) -> bool:
+        patterns = [
+            r"enumerat(?:e|ed|ion)[^\d]{0,20}(\d{1,4})",
+            r"generate\s*(\d{1,4})\s+(?:analogs|derivatives|molecules|compounds)",
+            r"(\d{1,4})\s+(?:molecules|compounds|analogs|derivatives)\b",
+        ]
+        return any(re.search(pattern, prompt_text, re.IGNORECASE) for pattern in patterns)
+
+    def _mentioned_defaults(self, prompt_text: str) -> bool:
+        return bool(re.search(r"use\s+defaults?", prompt_text, re.IGNORECASE))
+
+    def _compute_explicit_flags(self, context: ConversationContext) -> Dict[str, bool]:
+        prompt_text = (context.full_prompt or "").lower()
+        if not prompt_text:
+            return {
+                "starting_molecule": False,
+                "targets": False,
+                "max_iterations": False,
+                "batch_size": False,
+                "enumeration_size": False,
+            }
+
+        defaults_ok = self._mentioned_defaults(prompt_text)
+
+        return {
+            "starting_molecule": bool(context.starting_molecule or context.molecule_name),
+            "targets": bool(context.targets),
+            "max_iterations": self._has_explicit_iterations(prompt_text) or defaults_ok,
+            "batch_size": self._has_explicit_batch_size(prompt_text) or defaults_ok,
+            "enumeration_size": self._has_explicit_enumeration_size(prompt_text),
+        }
+
+    def _extract_notes(self, prompt_text: str) -> Optional[str]:
+        """Extract notes annotation from prompt text."""
+        matches = list(re.finditer(r"notes?\s*(?:=|:)?\s*(.+)", prompt_text, re.IGNORECASE))
+        if not matches:
+            return None
+        return matches[-1].group(1).strip()
+
+    def _determine_missing_fields(
+        self,
+        context: ConversationContext
+    ) -> Tuple[List[str], List[str]]:
+        """Determine which required fields are missing."""
+        flags = self._compute_explicit_flags(context)
+
+        required_missing: List[str] = []
+        optional_missing: List[str] = []
+
+        if not flags["starting_molecule"]:
+            required_missing.append("starting_molecule")
+
+        if not flags["targets"]:
+            required_missing.append("targets")
+
+        if context.max_iterations is None or not flags["max_iterations"]:
+            required_missing.append("max_iterations")
+
+        if context.batch_size is None or not flags["batch_size"]:
+            required_missing.append("batch_size")
+
+        if context.enumeration_size is None or not flags["enumeration_size"]:
+            optional_missing.append("enumeration_size")
+
+        return required_missing, optional_missing
+
+    def _determine_state(self, context: ConversationContext) -> ConversationState:
+        """Infer conversation state from collected context."""
+        missing_required, _ = self._determine_missing_fields(context)
+
+        if "starting_molecule" in missing_required:
+            return ConversationState.COLLECTING_MOLECULE
+
+        if "targets" in missing_required:
+            return ConversationState.COLLECTING_TARGETS
+
+        if any(field in missing_required for field in ("max_iterations", "batch_size")):
+            return ConversationState.COLLECTING_PARAMETERS
+
+        if self.can_create_run(context.model_dump()):
+            return ConversationState.CONFIRMATION
+
+        return ConversationState.COLLECTING_PARAMETERS
+
+    def _build_summary_lines(
+        self,
+        context: ConversationContext,
+        explicit_flags: Dict[str, bool]
+    ) -> List[str]:
+        """Create human-friendly summary lines of collected info."""
+        lines: List[str] = []
+
+        if context.starting_molecule or context.molecule_name:
+            molecule_desc = context.molecule_name or context.starting_molecule
+            lines.append(f"- Starting molecule: {molecule_desc}")
+
+        if context.targets:
+            target_descriptions: List[str] = []
+            for target in context.targets:
+                description = f"{target.mode.value} {target.name}"
+                if target.target_value is not None:
+                    description += f" (target {target.target_value})"
+                target_descriptions.append(description)
+
+            if target_descriptions:
+                lines.append("- Targets: " + "; ".join(target_descriptions))
+
+        if context.max_iterations is not None:
+            label = f"- Iterations: {context.max_iterations}"
+            if not explicit_flags.get("max_iterations", True):
+                label += " (default)"
+            lines.append(label)
+
+        if context.batch_size is not None:
+            label = f"- Batch size: {context.batch_size}"
+            if not explicit_flags.get("batch_size", True):
+                label += " (default)"
+            lines.append(label)
+
+        if context.enumeration_size is not None:
+            label = f"- Enumeration size: {context.enumeration_size}"
+            if not explicit_flags.get("enumeration_size", True):
+                label += " (optional/default)"
+            lines.append(label)
+
+        if context.notes:
+            lines.append(f"- Notes: {context.notes}")
+
+        return lines
+
+    def _missing_field_prompt(
+        self,
+        missing_required: List[str],
+        missing_optional: List[str]
+    ) -> str:
+        """Build follow-up question for missing fields."""
+        prompts: List[str] = []
+
+        for field in missing_required:
+            question = self.field_question_prompts.get(field)
+            if question:
+                prompts.append(question)
+
+        optional_questions = [
+            self.field_question_prompts[field]
+            for field in missing_optional
+            if field in self.field_question_prompts
+        ]
+
+        if optional_questions:
+            prompts.append("Optional: " + " ".join(optional_questions))
+
+        return "\n\n".join(prompts)
+
+    def _infer_target_mode(self, snippet: str) -> OptimizationMode:
+        """Infer optimization mode from nearby text."""
+        snippet = snippet.lower()
+
+        if re.search(r"between\s+\d", snippet) or re.search(r"within\s+\d", snippet):
+            return OptimizationMode.MATCH
+
+        if re.search(r"less\s+than|below|under|decrease|reduce|minim(?:ize|um)|<=|<", snippet):
+            return OptimizationMode.MINIMIZE
+
+        if re.search(r"greater\s+than|above|over|increase|maxim(?:ize|um)|higher|>=|>", snippet):
+            return OptimizationMode.MAXIMIZE
+
+        if re.search(r"match|target|keep|maintain|around|approx|equal", snippet):
+            return OptimizationMode.MATCH
+
+        if re.search(r"min\b", snippet):
+            return OptimizationMode.MINIMIZE
+
+        if re.search(r"max\b", snippet):
+            return OptimizationMode.MAXIMIZE
+
+        return OptimizationMode.MAXIMIZE
+
+    def _infer_target_value(
+        self,
+        snippet: str,
+        mode: OptimizationMode
+    ) -> Optional[float]:
+        """Extract a representative target value when matching."""
+        if mode != OptimizationMode.MATCH:
+            return None
+
+        snippet = snippet.lower()
+
+        between_match = re.search(
+            r"between\s*(\d+(?:\.\d+)?)\s*(?:and|to|[-–])\s*(\d+(?:\.\d+)?)",
+            snippet
+        )
+        if between_match:
+            low = float(between_match.group(1))
+            high = float(between_match.group(2))
+            return round((low + high) / 2.0, 3)
+
+        value_match = re.search(
+            r"(?:around|about|near|approx(?:\.|imately)?|target(?:ing)?|match(?:ing)?|keep(?:ing)?|=|to|at)\s*(\d+(?:\.\d+)?)",
+            snippet
+        )
+        if value_match:
+            return float(value_match.group(1))
+
+        return None
+
+    def _suggestions_for_missing(
+        self,
+        missing_required: List[str],
+        missing_optional: List[str]
+    ) -> List[str]:
+        """Suggest quick replies for missing items."""
+        suggestions: List[str] = []
+        seen: set[str] = set()
+
+        for field in missing_required + missing_optional:
+            for suggestion in self.field_suggestions.get(field, []):
+                if suggestion not in seen:
+                    suggestions.append(suggestion)
+                    seen.add(suggestion)
+
+        return suggestions[:3]
+
+    def _confirmation_transition(
+        self,
+        message: str,
+        context: ConversationContext
+    ) -> Optional[ConversationState]:
+        """Handle confirmation state responses."""
+        if not message:
+            return None
+
+        message_lower = message.lower()
+
+        if any(word in message_lower for word in [
+            "yes",
+            "confirm",
+            "looks good",
+            "go ahead",
+            "proceed",
+            "start",
+            "sounds good",
+        ]):
+            if self.can_create_run(context.model_dump()):
+                return ConversationState.COMPLETED
+
+        change_keywords = ["no", "change", "modify", "edit", "update", "adjust"]
+        if any(word in message_lower for word in change_keywords):
+            if any(token in message_lower for token in ["molecule", "starting"]):
+                return ConversationState.COLLECTING_MOLECULE
+            if any(token in message_lower for token in ["target", "property"]):
+                return ConversationState.COLLECTING_TARGETS
+            return ConversationState.COLLECTING_PARAMETERS
+
+        return None
 
     def start_conversation(
         self,
@@ -83,12 +666,15 @@ class ConversationService:
         db.add(conversation)
         db.flush()
 
-        # Parse initial message if provided
-        if initial_message:
-            context = ConversationContext(**conversation.context)
-            context, new_state = self._parse_initial_message(initial_message, context)
-            conversation.context = context.model_dump()
-            conversation.state = new_state.value
+        # Process initial message (if any) to pre-populate context
+        context = ConversationContext(**conversation.context)
+        context, new_state = self._process_new_message(
+            context,
+            initial_message,
+            ConversationState.GREETING
+        )
+        conversation.context = context.model_dump()
+        conversation.state = new_state.value
 
         # Generate response
         conversation.updated_at = now
@@ -130,8 +716,8 @@ class ConversationService:
         )
         db.add(user_message)
 
-        # Parse message based on current state
-        context, new_state = self._parse_message(message, context, current_state)
+        # Parse message using accumulated prompt parsing
+        context, new_state = self._process_new_message(message=message, context=context, current_state=current_state)
 
         # Update conversation
         conversation.context = context.model_dump()
@@ -155,244 +741,22 @@ class ConversationService:
 
         return response, new_state, suggestions
 
-    def _parse_initial_message(
-        self,
-        message: str,
-        context: ConversationContext
-    ) -> Tuple[ConversationContext, ConversationState]:
-        """Parse initial message to extract any upfront information.
 
-        Args:
-            message: User message
-            context: Current context
+    def _looks_like_smiles(self, token: str) -> bool:
+        """Heuristic check to see if a token resembles a SMILES string."""
+        if not token or " " in token or len(token) > 200:
+            return False
 
-        Returns:
-            Updated context and new state
-        """
-        # Try to extract molecule
-        molecule_info = self._extract_molecule(message)
-        if molecule_info:
-            context.starting_molecule = molecule_info.get("smiles")
-            context.molecule_name = molecule_info.get("name")
-            context.molecule_source = molecule_info.get("source", "unknown")
+        if re.fullmatch(r"[A-Za-z]+", token):
+            return False
 
-        # Try to extract targets
-        targets = self._extract_targets(message)
-        if targets:
-            context.targets.extend(targets)
+        if not re.search(r"[A-Za-z]", token):
+            return False
 
-        # Determine next state
-        if context.starting_molecule and context.targets:
-            return context, ConversationState.COLLECTING_PARAMETERS
-        elif context.starting_molecule:
-            return context, ConversationState.COLLECTING_TARGETS
-        else:
-            return context, ConversationState.COLLECTING_MOLECULE
+        if not re.search(r"[=#@()\[\]\.0-9]", token) and not re.search(r"(Cl|Br)", token):
+            return False
 
-    def _parse_message(
-        self,
-        message: str,
-        context: ConversationContext,
-        current_state: ConversationState
-    ) -> Tuple[ConversationContext, ConversationState]:
-        """Parse message based on current state.
-
-        Args:
-            message: User message
-            context: Current context
-            current_state: Current conversation state
-
-        Returns:
-            Updated context and new state
-        """
-        if current_state == ConversationState.COLLECTING_MOLECULE:
-            return self._parse_molecule_message(message, context)
-        elif current_state == ConversationState.COLLECTING_TARGETS:
-            return self._parse_targets_message(message, context)
-        elif current_state == ConversationState.COLLECTING_PARAMETERS:
-            return self._parse_parameters_message(message, context)
-        elif current_state == ConversationState.CONFIRMATION:
-            return self._parse_confirmation_message(message, context)
-        else:
-            # Default: try to extract any useful information
-            return self._parse_initial_message(message, context)
-
-    def _parse_molecule_message(
-        self,
-        message: str,
-        context: ConversationContext
-    ) -> Tuple[ConversationContext, ConversationState]:
-        """Parse molecule collection message."""
-        molecule_info = self._extract_molecule(message)
-
-        if molecule_info:
-            context.starting_molecule = molecule_info.get("smiles")
-            context.molecule_name = molecule_info.get("name")
-            context.molecule_source = molecule_info.get("source", "unknown")
-
-            # Move to collecting targets
-            return context, ConversationState.COLLECTING_TARGETS
-        else:
-            # Need clarification
-            context.needs_clarification.append("molecule")
-            return context, ConversationState.COLLECTING_MOLECULE
-
-    def _parse_targets_message(
-        self,
-        message: str,
-        context: ConversationContext
-    ) -> Tuple[ConversationContext, ConversationState]:
-        """Parse targets collection message."""
-        targets = self._extract_targets(message)
-
-        if targets:
-            context.targets.extend(targets)
-            # Move to collecting parameters
-            return context, ConversationState.COLLECTING_PARAMETERS
-        else:
-            context.needs_clarification.append("targets")
-            return context, ConversationState.COLLECTING_TARGETS
-
-    def _parse_parameters_message(
-        self,
-        message: str,
-        context: ConversationContext
-    ) -> Tuple[ConversationContext, ConversationState]:
-        """Parse parameters collection message."""
-        # Extract iterations
-        iterations_match = re.search(r'(\d+)\s*iterations?', message, re.IGNORECASE)
-        if iterations_match:
-            context.max_iterations = int(iterations_match.group(1))
-
-        # Extract batch size
-        batch_match = re.search(r'batch(?:\s+size)?\s*of\s*(\d+)', message, re.IGNORECASE)
-        if not batch_match:
-            batch_match = re.search(r'(\d+)\s*(?:molecules?|compounds?)\s+per\s+batch', message, re.IGNORECASE)
-        if not batch_match:
-            batch_match = re.search(r'batch(?:\s+size)?\s*[:=]?\s*(\d+)', message, re.IGNORECASE)
-        if not batch_match:
-            batch_match = re.search(r'(\d+)\s*per\s+batch', message, re.IGNORECASE)
-        if batch_match:
-            context.batch_size = int(batch_match.group(1))
-
-        # Extract notes
-        notes_match = re.search(r'note[s]?:\s*(.+)', message, re.IGNORECASE)
-        if notes_match:
-            context.notes = notes_match.group(1).strip()
-
-        # Check if we have everything
-        if context.max_iterations and context.batch_size:
-            return context, ConversationState.CONFIRMATION
-        else:
-            return context, ConversationState.COLLECTING_PARAMETERS
-
-    def _parse_confirmation_message(
-        self,
-        message: str,
-        context: ConversationContext
-    ) -> Tuple[ConversationContext, ConversationState]:
-        """Parse confirmation message."""
-        message_lower = message.lower()
-
-        if any(word in message_lower for word in ['yes', 'correct', 'looks good', 'confirm', 'proceed', 'start']):
-            return context, ConversationState.COMPLETED
-        elif any(word in message_lower for word in ['no', 'change', 'modify', 'edit']):
-            # TODO: Implement change handling
-            return context, ConversationState.COLLECTING_PARAMETERS
-        else:
-            return context, ConversationState.CONFIRMATION
-
-    def _extract_molecule(self, message: str) -> Optional[Dict[str, Any]]:
-        """Extract molecule information from message.
-
-        Args:
-            message: User message
-
-        Returns:
-            Dictionary with molecule info or None
-        """
-        # Check for SMILES pattern
-        smiles_patterns = [
-            r'SMILES[:\s]+([A-Za-z0-9@+\-\[\]\(\)=#$]+)',
-            r'\b([A-Z][a-z]?[A-Z0-9@+\-\[\]\(\)=#$]{5,})\b'  # Simple SMILES heuristic
-        ]
-
-        for pattern in smiles_patterns:
-            match = re.search(pattern, message, re.IGNORECASE)
-            if match:
-                smiles = match.group(1)
-                return {
-                    "smiles": smiles,
-                    "source": "smiles",
-                    "name": None
-                }
-
-        # Check for common molecule names
-        common_molecules = {
-            "aspirin": "CC(=O)Oc1ccccc1C(=O)O",
-            "ibuprofen": "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
-            "caffeine": "CN1C=NC2=C1C(=O)N(C(=O)N2C)C",
-            "paracetamol": "CC(=O)Nc1ccc(O)cc1",
-            "acetaminophen": "CC(=O)Nc1ccc(O)cc1",
-        }
-
-        message_lower = message.lower()
-        for name, smiles in common_molecules.items():
-            if name in message_lower:
-                return {
-                    "smiles": smiles,
-                    "source": "name",
-                    "name": name
-                }
-
-        return None
-
-    def _extract_targets(self, message: str) -> List[TargetProperty]:
-        """Extract optimization targets from message.
-
-        Args:
-            message: User message
-
-        Returns:
-            List of target properties
-        """
-        targets = []
-        message_lower = message.lower()
-
-        # Property patterns
-        property_patterns = {
-            "qed": r'\bqed\b',
-            "logP": r'\blog\s*p\b',
-            "SA_Score": r'\b(?:sa[_\s]?score|synthetic\s+accessibility)\b',
-            "molecular_weight": r'\b(?:mw|molecular\s+weight)\b',
-        }
-
-        # Mode patterns
-        for prop_name, pattern in property_patterns.items():
-            if re.search(pattern, message_lower):
-                # Determine mode
-                mode = OptimizationMode.MAXIMIZE  # Default
-                target_value = None
-
-                if any(word in message_lower for word in ['maximize', 'max', 'increase', 'improve', 'higher']):
-                    mode = OptimizationMode.MAXIMIZE
-                elif any(word in message_lower for word in ['minimize', 'min', 'decrease', 'lower', 'reduce']):
-                    mode = OptimizationMode.MINIMIZE
-                elif any(word in message_lower for word in ['match', 'target', 'around', 'approximately']):
-                    mode = OptimizationMode.MATCH
-                    # Try to extract target value
-                    value_match = re.search(rf'{pattern}[:\s]+(?:around|approximately|~)?\s*([\d.]+)', message_lower)
-                    if value_match:
-                        target_value = float(value_match.group(1))
-
-                targets.append(TargetProperty(
-                    name=prop_name,
-                    mode=mode,
-                    target_value=target_value,
-                    weight=1.0
-                ))
-
-        return targets
+        return True
 
     def _generate_response(
         self,
@@ -410,6 +774,13 @@ class ConversationService:
         """
         ctx = ConversationContext(**context)
 
+        explicit_flags = self._compute_explicit_flags(ctx)
+        required_missing, optional_missing = self._determine_missing_fields(ctx)
+        summary_lines = self._build_summary_lines(ctx, explicit_flags)
+        summary_section = ""
+        if summary_lines:
+            summary_section = "Here's what I have so far:\n" + "\n".join(summary_lines)
+
         if state == ConversationState.GREETING:
             return (
                 "Hi! I'll help you set up a molecular optimization run. "
@@ -417,67 +788,91 @@ class ConversationService:
                 ["Aspirin", "Ibuprofen", "Show me examples"]
             )
 
-        elif state == ConversationState.COLLECTING_MOLECULE:
-            if "molecule" in ctx.needs_clarification:
-                return (
-                    "I couldn't understand the molecule. Please provide either:\n"
-                    "- A SMILES string (e.g., 'CC(=O)Oc1ccccc1C(=O)O')\n"
-                    "- A common molecule name (e.g., 'aspirin')",
-                    ["CC(=O)Oc1ccccc1C(=O)O", "Aspirin"]
-                )
-            return (
-                "What molecule would you like to optimize?",
-                ["Aspirin", "Caffeine", "Ibuprofen"]
-            )
+        if state == ConversationState.COLLECTING_MOLECULE:
+            ask_fields = ["starting_molecule"]
+            prompt = self._missing_field_prompt(ask_fields, [])
+            message_parts = []
+            if summary_section:
+                message_parts.append(summary_section)
+            message_parts.append(prompt)
+            message = "\n\n".join(part for part in message_parts if part).strip()
+            suggestions = self._suggestions_for_missing(ask_fields, []) or [
+                "Aspirin",
+                "Caffeine",
+                "CC(=O)Oc1ccccc1C(=O)O",
+            ]
+            return message, suggestions
 
-        elif state == ConversationState.COLLECTING_TARGETS:
-            molecule_desc = ctx.molecule_name or ctx.starting_molecule[:20] + "..."
-            return (
-                f"Great! You're optimizing {molecule_desc}. "
-                f"What properties would you like to optimize? (e.g., QED, logP, SA_Score)",
-                ["Maximize QED", "Minimize logP", "Improve synthetic accessibility"]
-            )
+        if state == ConversationState.COLLECTING_TARGETS:
+            ask_fields = ["targets"]
+            prompt = self._missing_field_prompt(ask_fields, [])
+            message_parts = []
+            if summary_section:
+                message_parts.append(summary_section)
+            message_parts.append(prompt)
+            message_parts.append("You can mention goals like 'maximize QED and keep logP around 2.5'.")
+            message = "\n\n".join(part for part in message_parts if part).strip()
+            suggestions = self._suggestions_for_missing(ask_fields, []) or [
+                "Maximize QED",
+                "Minimize logP",
+                "Match logP around 2.5",
+            ]
+            return message, suggestions
 
-        elif state == ConversationState.COLLECTING_PARAMETERS:
-            target_desc = ", ".join([f"{t.mode.value} {t.name}" for t in ctx.targets])
-            return (
-                f"Perfect! You want to {target_desc}. "
-                f"How many iterations and molecules per batch would you like? "
-                f"(Default: 10 iterations, 5 molecules per batch)",
-                ["10 iterations, 5 per batch", "20 iterations, 10 per batch", "Use defaults"]
-            )
+        if state == ConversationState.COLLECTING_PARAMETERS:
+            ask_fields = [
+                field for field in ("max_iterations", "batch_size")
+                if field in required_missing
+            ]
+            optional_fields = [
+                "enumeration_size"
+            ] if "enumeration_size" in optional_missing else []
+            prompt = self._missing_field_prompt(ask_fields, optional_fields)
+            message_parts = []
+            if summary_section:
+                message_parts.append(summary_section)
+            if prompt:
+                message_parts.append(prompt)
+            message_parts.append("Defaults are 10 iterations with 5 molecules per batch if you'd like to use them.")
+            message = "\n\n".join(part for part in message_parts if part).strip()
+            suggestions = self._suggestions_for_missing(ask_fields, optional_fields) or [
+                "10 iterations, batch size 5",
+                "12 iterations, batch size 8",
+                "Batch size 5 and 10 iterations",
+            ]
+            return message, suggestions
 
-        elif state == ConversationState.CONFIRMATION:
-            # Generate summary
-            molecule_desc = ctx.molecule_name or ctx.starting_molecule
-            targets_desc = "\n".join([
-                f"  - {t.mode.value.capitalize()} {t.name}" +
-                (f" (target: {t.target_value})" if t.target_value else "")
-                for t in ctx.targets
-            ])
+        if state == ConversationState.CONFIRMATION:
+            confirmation_lines = ["Here's your optimization configuration:"]
+            confirmation_lines.extend(summary_lines)
+            if "enumeration_size" in optional_missing:
+                confirmation_lines.append("- Enumeration size: not specified (optional)")
 
-            summary = (
-                f"Here's your optimization configuration:\n\n"
-                f"Molecule: {molecule_desc}\n"
-                f"Targets:\n{targets_desc}\n"
-                f"Max iterations: {ctx.max_iterations or 10}\n"
-                f"Batch size: {ctx.batch_size or 5}\n"
-            )
+            if ctx.full_prompt:
+                confirmation_lines.append("")
+                confirmation_lines.append("Original request:")
+                confirmation_lines.append(ctx.full_prompt.strip())
 
-            if ctx.notes:
-                summary += f"Notes: {ctx.notes}\n"
+            confirmation_lines.append("")
+            confirmation_lines.append("Does this look correct?")
 
-            summary += "\nDoes this look correct?"
+            suggestions = [
+                "Yes, start optimization",
+                "No, I need to change something",
+            ]
+            if "enumeration_size" in optional_missing:
+                suggestions.append("Enumerate 200 molecules")
 
-            return (summary, ["Yes, start optimization", "No, let me change something"])
+            return "\n".join(line for line in confirmation_lines if line is not None), suggestions[:3]
 
-        elif state == ConversationState.COMPLETED:
+        if state == ConversationState.COMPLETED:
             return (
                 "Configuration confirmed! Creating your optimization run...",
                 []
             )
 
-        return ("I'm not sure what to do next. Let's start over.", ["Start over"])
+        fallback_message = summary_section or "I'm not sure what to do next. Let's start over."
+        return fallback_message, ["Start over"]
 
     def can_create_run(self, context: Dict[str, Any]) -> bool:
         """Check if context has all required information to create a run.
@@ -507,24 +902,34 @@ class ConversationService:
         """
         ctx = ConversationContext(**context)
 
-        # Build targets description
-        targets_desc = []
-        for target in ctx.targets:
-            if target.mode == OptimizationMode.MAXIMIZE:
-                targets_desc.append(f"maximize {target.name}")
-            elif target.mode == OptimizationMode.MINIMIZE:
-                targets_desc.append(f"minimize {target.name}")
-            elif target.mode == OptimizationMode.MATCH and target.target_value is not None:
-                targets_desc.append(f"match {target.name} to {target.target_value}")
+        prompt_sections: List[str] = []
 
+        if ctx.full_prompt:
+            prompt_sections.append("User request:\n" + ctx.full_prompt.strip())
+
+        config_lines: List[str] = []
         molecule_desc = ctx.molecule_name or ctx.starting_molecule
-
-        prompt = (
-            f"Optimize {molecule_desc} (SMILES: {ctx.starting_molecule}) "
-            f"to {', '.join(targets_desc)}."
+        config_lines.append(
+            f"Starting molecule: {molecule_desc} (SMILES: {ctx.starting_molecule})"
         )
 
-        if ctx.notes:
-            prompt += f" Notes: {ctx.notes}"
+        if ctx.targets:
+            config_lines.append("Targets:")
+            for target in ctx.targets:
+                line = f"  - {target.mode.value} {target.name}"
+                if target.mode == OptimizationMode.MATCH and target.target_value is not None:
+                    line += f" (target {target.target_value})"
+                config_lines.append(line)
 
-        return prompt
+        config_lines.append(f"Iterations: {ctx.max_iterations or 10}")
+        config_lines.append(f"Batch size: {ctx.batch_size or 5}")
+
+        if ctx.enumeration_size is not None:
+            config_lines.append(f"Enumeration size: {ctx.enumeration_size}")
+
+        if ctx.notes:
+            config_lines.append(f"Notes: {ctx.notes}")
+
+        prompt_sections.append("Structured configuration:\n" + "\n".join(config_lines))
+
+        return "\n\n".join(prompt_sections).strip()

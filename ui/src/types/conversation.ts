@@ -23,10 +23,12 @@ export interface ConversationContext {
   targets: TargetProperty[]
   max_iterations?: number | null
   batch_size?: number | null
+  enumeration_size?: number | null
   notes?: string | null
   protein_target?: Record<string, unknown> | null
   needs_clarification: string[]
   clarifications_asked: string[]
+  full_prompt: string
 }
 
 export interface ConversationStartRequest {
