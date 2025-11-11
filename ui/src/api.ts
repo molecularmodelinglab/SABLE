@@ -47,6 +47,7 @@ export type RunInfo = {
   status: string
   created_at: string
   updated_at: string
+  prompt?: string | null
   exit_reason?: string | null
   summary_available: boolean
   results_available: boolean
