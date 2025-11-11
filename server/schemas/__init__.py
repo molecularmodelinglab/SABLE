@@ -15,6 +15,15 @@ from server.schemas.run import (
     RunInfo,
     RunList,
 )
+from server.schemas.admin import (
+    AdminAnalyticsSummary,
+    AuditEventCount,
+    AuditMetrics,
+    DailyCount,
+    SessionMetrics,
+    StatusBreakdown,
+    UserMetrics,
+)
 from server.schemas.conversation import (
     ConversationState,
     OptimizationMode,
@@ -40,6 +49,13 @@ __all__ = [
     "RunCreateRequest",
     "RunInfo",
     "RunList",
+    "AdminAnalyticsSummary",
+    "AuditEventCount",
+    "AuditMetrics",
+    "DailyCount",
+    "SessionMetrics",
+    "StatusBreakdown",
+    "UserMetrics",
     "ConversationState",
     "OptimizationMode",
     "TargetProperty",
