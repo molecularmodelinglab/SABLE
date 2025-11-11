@@ -29,6 +29,25 @@ class TestUserService:
         assert user.is_active is True
         assert user.is_verified is False
         assert verify_password(password, user.password_hash)
+        assert user.roles == []
+
+    def test_create_user_with_roles(self, db_session):
+        """User creation should store normalized, unique role assignments."""
+        email = "admin2@example.com"
+        username = "admin2"
+        password = "Adm1n#SecureR0les42"
+
+        user, error = user_service.create_user(
+            db_session,
+            email,
+            username,
+            password,
+            roles=["Admin", "observer", "admin"],
+        )
+
+        assert error is None
+        assert user is not None
+        assert user.roles == ["admin", "observer"]
     
     def test_create_user_duplicate_email(self, db_session, test_user):
         """Test creating user with duplicate email."""

@@ -26,6 +26,7 @@ class TestAuthRegistration:
         assert data["email"] == "newuser@example.com"
         assert data["username"] == "newuser"
         assert "id" in data
+        assert data.get("roles") == []
         assert "password" not in data
         assert "password_hash" not in data
     
@@ -106,6 +107,7 @@ class TestAuthLogin:
         assert "access_token" in data
         assert "user" in data
         assert data["user"]["email"] == test_user.email
+        assert data["user"].get("roles") == []
         assert "session" in data
     
     def test_login_wrong_password(self, client, test_user):
@@ -187,6 +189,7 @@ class TestAuthProfile:
         data = response.json()
         assert data["email"] == test_user.email
         assert data["username"] == test_user.username
+        assert data.get("roles") == []
         assert "password" not in data
     
     def test_get_current_user_no_auth(self, client):
