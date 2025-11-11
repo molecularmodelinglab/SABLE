@@ -4,12 +4,13 @@ import json
 import os
 import shutil
 import queue
+import threading
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Callable, Deque
 from collections import deque
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse, Response
 from sqlalchemy.orm import Session as DBSession
 
@@ -360,7 +361,6 @@ def _run_workflow_background(
 @router.post("", response_model=RunInfo)
 async def create_run(
     req: RunCreateRequest,
-    background: BackgroundTasks,
     request: Request,
     current_user: User = Depends(get_current_active_user),
     db: DBSession = Depends(get_db)
@@ -453,16 +453,32 @@ async def create_run(
         details={"prompt": req.prompt[:100]}
     )
 
-    background.add_task(
-        _run_workflow_background,
-        run_id,
-        req.prompt,
-        req.max_iterations,
-        req.batch_size,
-        experiment.id,
-        str(current_user.id),
-        current_user.username
-    )
+    environment = os.getenv("ENVIRONMENT", "development").lower()
+    if environment == "testing":
+        _run_workflow_background(
+            run_id,
+            req.prompt,
+            req.max_iterations,
+            req.batch_size,
+            experiment.id,
+            str(current_user.id),
+            current_user.username,
+        )
+    else:
+        threading.Thread(
+            target=_run_workflow_background,
+            name=f"workflow-{run_id}",
+            args=(
+                run_id,
+                req.prompt,
+                req.max_iterations,
+                req.batch_size,
+                experiment.id,
+                str(current_user.id),
+                current_user.username,
+            ),
+            daemon=True,
+        ).start()
     return info
 
 
