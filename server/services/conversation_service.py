@@ -867,7 +867,7 @@ class ConversationService:
 
         if state == ConversationState.COMPLETED:
             return (
-                "Configuration confirmed! Creating your optimization run...",
+                "Configuration confirmed! Please click the launch button to start your optimization run.",
                 []
             )
 
