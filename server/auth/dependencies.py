@@ -1,6 +1,6 @@
 """FastAPI dependencies for authentication and authorization."""
 
-from typing import Optional
+from typing import Optional, Iterable
 from fastapi import Depends, HTTPException, status, Header, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
@@ -277,25 +277,61 @@ def require_verified_email(user: User = Depends(get_current_user)) -> User:
     return user
 
 
-# Future: Role-based access control
-# def require_role(required_role: str):
-#     """
-#     Dependency factory for role-based access control.
-#
-#     Example:
-#         @app.delete("/admin/users/{user_id}")
-#         async def delete_user(
-#             user_id: str,
-#             admin: User = Depends(require_role("admin"))
-#         ):
-#             pass
-#     """
-#     async def role_checker(user: User = Depends(get_current_active_user)) -> User:
-#         user_roles = user.extra_metadata.get("roles", [])
-#         if required_role not in user_roles:
-#             raise HTTPException(
-#                 status_code=status.HTTP_403_FORBIDDEN,
-#                 detail=f"Role '{required_role}' required"
-#             )
-#         return user
-#     return role_checker
+def _normalize_roles(*roles: str | Iterable[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for entry in roles:
+        if isinstance(entry, str):
+            value = entry.strip().lower()
+            if value and value not in seen:
+                seen.add(value)
+                normalized.append(value)
+        else:
+            for item in entry:
+                if isinstance(item, str):
+                    value = item.strip().lower()
+                    if value and value not in seen:
+                        seen.add(value)
+                        normalized.append(value)
+    return normalized
+
+
+def require_role(required_role: str):
+    """Dependency factory enforcing that the current user has a specific role."""
+    if not required_role or not isinstance(required_role, str):
+        raise ValueError("required_role must be a non-empty string")
+
+    normalized_role = required_role.strip().lower()
+
+    async def role_checker(user: User = Depends(get_current_active_user)) -> User:
+        if not user.has_role(normalized_role):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Role '{required_role}' required"
+            )
+        return user
+
+    return role_checker
+
+
+def require_any_role(*roles: str):
+    """Dependency factory enforcing that the current user has at least one of the roles."""
+    normalized = _normalize_roles(*roles)
+    if not normalized:
+        raise ValueError("At least one role must be specified")
+
+    async def role_checker(user: User = Depends(get_current_active_user)) -> User:
+        if not user.has_role(normalized):
+            joined = ", ".join(sorted(set(normalized)))
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"One of the following roles is required: {joined}"
+            )
+        return user
+
+    return role_checker
+
+
+def get_current_admin(user: User = Depends(require_role("admin"))) -> User:
+    """Dependency that ensures the current user is an administrator."""
+    return user
