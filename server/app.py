@@ -10,13 +10,14 @@ from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import text
 
 from server.models.user import User
-from server.auth.dependencies import get_current_user
+from server.auth.dependencies import get_current_user, require_role
 from server.experiment_logger import experiment_logger
 from server.audit import audit_logger, AuditEventType, AuditSeverity
 
 from server.routers.auth import router as auth_router
 from server.routers.conversations import router as conversations_router
 from server.routers.runs import router as runs_router
+from server.routers.admin import router as admin_router
 
 
 app = FastAPI(
@@ -46,6 +47,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(conversations_router)
 app.include_router(runs_router)
+app.include_router(admin_router)
 
 
 # ==================== Experiment Logging Endpoints ====================
@@ -169,11 +171,10 @@ async def get_user_activity(
 
 @app.get("/audit/security")
 async def get_security_events(
-    current_user: User = Depends(get_current_user),
+    current_admin: User = Depends(require_role("admin")),
     limit: int = Query(50, ge=1, le=500)
 ):
-    """Get security-related events (admin only in production)."""
-    # TODO: Add admin check in production
+    """Get security-related events (admin only)."""
     events = audit_logger.get_security_events(limit=limit)
     return {"events": events}
 
