@@ -1,12 +1,15 @@
-import { useLocation, Routes, Route, Navigate } from 'react-router-dom'
+import { useLocation, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
 import { AppShell } from './components/AppShell'
 import { AuthGuard } from './components/AuthGuard'
+import { AdminGuard } from './components/AdminGuard'
 import { DashboardPage } from './pages/DashboardPage'
 import { NewRunPage } from './pages/NewRunPage'
 import { RunDetailPage } from './pages/RunDetailPage'
 import { LoginPage } from './pages/LoginPage'
 import { RegisterPage } from './pages/RegisterPage'
+import { AdminDashboardPage } from './pages/AdminDashboardPage'
+import { useAuthProfile } from './hooks/useAuthProfile'
 
 export function App() {
   const location = useLocation()
@@ -20,11 +23,19 @@ export function App() {
         path="/*"
         element={
           <AuthGuard>
-            <AppShell header={<Header title={headerContent.title} description={headerContent.description} />}>
+            <AppShell header={<Header title={headerContent.title} description={headerContent.description} pathname={location.pathname} />}>
               <Routes>
                 <Route path="/" element={<DashboardPage />} />
                 <Route path="/runs/new" element={<NewRunPage />} />
                 <Route path="/runs/:id" element={<RunDetailPage />} />
+                <Route
+                  path="/admin"
+                  element={
+                    <AdminGuard>
+                      <AdminDashboardPage />
+                    </AdminGuard>
+                  }
+                />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </AppShell>
@@ -35,13 +46,18 @@ export function App() {
   )
 }
 
-function Header({ title, description }: { title: string; description: string }) {
+function Header({ title, description, pathname }: { title: string; description: string; pathname: string }) {
   const [timestamp, setTimestamp] = useState(() => new Date().toLocaleString())
+  const navigate = useNavigate()
+  const { data: profile } = useAuthProfile()
 
   useEffect(() => {
     const timer = window.setInterval(() => setTimestamp(new Date().toLocaleString()), 30000)
     return () => window.clearInterval(timer)
   }, [])
+
+  const isAdmin = Boolean(profile?.user.roles?.includes('admin'))
+  const onAdminView = pathname.startsWith('/admin')
 
   return (
     <div className="app-header">
@@ -51,6 +67,34 @@ function Header({ title, description }: { title: string; description: string }) 
       </div>
       <div className="app-header__status">
         <span>{timestamp}</span>
+        {isAdmin && (
+          <div className="view-toggle" role="group" aria-label="Select dashboard view">
+            <button
+              type="button"
+              className={!onAdminView ? 'active' : ''}
+              aria-pressed={!onAdminView}
+              onClick={() => {
+                if (onAdminView) {
+                  navigate('/')
+                }
+              }}
+            >
+              Workflows
+            </button>
+            <button
+              type="button"
+              className={onAdminView ? 'active' : ''}
+              aria-pressed={onAdminView}
+              onClick={() => {
+                if (!onAdminView) {
+                  navigate('/admin')
+                }
+              }}
+            >
+              Admin
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -67,6 +111,12 @@ function buildHeader(pathname: string) {
     return {
       title: 'Run Details',
       description: 'Track live progress, checkpoints, and outputs for this campaign.',
+    }
+  }
+  if (pathname.startsWith('/admin')) {
+    return {
+      title: 'Administrator Console',
+      description: 'Operations, security signals, and aggregate analytics across the platform.',
     }
   }
   return {
