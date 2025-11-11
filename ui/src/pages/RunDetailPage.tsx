@@ -208,6 +208,12 @@ export function RunDetailPage() {
             <InfoCard label="Results" value={run.results_available ? 'Ready' : 'Not yet'} />
             <InfoCard label="Summary" value={run.summary_available ? 'Ready' : 'Not yet'} />
           </div>
+          {run.prompt && (
+            <div className="run-detail__prompt">
+              <h3>User prompt</h3>
+              <pre>{run.prompt}</pre>
+            </div>
+          )}
           {run.note && (
             <div className="run-detail__note">
               <h3>Launch note</h3>
