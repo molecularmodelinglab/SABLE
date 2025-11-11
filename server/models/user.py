@@ -1,7 +1,7 @@
 """User model for authentication and user management."""
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Iterable
 import uuid
 
 from sqlalchemy import Column, String, Boolean, DateTime, JSON, Index
@@ -60,8 +60,60 @@ class User(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "last_login": self.last_login.isoformat() if self.last_login else None,
+            "roles": self.roles,
             "extra_metadata": self.extra_metadata,
         }
+
+    @property
+    def roles(self) -> list[str]:
+        """Return normalized list of roles for the user."""
+        metadata = self.extra_metadata or {}
+        raw_roles = metadata.get("roles", []) if isinstance(metadata, dict) else []
+
+        if raw_roles is None:
+            return []
+
+        if isinstance(raw_roles, str):
+            raw_roles = [raw_roles]
+
+        normalized: list[str] = []
+        for role in raw_roles:
+            if isinstance(role, str):
+                clean = role.strip()
+                if clean:
+                    normalized.append(clean.lower())
+
+        # Ensure uniqueness while preserving order
+        seen = set()
+        deduped: list[str] = []
+        for role in normalized:
+            if role not in seen:
+                seen.add(role)
+                deduped.append(role)
+
+        return deduped
+
+    def has_role(self, *roles: str | Iterable[str]) -> bool:
+        """Check if user has any of the provided roles."""
+        if not roles:
+            return False
+
+        targets: set[str] = set()
+        for entry in roles:
+            if isinstance(entry, str):
+                targets.add(entry.strip().lower())
+            else:
+                targets.update(
+                    str(item).strip().lower()
+                    for item in entry
+                    if isinstance(item, str) and item.strip()
+                )
+
+        if not targets:
+            return False
+
+        role_set = set(self.roles)
+        return any(role in role_set for role in targets)
 
     @property
     def last_login_at(self) -> Optional[datetime]:
