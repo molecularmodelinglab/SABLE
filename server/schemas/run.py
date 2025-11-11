@@ -19,6 +19,7 @@ class RunInfo(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+    prompt: Optional[str] = Field(default=None, description="Original optimization prompt provided by the user.")
     exit_reason: Optional[str] = None
     summary_available: bool = False
     results_available: bool = False
