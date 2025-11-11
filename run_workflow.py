@@ -131,6 +131,8 @@ class WorkflowRunner:
             Final workflow state
         """
         # Initialize or load state
+        cleanup_workflow_id: Optional[str] = None
+
         if checkpoint_path:
             state = self.load_checkpoint(checkpoint_path)
             print(f"Resuming from checkpoint at iteration {state.current_iteration}")
@@ -149,6 +151,8 @@ class WorkflowRunner:
         # Set event callback for streaming logs to UI
         if event_callback:
             state._event_callback = event_callback
+            WorkflowState.register_event_callback(state.workflow_id, event_callback)
+            cleanup_workflow_id = state.workflow_id
         
         try:
             config = {
@@ -166,6 +170,9 @@ class WorkflowRunner:
             if save_checkpoints:
                 self.save_checkpoint(final_state, f"{final_state.workflow_id}_final")
             
+            if event_callback:
+                # Ensure the callback is present on the final state as well
+                setattr(final_state, "_event_callback", event_callback)
             return final_state
             
         except (NodeError, ToolError) as e:
@@ -244,6 +251,9 @@ class WorkflowRunner:
                 self.save_checkpoint(state, f"{state.workflow_id}_error")
             
             raise
+        finally:
+            if cleanup_workflow_id and event_callback:
+                WorkflowState.unregister_event_callback(cleanup_workflow_id)
     
     async def run_async(self,
                        user_prompt: str,
