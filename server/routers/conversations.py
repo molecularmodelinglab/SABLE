@@ -3,7 +3,7 @@
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session as DBSession
 
 from server.database import get_db
@@ -13,6 +13,7 @@ from server.models.session import Session as SessionModel
 from server.auth.dependencies import get_current_active_user
 from server.services.conversation_service import ConversationService
 from server.services.run_service import run_service
+from server.services.run_scheduler import run_scheduler
 from server.services.cache_service import cache_service
 from server.schemas.conversation import (
     ConversationStartRequest,
@@ -27,7 +28,6 @@ from server.schemas.conversation import (
 from server.audit import audit_logger, AuditEventType
 from server.experiment_logger import experiment_logger
 from server.storage import ensure_run_dirs
-from server.routers.runs import _run_workflow_background
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -199,7 +199,6 @@ async def send_message(
 async def confirm_and_create_run(
     conversation_id: str,
     payload: ConversationConfirmRequest,
-    background: BackgroundTasks,
     http_request: Request,
     current_user: User = Depends(get_current_active_user),
     db: DBSession = Depends(get_db)
@@ -311,14 +310,6 @@ async def confirm_and_create_run(
             extra_metadata=extra_metadata,
         )
 
-        run_model = run_service.update_run_status(db, run_id, "running") or run_model
-
-        info = run_service.run_to_info(run_model, paths=paths)
-        info.username = current_user.username
-
-        cache_service.cache_run(run_id, info.model_dump())
-        cache_service.invalidate_user_runs_list(str(current_user.id))
-
         experiment = experiment_logger.create_experiment(
             run_id=run_id,
             session_id=str(session.id),
@@ -332,16 +323,23 @@ async def confirm_and_create_run(
             notes=note,
         )
 
-        background.add_task(
-            _run_workflow_background,
-            run_id,
-            prompt,
-            context.max_iterations,
-            context.batch_size,
-            experiment.id,
-            str(current_user.id),
-            current_user.username,
-        )
+        updated_metadata = dict(run_model.extra_metadata or {})
+        updated_metadata["experiment_id"] = experiment.id
+        run_model.extra_metadata = updated_metadata
+        db.commit()
+        db.refresh(run_model)
+
+        run_scheduler.submit_run(run_id)
+
+        db.refresh(run_model)
+
+        metadata = run_model.extra_metadata or {}
+        paths = metadata.get("paths", {}) if isinstance(metadata, dict) else {}
+        info = run_service.run_to_info(run_model, paths=paths)
+        info.username = current_user.username
+
+        cache_service.cache_run(run_id, info.model_dump())
+        cache_service.invalidate_user_runs_list(str(current_user.id))
 
         # Update conversation to reflect run creation
         conversation.state = ConversationState.COMPLETED.value

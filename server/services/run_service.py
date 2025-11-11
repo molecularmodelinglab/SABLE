@@ -1,10 +1,11 @@
 """Run service for managing optimization runs in the database."""
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Iterable
 from datetime import datetime
 from sqlalchemy.orm import Session
-from sqlalchemy.orm.exc import DetachedInstanceError
-from sqlalchemy import desc
+from sqlalchemy.orm.exc import DetachedInstanceError, StaleDataError
+from sqlalchemy import desc, func
+from sqlalchemy.exc import ProgrammingError, OperationalError
 
 from server.models.run import Run as RunModel, RunLog
 from server.schemas.run import RunInfo
@@ -106,6 +107,34 @@ class RunService:
             desc(RunModel.created_at)
         ).limit(limit).offset(offset).all()
 
+    def count_runs_with_status(
+        self,
+        db: Session,
+        statuses: Iterable[str]
+    ) -> int:
+        """Count runs matching any of the provided statuses."""
+        statuses = list(set(statuses))
+        query = db.query(func.count(RunModel.id))
+        if statuses:
+            query = query.filter(RunModel.status.in_(statuses))
+        try:
+            return query.scalar() or 0
+        except (ProgrammingError, OperationalError):
+            # Database schema may not be initialized yet (e.g., during test bootstrap)
+            return 0
+
+    def get_next_queued_run(self, db: Session) -> Optional[RunModel]:
+        """Fetch next queued run in FIFO order."""
+        try:
+            return db.query(RunModel).filter(
+                RunModel.status == "queued"
+            ).order_by(
+                RunModel.created_at.asc(),
+                RunModel.updated_at.asc()
+            ).first()
+        except (ProgrammingError, OperationalError):
+            return None
+
     def update_run_status(
         self,
         db: Session,
@@ -136,7 +165,11 @@ class RunService:
             if status == "completed":
                 run.completed_at = datetime.now()
 
-            db.commit()
+            try:
+                db.commit()
+            except StaleDataError:
+                db.rollback()
+                return None
             db.refresh(run)
 
         return run
@@ -162,7 +195,11 @@ class RunService:
         if run:
             run.starting_molecules = starting_molecules
             run.updated_at = datetime.now()
-            db.commit()
+            try:
+                db.commit()
+            except StaleDataError:
+                db.rollback()
+                return None
             db.refresh(run)
 
         return run

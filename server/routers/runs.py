@@ -4,7 +4,6 @@ import json
 import os
 import shutil
 import queue
-import threading
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Callable, Deque
@@ -28,45 +27,13 @@ from server.storage import (
 )
 from server.services.run_service import run_service
 from server.services.cache_service import cache_service
-from server.experiment_logger import experiment_logger, ExperimentError
+from server.experiment_logger import experiment_logger
 from server.audit import audit_logger, AuditEventType, AuditSeverity
 from server.models.session import Session as SessionModel
-from run_workflow import WorkflowRunner
+from server.services.run_events import run_event_hub
+from server.services.run_scheduler import run_scheduler
 
 router = APIRouter(prefix="/runs", tags=["runs"])
-
-# Subscribers for Server-Sent Events
-_SUBSCRIBERS: Dict[str, list[Callable[[Dict[str, Any]], None]]] = {}
-
-
-def get_environment_info() -> Dict[str, str]:
-    """Collect environment information for reproducibility."""
-    import platform
-    import subprocess
-
-    def get_git_commit() -> str | None:
-        """Get current git commit hash."""
-        try:
-            result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                cwd=Path(__file__).parent.parent.parent
-            )
-            if result.returncode == 0:
-                return result.stdout.strip()
-        except Exception:
-            pass
-        return None
-
-    return {
-        "python_version": platform.python_version(),
-        "platform": platform.platform(),
-        "processor": platform.processor(),
-        "hostname": platform.node(),
-        "git_commit": get_git_commit() or "unknown",
-    }
-
 
 def check_run_authorization(run_id: str, user: User, db: DBSession) -> RunInfo:
     """
@@ -128,234 +95,6 @@ def check_run_authorization(run_id: str, user: User, db: DBSession) -> RunInfo:
     cache_service.cache_run(run_id, info.model_dump())
 
     return info
-
-
-def _append_log(run_id: str, event: Dict[str, Any]):
-    """Append event to run logs."""
-    log_path = run_dir(run_id) / "logs" / "logs.ndjson"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("a") as f:
-        f.write(json.dumps(event) + "\n")
-
-    # Fan-out to in-memory subscribers
-    for cb in _SUBSCRIBERS.get(run_id, []):
-        try:
-            cb(event)
-        except Exception:
-            pass
-
-
-def _run_workflow_background(
-    run_id: str,
-    prompt: str,
-    max_iterations: int | None,
-    batch_size: int | None,
-    experiment_id: str,
-    user_id: str,
-    username: str
-):
-    """Run workflow in background."""
-    experiment = experiment_logger.get_experiment(experiment_id)
-    if not experiment:
-        return
-
-    # Get database context for updates
-    db_context = get_db_context()
-
-    environment = os.getenv("ENVIRONMENT", "development")
-
-    # Mark experiment as started
-    if experiment:
-        experiment.mark_started()
-        experiment.environment = get_environment_info()
-        experiment_logger.update_experiment(experiment)
-
-    # Log experiment start
-    audit_logger.log(
-        event_type=AuditEventType.EXPERIMENT_STARTED,
-        message=f"Started experiment {experiment_id} for run {run_id}",
-        user_id=user_id,
-        username=username,
-        experiment_id=experiment_id,
-        run_id=run_id,
-        details={"prompt": prompt}
-    )
-
-    # Short-circuit workflow execution in testing environment
-    if environment == "testing":
-        with db_context as db:
-            run_service.update_run_status(db, run_id, "completed", "testing-shortcut")
-            run_model = run_service.get_run(db, run_id)
-
-        if run_model:
-            cached_info = run_service.run_to_info(run_model)
-            cache_service.cache_run(run_id, cached_info.model_dump())
-
-        cache_service.invalidate_user_runs_list(user_id)
-
-        _append_log(run_id, {
-            "timestamp": datetime.now().isoformat(),
-            "message": "Workflow skipped in testing environment",
-            "level": "INFO",
-        })
-
-        if experiment:
-            experiment.mark_completed()
-            experiment_logger.update_experiment(experiment)
-
-        audit_logger.log(
-            event_type=AuditEventType.EXPERIMENT_COMPLETED,
-            message=f"Completed experiment {experiment_id} for run {run_id} (testing shortcut)",
-            user_id=user_id,
-            username=username,
-            experiment_id=experiment_id,
-            run_id=run_id,
-            details={"status": "success", "mode": "testing"}
-        )
-
-        return
-
-    runner = WorkflowRunner(checkpoint_dir=str(run_dir(run_id) / "checkpoints"))
-
-    def emit(event: Dict[str, Any]):
-        _append_log(run_id, event)
-
-        # Also log to experiment
-        if experiment:
-            experiment.add_log(
-                message=event.get("message", str(event)),
-                level=event.get("level", "INFO"),
-                node=event.get("node"),
-                iteration=event.get("iteration"),
-                data=event
-            )
-
-        # Capture starting molecules
-        starting = None
-        data = event.get("data")
-        if isinstance(data, dict) and data.get("starting_molecules"):
-            starting = data.get("starting_molecules")
-        elif event.get("starting_molecules"):
-            starting = event.get("starting_molecules")
-
-        if starting:
-            if isinstance(starting, (list, tuple, set)):
-                normalized = [str(m) for m in starting]
-            else:
-                normalized = [str(starting)]
-
-            # Update database
-            with db_context as db:
-                run_service.update_run_molecules(db, run_id, normalized)
-
-            # Invalidate cache since run data changed
-            cache_service.invalidate_run(run_id)
-            cache_service.invalidate_user_runs_list(user_id)
-
-    try:
-        # Run the workflow
-        state = runner.run(
-            user_prompt=prompt,
-            checkpoint_path=None,
-            save_checkpoints=True,
-            event_callback=emit
-        )
-
-        starting_molecules = list(state.starting_molecules or [])
-        if starting_molecules:
-            experiment.metadata["starting_molecules"] = starting_molecules
-
-        # Update experiment with results
-        experiment.parsed_arguments = state.parsed_arguments
-        experiment.targets = [t.model_dump() for t in state.targets]
-        experiment.best_molecules = state.best_molecules
-        experiment.metrics.iterations_completed = state.current_iteration
-        experiment.metrics.molecules_evaluated = len(state.experimental_results)
-        experiment.metrics.bo_iterations = len(state.bo_rounds)
-
-        # Export results
-        results_path = results_json_path(run_id)
-        results_path.parent.mkdir(parents=True, exist_ok=True)
-        runner.export_results(state, str(results_path))
-
-        # Write summary
-        if state.summary:
-            s_path = summary_txt_path(run_id)
-            s_path.write_text(state.summary)
-            experiment.summary = state.summary
-
-        # Update database
-        with db_context as db:
-            run_service.update_run_status(db, run_id, str(state.status), state.exit_reason)
-            if starting_molecules:
-                run_service.update_run_molecules(db, run_id, starting_molecules)
-
-        # Invalidate cache since run data changed
-        cache_service.invalidate_run(run_id)
-        cache_service.invalidate_user_runs_list(user_id)
-
-        _append_log(run_id, {
-            "timestamp": datetime.now().isoformat(),
-            "message": f"Workflow completed with status {state.status}",
-            "level": "INFO",
-        })
-
-        # Mark experiment as completed
-        experiment.mark_completed()
-        experiment_logger.update_experiment(experiment)
-
-        # Log completion
-        audit_logger.log(
-            event_type=AuditEventType.EXPERIMENT_COMPLETED,
-            message=f"Completed experiment {experiment_id} for run {run_id}",
-            user_id=user_id,
-            username=username,
-            experiment_id=experiment_id,
-            run_id=run_id,
-            details={
-                "status": str(state.status),
-                "molecules_evaluated": len(state.experimental_results)
-            }
-        )
-
-    except Exception as e:
-        # Mark experiment as failed
-        error = ExperimentError(
-            error_type=type(e).__name__,
-            message=str(e),
-            stack_trace="",  # Don't include full traceback for security
-        )
-        experiment.mark_failed(error)
-        experiment_logger.update_experiment(experiment)
-
-        # Update database
-        with db_context as db:
-            run_service.update_run_status(db, run_id, "failed", str(e))
-
-        # Invalidate cache
-        cache_service.invalidate_run(run_id)
-        cache_service.invalidate_user_runs_list(user_id)
-
-        # Log error
-        _append_log(run_id, {
-            "timestamp": datetime.now().isoformat(),
-            "message": f"Workflow failed: {str(e)}",
-            "level": "ERROR",
-        })
-
-        # Log failure
-        audit_logger.log(
-            event_type=AuditEventType.EXPERIMENT_FAILED,
-            message=f"Experiment {experiment_id} failed for run {run_id}",
-            user_id=user_id,
-            username=username,
-            experiment_id=experiment_id,
-            run_id=run_id,
-            severity=AuditSeverity.ERROR,
-            details={"error": str(e)}
-        )
-
-
 # ==================== API Endpoints ====================
 
 @router.post("", response_model=RunInfo)
@@ -417,20 +156,10 @@ async def create_run(
         extra_metadata=extra_metadata,
     )
 
-    # Update status to running
-    run_service.update_run_status(db, run_id, "running")
-
-    # Create RunInfo for response
-    info = run_service.run_to_info(run_model, paths=paths)
-    info.username = current_user.username
-
-    # Cache the run for fast subsequent access
-    cache_service.cache_run(run_id, info.model_dump())
-
     # Create experiment record
     experiment = experiment_logger.create_experiment(
         run_id=run_id,
-        session_id="",
+        session_id=str(session.id),
         user_id=str(current_user.id),
         username=current_user.username,
         prompt=req.prompt,
@@ -440,6 +169,13 @@ async def create_run(
         },
         notes=note,
     )
+
+    # Persist experiment identifier on the run metadata
+    updated_metadata = dict(run_model.extra_metadata or {})
+    updated_metadata["experiment_id"] = experiment.id
+    run_model.extra_metadata = updated_metadata
+    db.commit()
+    db.refresh(run_model)
 
     # Log in audit trail
     audit_logger.log(
@@ -453,32 +189,19 @@ async def create_run(
         details={"prompt": req.prompt[:100]}
     )
 
-    environment = os.getenv("ENVIRONMENT", "development").lower()
-    if environment == "testing":
-        _run_workflow_background(
-            run_id,
-            req.prompt,
-            req.max_iterations,
-            req.batch_size,
-            experiment.id,
-            str(current_user.id),
-            current_user.username,
-        )
-    else:
-        threading.Thread(
-            target=_run_workflow_background,
-            name=f"workflow-{run_id}",
-            args=(
-                run_id,
-                req.prompt,
-                req.max_iterations,
-                req.batch_size,
-                experiment.id,
-                str(current_user.id),
-                current_user.username,
-            ),
-            daemon=True,
-        ).start()
+    run_scheduler.submit_run(run_id)
+
+    # Refresh run model with latest status
+    db.refresh(run_model)
+
+    metadata = run_model.extra_metadata or {}
+    paths = metadata.get("paths", {}) if isinstance(metadata, dict) else {}
+    info = run_service.run_to_info(run_model, paths=paths)
+    info.username = current_user.username
+
+    cache_service.cache_run(run_id, info.model_dump())
+    cache_service.invalidate_user_runs_list(str(current_user.id))
+
     return info
 
 
@@ -554,10 +277,10 @@ def sse_events(
 
     q: "queue.Queue[Dict[str, Any]]" = queue.Queue()
 
-    def push(evt: Dict[str, Any]):
+    def push(evt: Dict[str, Any]) -> None:
         q.put(evt)
 
-    _SUBSCRIBERS.setdefault(run_id, []).append(push)
+    run_event_hub.subscribe(run_id, push)
 
     def stream():
         try:
@@ -567,10 +290,7 @@ def sse_events(
                 evt = q.get()
                 yield f"data: {json.dumps(evt)}\n\n"
         finally:
-            # Remove subscriber
-            subs = _SUBSCRIBERS.get(run_id, [])
-            if push in subs:
-                subs.remove(push)
+            run_event_hub.unsubscribe(run_id, push)
 
     return StreamingResponse(stream(), media_type="text/event-stream")
 
