@@ -275,6 +275,7 @@ class RunService:
             status=run.status,
             created_at=run.created_at,
             updated_at=run.updated_at,
+            prompt=getattr(run, "prompt", None),
             exit_reason=run.exit_reason,
             summary_available=summary_available,
             results_available=results_available,
