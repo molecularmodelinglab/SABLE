@@ -1,35 +1,33 @@
-import { ReactNode, useEffect, useState } from 'react'
+import { ReactNode, useMemo, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { getAuthProfile, logout } from '../api'
-import type { AuthProfile } from '../types/session'
-
-const navLinks = [
-  { to: '/', label: 'Dashboard', icon: '📊', end: true },
-  { to: '/runs/new', label: 'New Run', icon: '🎯', end: false },
-]
+import { useQueryClient } from '@tanstack/react-query'
+import { logout } from '../api'
+import { useAuthProfile } from '../hooks/useAuthProfile'
 
 export function AppShell({ header, children }: { header: ReactNode; children: ReactNode }) {
   const location = useLocation()
   const navigate = useNavigate()
-  const [profile, setProfile] = useState<AuthProfile | null>(null)
+  const queryClient = useQueryClient()
+  const { data: profile } = useAuthProfile()
   const [showUserMenu, setShowUserMenu] = useState(false)
 
-  useEffect(() => {
-    loadSession()
-  }, [])
+  const navLinks = useMemo(() => {
+    const baseLinks = [
+      { to: '/', label: 'Dashboard', icon: '📊', end: true },
+      { to: '/runs/new', label: 'New Run', icon: '🎯', end: false },
+    ]
 
-  async function loadSession() {
-    try {
-      const authProfile = await getAuthProfile()
-      setProfile(authProfile)
-    } catch (error) {
-      // Session invalid, user will be redirected by AuthGuard
+    if (profile?.user.roles?.includes('admin')) {
+      baseLinks.push({ to: '/admin', label: 'Admin', icon: '🛡️', end: false })
     }
-  }
+
+    return baseLinks
+  }, [profile?.user.roles])
 
   async function handleLogout() {
     try {
       await logout()
+      queryClient.removeQueries({ queryKey: ['auth'] })
       navigate('/login', { replace: true })
     } catch (error) {
       console.error('Logout error:', error)
