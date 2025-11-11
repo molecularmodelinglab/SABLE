@@ -19,7 +19,8 @@ class UserService:
         email: str,
         username: str,
         password: str,
-        auth_provider: str = "local"
+        auth_provider: str = "local",
+        roles: Optional[list[str]] = None
     ) -> tuple[Optional[User], Optional[str]]:
         """
         Create a new user account.
@@ -69,6 +70,20 @@ class UserService:
 
         # Create user
         try:
+            metadata: dict = {}
+            if roles:
+                normalized_roles: list[str] = []
+                seen = set()
+                for role in roles:
+                    if not isinstance(role, str):
+                        continue
+                    value = role.strip().lower()
+                    if value and value not in seen:
+                        seen.add(value)
+                        normalized_roles.append(value)
+                if normalized_roles:
+                    metadata["roles"] = normalized_roles
+
             user = User(
                 email=email.lower(),
                 username=username,
@@ -78,6 +93,7 @@ class UserService:
                 is_verified=False,  # Require email verification
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
+                extra_metadata=metadata,
             )
 
             db.add(user)
