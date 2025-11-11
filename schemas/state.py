@@ -6,7 +6,8 @@ of the molecular optimization workflow as it flows through a LangGraph graph.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple, Callable, Union
+from threading import RLock
+from typing import Any, Dict, List, Optional, Tuple, Callable, Union, ClassVar
 from pydantic import BaseModel, Field, PrivateAttr, model_validator, ConfigDict
 
 
@@ -208,6 +209,8 @@ class WorkflowState(BaseModel):
 
     # Private callback used for UI live events; not part of the public schema
     _event_callback: Optional[Callable[[Dict[str, Any]], None]] = PrivateAttr(default=None)
+    _callback_registry: ClassVar[Dict[str, Callable[[Dict[str, Any]], None]]] = {}
+    _registry_lock: ClassVar[RLock] = RLock()
 
     def log(self, action: str, data: Any = None) -> None:
         """Adds a structured log entry to the state."""
@@ -222,6 +225,9 @@ class WorkflowState(BaseModel):
 
         # Fan out to UI if an event callback is present
         cb = getattr(self, "_event_callback", None)
+        if cb is None:
+            with self._registry_lock:
+                cb = self._callback_registry.get(self.workflow_id)
         if cb is not None:
             try:
                 payload = {
@@ -265,6 +271,23 @@ class WorkflowState(BaseModel):
         is_max_iterations_reached = self.current_iteration >= self.max_iterations
 
         return not (is_terminated or is_max_iterations_reached)
+
+    def model_copy(self, *args, **kwargs):  # type: ignore[override]
+        """Ensure private event callbacks survive state cloning."""
+        copied = super().model_copy(*args, **kwargs)
+        if isinstance(copied, WorkflowState):
+            setattr(copied, "_event_callback", getattr(self, "_event_callback", None))
+        return copied
+
+    @classmethod
+    def register_event_callback(cls, workflow_id: str, callback: Callable[[Dict[str, Any]], None]) -> None:
+        with cls._registry_lock:
+            cls._callback_registry[workflow_id] = callback
+
+    @classmethod
+    def unregister_event_callback(cls, workflow_id: str) -> None:
+        with cls._registry_lock:
+            cls._callback_registry.pop(workflow_id, None)
 
     model_config = ConfigDict(
         # """Pydantic model configuration."""
