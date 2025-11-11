@@ -7,6 +7,8 @@ export interface AuthUser {
   is_verified: boolean;
   created_at: string;
   last_login?: string | null;
+  roles?: string[];
+  extra_metadata?: Record<string, unknown> | null;
 }
 
 export interface Session {
