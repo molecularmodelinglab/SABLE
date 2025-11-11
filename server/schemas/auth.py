@@ -74,6 +74,7 @@ class UserResponse(BaseModel):
     is_verified: bool = Field(..., description="Whether email is verified")
     created_at: datetime = Field(..., description="Account creation timestamp")
     last_login: Optional[datetime] = Field(None, description="Last login timestamp")
+    roles: list[str] = Field(default_factory=list, description="Roles assigned to the user")
 
     model_config = ConfigDict(
         from_attributes = True,
@@ -86,7 +87,8 @@ class UserResponse(BaseModel):
                 "is_active": True,
                 "is_verified": True,
                 "created_at": "2025-01-01T12:00:00Z",
-                "last_login": "2025-01-15T08:30:00Z"
+                "last_login": "2025-01-15T08:30:00Z",
+                "roles": ["admin"],
             }
         }
     )
@@ -126,7 +128,8 @@ class UserLoginResponse(BaseModel):
                     "is_active": True,
                     "is_verified": True,
                     "created_at": "2025-01-01T12:00:00Z",
-                    "last_login": "2025-01-15T08:30:00Z"
+                    "last_login": "2025-01-15T08:30:00Z",
+                    "roles": ["admin"],
                 },
                 "session": {
                     "id": "650e8400-e29b-41d4-a716-446655440001",
