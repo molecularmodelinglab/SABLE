@@ -22,6 +22,7 @@ import {
 import { Experiment, ExperimentListResponse } from './types/experiment'
 import { AuditEvent, AuditEventsResponse } from './types/audit'
 import { AnalyticsSummary, HealthCheck } from './types/analytics'
+import { AdminAnalyticsSummary } from './types/admin'
 
 export const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000'
 
@@ -333,5 +334,12 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
 
 export async function getHealthCheck(): Promise<HealthCheck> {
   return request<HealthCheck>('/health')
+}
+
+
+// ==================== Admin Analytics ====================
+
+export async function getAdminAnalyticsSummary(): Promise<AdminAnalyticsSummary> {
+  return request<AdminAnalyticsSummary>('/admin/analytics/summary')
 }
 
