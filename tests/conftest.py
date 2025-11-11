@@ -50,6 +50,8 @@ from server.models.user import User
 from server.models.session import Session as SessionModel
 from server.models.run import Run
 from server.models.conversation import Conversation
+from server.models.experiment import Experiment
+from server.models.audit import AuditEvent
 from server.schemas.conversation import ConversationState
 from server.auth.password import hash_password, verify_password
 from server.services.cache_service import cache_service
@@ -138,6 +140,16 @@ def test_user_data():
 
 
 @pytest.fixture
+def admin_user_data():
+    """Administrator account credentials used for privileged API calls."""
+    return {
+        "email": "admin@example.com",
+        "username": "adminuser",
+        "password": "Adm1nP@ssw0rd!",
+    }
+
+
+@pytest.fixture
 def test_user(db_session, test_user_data) -> User:
     """Create a test user in the database."""
     existing = db_session.query(User).filter_by(email=test_user_data["email"]).one_or_none()
@@ -147,6 +159,9 @@ def test_user(db_session, test_user_data) -> User:
             existing.password_hash = hash_password(test_user_data["password"])
         existing.is_active = True
         existing.is_verified = True
+        metadata = dict(existing.extra_metadata or {})
+        metadata.setdefault("roles", [])
+        existing.extra_metadata = metadata
         db_session.commit()
         db_session.refresh(existing)
         return existing
@@ -155,7 +170,8 @@ def test_user(db_session, test_user_data) -> User:
         username=test_user_data["username"],
         password_hash=hash_password(test_user_data["password"]),
         is_active=True,
-        is_verified=True
+        is_verified=True,
+        extra_metadata={"roles": []},
     )
     db_session.add(user)
     db_session.commit()
@@ -181,6 +197,55 @@ def test_user_token(client, test_user, test_user_data) -> str:
 def auth_headers(test_user_token) -> dict:
     """Get authorization headers with JWT token."""
     return {"Authorization": f"Bearer {test_user_token}"}
+
+
+@pytest.fixture
+def admin_user(db_session, admin_user_data) -> User:
+    """Create or refresh an administrator user."""
+    existing = db_session.query(User).filter_by(email=admin_user_data["email"]).one_or_none()
+    metadata_roles = {"roles": ["admin"]}
+    if existing:
+        if not verify_password(admin_user_data["password"], existing.password_hash or ""):
+            existing.password_hash = hash_password(admin_user_data["password"])
+        existing.is_active = True
+        existing.is_verified = True
+        existing.extra_metadata = metadata_roles
+        db_session.commit()
+        db_session.refresh(existing)
+        return existing
+
+    user = User(
+        email=admin_user_data["email"],
+        username=admin_user_data["username"],
+        password_hash=hash_password(admin_user_data["password"]),
+        is_active=True,
+        is_verified=True,
+        extra_metadata=metadata_roles,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+@pytest.fixture
+def admin_token(client, admin_user, admin_user_data) -> str:
+    """Obtain an access token for the administrator user."""
+    response = client.post(
+        "/auth/login",
+        json={
+            "email": admin_user_data["email"],
+            "password": admin_user_data["password"],
+        },
+    )
+    assert response.status_code == 200
+    return response.json()["access_token"]
+
+
+@pytest.fixture
+def admin_headers(admin_token) -> dict:
+    """Authorization headers for administrator-protected endpoints."""
+    return {"Authorization": f"Bearer {admin_token}"}
 
 
 # Additional user fixtures
@@ -366,6 +431,8 @@ def cleanup_after_test(db_session):
     
     # Clean up all tables to prevent unique constraint violations
     try:
+        db_session.query(AuditEvent).delete()
+        db_session.query(Experiment).delete()
         db_session.query(Run).delete()
         db_session.query(User).delete()
         db_session.query(Conversation).delete()
