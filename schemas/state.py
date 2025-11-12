@@ -168,6 +168,10 @@ class WorkflowState(BaseModel):
     characterization_config: Dict[str, Any] = Field(
         default_factory=dict, description="Configuration for characterization tools."
     )
+    run_paths: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Filesystem paths provisioned for this run (inputs, outputs, artifacts, etc.).",
+    )
 
     llm_client: Optional[Any] = Field(
         default=None, exclude=True

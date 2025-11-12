@@ -183,6 +183,7 @@ def _run_workflow_background(run_id: str) -> None:
             checkpoint_path=None,
             save_checkpoints=True,
             event_callback=emit,
+            run_paths=paths or None,
         )
 
         starting_molecules = list(state.starting_molecules or [])

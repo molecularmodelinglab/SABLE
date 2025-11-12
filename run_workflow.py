@@ -112,12 +112,13 @@ class WorkflowRunner:
         
         print(f"Checkpoint loaded: {checkpoint_path}")
         return state
-    
+
     def run(self, 
             user_prompt: str,
             checkpoint_path: Optional[str] = None,
             save_checkpoints: bool = True,
-            event_callback: Optional[callable] = None) -> WorkflowState:
+            event_callback: Optional[callable] = None,
+            run_paths: Optional[dict[str, str]] = None) -> WorkflowState:
         """
         Run the molecular optimization workflow.
         
@@ -148,6 +149,12 @@ class WorkflowRunner:
             else:
                 print("⚠ LLM client not available - will use rule-based extraction only")
         
+        if run_paths:
+            try:
+                state.run_paths.update(run_paths)
+            except Exception:
+                state.run_paths = dict(run_paths)
+
         # Set event callback for streaming logs to UI
         if event_callback:
             state._event_callback = event_callback
