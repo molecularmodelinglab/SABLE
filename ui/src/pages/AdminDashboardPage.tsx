@@ -1,9 +1,14 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { getAdminAnalyticsSummary } from '../api'
+import { getAdminAnalyticsSummary, listAdminRuns, type RunInfo } from '../api'
+import { RunStatusBadge } from '../components/RunStatusBadge'
 import type { AdminAnalyticsSummary, DailyCount } from '../types/admin'
 
 export function AdminDashboardPage() {
+  const navigate = useNavigate()
+  const [runSearch, setRunSearch] = useState('')
+
   const {
     data,
     isLoading,
@@ -16,6 +21,17 @@ export function AdminDashboardPage() {
     refetchInterval: 60_000,
     staleTime: 30_000,
     retry: 1,
+  })
+
+  const {
+    data: allRuns = [],
+    isLoading: runsLoading,
+    isError: runsError,
+    refetch: refetchRuns,
+  } = useQuery<RunInfo[]>({
+    queryKey: ['admin', 'runs'],
+    queryFn: () => listAdminRuns(),
+    refetchInterval: 15000,
   })
 
   if (isLoading) {
@@ -43,6 +59,18 @@ export function AdminDashboardPage() {
   const runStatusEntries = Object.entries(data.runs.by_status)
   const experimentStatusEntries = Object.entries(data.experiments.by_status)
   const auditSeverityEntries = Object.entries(data.audit.last_7_days_by_severity)
+
+
+  const filteredRuns = useMemo(() => {
+    const term = runSearch.trim().toLowerCase()
+    if (!term) return allRuns
+    return allRuns.filter((run) => {
+      const idMatch = run.id.toLowerCase().includes(term)
+      const userMatch = (run.username || '').toLowerCase().includes(term)
+      const reasonMatch = (run.exit_reason || '').toLowerCase().includes(term)
+      return idMatch || userMatch || reasonMatch
+    })
+  }, [allRuns, runSearch])
 
   return (
     <div className="admin-dashboard">
@@ -151,6 +179,72 @@ export function AdminDashboardPage() {
               )}
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="admin-section admin-runs">
+        <div className="admin-runs__header">
+          <div>
+            <div className="admin-runs__title">All user runs</div>
+            <p className="admin-empty">Browse and inspect optimization runs across all accounts.</p>
+          </div>
+          <div className="admin-runs__controls">
+            <div className="admin-runs__search">
+              <input
+                type="search"
+                placeholder="Search by run id, user, or exit reason"
+                value={runSearch}
+                onChange={(e) => setRunSearch(e.target.value)}
+                aria-label="Search runs"
+              />
+            </div>
+            <button className="ghost" onClick={() => refetchRuns()} disabled={runsLoading}>
+              {runsLoading ? 'Refreshing…' : 'Refresh runs'}
+            </button>
+          </div>
+        </div>
+
+        <div className="admin-runs__table">
+          {runsLoading ? (
+            <div className="admin-runs__empty">Loading runs…</div>
+          ) : runsError ? (
+            <div className="admin-runs__empty">Unable to load runs. Try refreshing.</div>
+          ) : filteredRuns.length === 0 ? (
+            <div className="admin-runs__empty">No runs match the current filters.</div>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Run</th>
+                  <th>User</th>
+                  <th>Status</th>
+                  <th>Created</th>
+                  <th>Updated</th>
+                  <th>Exit reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRuns.map((run) => (
+                  <tr
+                    key={run.id}
+                    onClick={() => navigate(`/runs/${run.id}`)}
+                    title={run.note ? `Note: ${run.note}` : undefined}
+                  >
+                    <td>
+                      <code className="dashboard__run-id">{run.id}</code>
+                    </td>
+                    <td>{run.username || '—'}</td>
+                    <td>
+                      <RunStatusBadge status={run.status} />
+                    </td>
+                    <td>{new Date(run.created_at).toLocaleString()}</td>
+                    <td>{new Date(run.updated_at).toLocaleString()}</td>
+                    <td>{run.exit_reason || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </section>
     </div>
