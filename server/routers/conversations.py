@@ -12,6 +12,7 @@ from server.models.conversation import Conversation as ConversationModel
 from server.models.session import Session as SessionModel
 from server.auth.dependencies import get_current_active_user
 from server.services.conversation_service import ConversationService
+from utils.llm_factory import get_llm_client
 from server.services.run_service import run_service
 from server.services.run_scheduler import run_scheduler
 from server.services.cache_service import cache_service
@@ -31,8 +32,9 @@ from server.storage import ensure_run_dirs
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
-# Initialize conversation service
-conversation_service = ConversationService()
+# Initialize conversation service with shared LLM client (if available)
+_conversation_llm_client = get_llm_client()
+conversation_service = ConversationService(llm_client=_conversation_llm_client)
 
 
 @router.post("", response_model=ConversationResponse)
