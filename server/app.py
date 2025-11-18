@@ -1,5 +1,5 @@
 """LIZARD API with new database-backed authentication system."""
-
+import os
 from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
@@ -27,13 +27,20 @@ app = FastAPI(
 )
 
 # CORS configuration
-origins = [
+_default_origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://lizard-frontend-dept-lizard-prod.apps.cloudapps.unc.edu",
 ]
 
+_env_origins = os.getenv("CORS_ORIGINS")
+if _env_origins:
+    origins = [o.strip() for o in _env_origins.split(",") if o.strip()]
+else:
+    origins = _default_origins
+print(origins)
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
