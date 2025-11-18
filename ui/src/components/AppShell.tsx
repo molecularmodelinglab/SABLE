@@ -163,6 +163,7 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
         
         <div className="app-shell__footer">
           <div>Molecular Modelling Lab</div>
+          <div>UNC - Chapel Hill</div>
           <div className="app-shell__footer-meta">{new Date().getFullYear()}</div>
         </div>
       </aside>
