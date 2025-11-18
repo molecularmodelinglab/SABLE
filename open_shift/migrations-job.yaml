@@ -1,0 +1,23 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: lizard-migrations
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrations
+          image: image-registry.openshift-image-registry.svc:5000/dept-lizard-prod/lizard-api:latest
+          command: ["/bin/bash", "-lc", "micromamba run -n lizard alembic upgrade head"]
+          envFrom:
+            - configMapRef:
+                name: lizard-config
+            - secretRef:
+                name: lizard-secrets
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: lizard-secrets
+                  key: DATABASE_URL
