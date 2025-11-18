@@ -24,7 +24,7 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN grep -viE '^(rdkit\b|.*git\+.*healer.*)' requirements.txt > requirements.base.txt || true \
  && micromamba run -n lizard python -m pip install --upgrade pip \
- && micromamba run -n lizard python -m pip install --no-cache-dir -r requirements.base.txt
+ && micromamba run -n lizard python -m pip install --no-cache-dir -r requirements.base.txt --constraint constraints-cpu.txt
 
 COPY --chown=$MAMBA_USER:$MAMBA_USER healer/ ./healer/
 
