@@ -113,6 +113,17 @@ export async function getRun(id: string): Promise<RunInfo> {
   return request<RunInfo>(`/runs/${id}`)
 }
 
+// ==================== Admin Run Inspection ====================
+
+export async function listAdminRuns(): Promise<RunInfo[]> {
+  const data = await request<{ runs: RunInfo[] }>('/admin/runs')
+  return data.runs
+}
+
+export async function getAdminRun(id: string): Promise<RunInfo> {
+  return request<RunInfo>(`/admin/runs/${id}`)
+}
+
 export async function getCheckpoints(id: string): Promise<string[]> {
   return request<string[]>(`/runs/${id}/checkpoints`)
 }
