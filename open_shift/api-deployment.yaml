@@ -27,6 +27,9 @@ spec:
                 name: lizard-config
             - secretRef:
                 name: lizard-secrets
+          env:
+            - name: CORS_ORIGINS
+              value: "https://lizard-frontend-dept-lizard-prod.apps.cloudapps.unc.edu"
           volumeMounts:
             - name: artifacts
               mountPath: /app/data
