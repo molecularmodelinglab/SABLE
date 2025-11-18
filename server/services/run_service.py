@@ -107,6 +107,15 @@ class RunService:
             desc(RunModel.created_at)
         ).limit(limit).offset(offset).all()
 
+    def list_runs_for_admin(self, db: Session, *, limit: int = 100, offset: int = 0) -> list[RunModel]:
+        """List runs across all users for administrative views."""
+        query = db.query(RunModel).order_by(RunModel.created_at.desc())
+        if offset:
+            query = query.offset(offset)
+        if limit:
+            query = query.limit(limit)
+        return query.all()
+
     def count_runs_with_status(
         self,
         db: Session,
