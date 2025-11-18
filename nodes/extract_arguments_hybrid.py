@@ -100,6 +100,8 @@ Available properties: qed, logp, tpsa, molecular_weight, h_bond_donors, h_bond_a
 rotatable_bonds, ring_count, heavy_atom_count, solubility, fsp3, cns_activity, toxicity, 
 binding_affinity, permeability
 
+Note for binding_affinity: This is expressed in Log10 Kd (nM), where lower is better, so we ideally want to minimize.
+
 LLM Confidence score guidelines:
 - 0.9-1.0: All required fields clearly specified, no ambiguity
 - 0.7-0.9: Most fields clear, minor assumptions needed
