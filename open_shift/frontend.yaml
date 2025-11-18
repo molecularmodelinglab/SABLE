@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lizard-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lizard-frontend
+  template:
+    metadata:
+      labels:
+        app: lizard-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: image-registry.openshift-image-registry.svc:5000/dept-lizard-prod/lizard-frontend:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: API_BASE
+              value: "https://lizard-api-dept-lizard-prod.apps.cloudapps.unc.edu"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lizard-frontend
+spec:
+  selector:
+    app: lizard-frontend
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: lizard-frontend
+spec:
+  to:
+    kind: Service
+    name: lizard-frontend
+  tls:
+    termination: edge
