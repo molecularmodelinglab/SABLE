@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { getAdminAnalyticsSummary, listAdminRuns, type RunInfo } from '../api'
 import { RunStatusBadge } from '../components/RunStatusBadge'
 import type { AdminAnalyticsSummary, DailyCount } from '../types/admin'
@@ -23,16 +23,31 @@ export function AdminDashboardPage() {
     retry: 1,
   })
 
+  const [limit, setLimit] = useState(10)
+
   const {
     data: allRuns = [],
     isLoading: runsLoading,
     isError: runsError,
     refetch: refetchRuns,
+    isFetching: runsFetching,
   } = useQuery<RunInfo[]>({
-    queryKey: ['admin', 'runs'],
-    queryFn: () => listAdminRuns(),
+    queryKey: ['admin', 'runs', limit],
+    queryFn: () => listAdminRuns(limit),
     refetchInterval: 15000,
+    placeholderData: keepPreviousData,
   })
+
+  const filteredRuns = useMemo(() => {
+    const term = runSearch.trim().toLowerCase()
+    if (!term) return allRuns
+    return allRuns.filter((run) => {
+      const idMatch = run.id.toLowerCase().includes(term)
+      const userMatch = (run.username || '').toLowerCase().includes(term)
+      const reasonMatch = (run.exit_reason || '').toLowerCase().includes(term)
+      return idMatch || userMatch || reasonMatch
+    })
+  }, [allRuns, runSearch])
 
   if (isLoading) {
     return (
@@ -59,18 +74,6 @@ export function AdminDashboardPage() {
   const runStatusEntries = Object.entries(data.runs.by_status)
   const experimentStatusEntries = Object.entries(data.experiments.by_status)
   const auditSeverityEntries = Object.entries(data.audit.last_7_days_by_severity)
-
-
-  const filteredRuns = useMemo(() => {
-    const term = runSearch.trim().toLowerCase()
-    if (!term) return allRuns
-    return allRuns.filter((run) => {
-      const idMatch = run.id.toLowerCase().includes(term)
-      const userMatch = (run.username || '').toLowerCase().includes(term)
-      const reasonMatch = (run.exit_reason || '').toLowerCase().includes(term)
-      return idMatch || userMatch || reasonMatch
-    })
-  }, [allRuns, runSearch])
 
   return (
     <div className="admin-dashboard">
@@ -245,6 +248,16 @@ export function AdminDashboardPage() {
               </tbody>
             </table>
           )}
+        </div>
+
+        <div style={{ marginTop: '1rem', textAlign: 'center' }}>
+          <button
+            className="secondary"
+            onClick={() => setLimit((l) => l + 10)}
+            disabled={runsFetching}
+          >
+            {runsFetching ? 'Loading more…' : 'Load more runs'}
+          </button>
         </div>
       </section>
     </div>

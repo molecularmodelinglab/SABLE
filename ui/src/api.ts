@@ -115,8 +115,11 @@ export async function getRun(id: string): Promise<RunInfo> {
 
 // ==================== Admin Run Inspection ====================
 
-export async function listAdminRuns(): Promise<RunInfo[]> {
-  const data = await request<{ runs: RunInfo[] }>('/admin/runs')
+export async function listAdminRuns(limit = 100, offset = 0): Promise<RunInfo[]> {
+  const params = new URLSearchParams()
+  params.set('limit', limit.toString())
+  params.set('offset', offset.toString())
+  const data = await request<{ runs: RunInfo[] }>(`/admin/runs?${params}`)
   return data.runs
 }
 
