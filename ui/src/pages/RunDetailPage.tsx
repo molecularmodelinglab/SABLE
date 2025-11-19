@@ -148,9 +148,9 @@ export function RunDetailPage() {
   )
   const numericSeries = useMemo(() => extractNumericSeries(flatRows), [flatRows])
   const numericEntries = useMemo(() => Object.entries(numericSeries).sort((a, b) => b[1].length - a[1].length), [numericSeries])
-  const numericKeys = useMemo(() => numericEntries.slice(0, 3).map(([key]) => key), [numericEntries])
+  const numericKeys = useMemo(() => numericEntries.map(([key]) => key).filter((k) => !k.startsWith('metadata')), [numericEntries])
   const columns = useMemo(() => buildColumns(numericKeys), [numericKeys])
-  const chartSeries = useMemo(() => numericEntries.slice(0, 3), [numericEntries])
+  const chartSeries = useMemo(() => numericEntries.filter(([key]) => !key.startsWith('metadata')).slice(0, 6), [numericEntries])
 
   if (isLoading) {
     return <div className="run-detail__placeholder">Loading run...</div>
@@ -361,7 +361,7 @@ export function RunDetailPage() {
           <div className="run-detail__charts">
             {chartSeries.length ? (
               chartSeries.map(([metric, values]) => (
-                <DistributionChart key={metric} label={metric} values={values} />
+                <DistributionChart key={metric} label={metric.split('.').pop() ?? metric} values={values} />
               ))
             ) : (
               <div className="distribution-chart__empty">No numeric metrics detected yet.</div>
@@ -394,7 +394,7 @@ function buildColumns(metricKeys: string[]): ResultsColumn[] {
       },
     },
   ]
-  const metricColumns = metricKeys.map((key) => ({ key, label: key }))
+  const metricColumns = metricKeys.map((key) => ({ key, label: key.split('.').pop() ?? key }))
   return [...base, ...metricColumns]
 }
 

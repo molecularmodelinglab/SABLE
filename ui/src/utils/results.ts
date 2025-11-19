@@ -67,6 +67,7 @@ function normalizeItems(results: RunResults): unknown[] {
   if (Array.isArray(results)) return results
   if (typeof results === 'object') {
     const record = results as Record<string, unknown>
+    if (Array.isArray(record.experimental_data)) return record.experimental_data
     if (Array.isArray(record.items)) return record.items
     if (Array.isArray(record.molecules)) return record.molecules
     if (Array.isArray(record.results)) return record.results
@@ -78,7 +79,7 @@ function normalizeItems(results: RunResults): unknown[] {
 }
 
 function readIdentifier(record: Record<string, unknown>, fallbackIndex: number) {
-  const candidates = ['id', 'name', 'label', 'identifier', 'compound', 'molecule']
+  const candidates = ['molecule_id', 'id', 'name', 'label', 'identifier', 'compound', 'molecule']
   for (const key of candidates) {
     const value = record[key]
     if (typeof value === 'string' && value.trim()) return value
