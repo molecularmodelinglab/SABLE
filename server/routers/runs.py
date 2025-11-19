@@ -52,11 +52,13 @@ def check_run_authorization(run_id: str, user: User, db: DBSession) -> RunInfo:
     Raises:
         HTTPException: If not authorized
     """
+    is_admin = user.has_role("admin")
+
     # Try cache first for performance
     cached_run = cache_service.get_cached_run(run_id)
     if cached_run:
-        # Verify user ownership from cache
-        if cached_run.get("user_id") == str(user.id):
+        # Verify user ownership from cache or admin status
+        if is_admin or cached_run.get("user_id") == str(user.id):
             # Convert dict back to RunInfo
             info = RunInfo(**cached_run)
             info.username = user.username
@@ -76,7 +78,8 @@ def check_run_authorization(run_id: str, user: User, db: DBSession) -> RunInfo:
             raise HTTPException(403, "Access denied: You can only access your own runs")
 
     # Cache miss - fetch from database
-    run_model = run_service.get_run(db, run_id, str(user.id))
+    # If admin, fetch any run; otherwise, enforce ownership
+    run_model = run_service.get_run(db, run_id, None if is_admin else str(user.id))
     if not run_model:
         raise HTTPException(404, "Run not found")
 
