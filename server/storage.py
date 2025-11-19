@@ -136,8 +136,20 @@ class LocalStorageBackend(StorageBackend):
         )
 
     def checkpoint_path(self, run_id: str, filename: str, *, ensure_exists: bool = True) -> Path:
-        base = (self.run_dir(run_id) / "checkpoints").resolve()
+        run_base = self.run_dir(run_id)
+        
+        # check standard checkpoints first
+        base = (run_base / "checkpoints").resolve()
         target = (base / filename).resolve()
+        
+        # if not found in checkpoints, check boltz_cifs
+        if not (target.exists() and target.is_file()):
+            boltz_dir = (run_base / "artifacts" / "boltz_cifs").resolve()
+            boltz_target = (boltz_dir / filename).resolve()
+            if boltz_target.exists() and boltz_target.is_file():
+                target = boltz_target
+                base = boltz_dir
+
         try:
             target.relative_to(base)
         except ValueError as exc:
@@ -149,10 +161,19 @@ class LocalStorageBackend(StorageBackend):
         return target
 
     def list_checkpoints(self, run_id: str) -> Iterable[str]:
+        checkpoints = []
+        
+        # Standard checkpoints
         base = self.run_dir(run_id) / "checkpoints"
-        if not base.exists():
-            return []
-        return sorted(p.name for p in base.iterdir() if p.is_file())
+        if base.exists():
+            checkpoints.extend(sorted(p.name for p in base.iterdir() if p.is_file()))
+            
+        # Boltz CIFs
+        boltz_dir = self.run_dir(run_id) / "artifacts" / "boltz_cifs"
+        if boltz_dir.exists():
+            checkpoints.extend(sorted(p.name for p in boltz_dir.iterdir() if p.is_file() and p.suffix == '.cif'))
+            
+        return checkpoints
 
 
 class S3StorageBackend(StorageBackend):

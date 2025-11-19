@@ -50,6 +50,26 @@ async function downloadFile(url: string, filename: string) {
   window.URL.revokeObjectURL(downloadUrl)
 }
 
+function getBoltzMapping(results: any): Record<string, string> {
+  const mapping: Record<string, string> = {}
+  if (!results || !results.experimental_data || !Array.isArray(results.experimental_data)) {
+    return mapping
+  }
+  
+  for (const entry of results.experimental_data) {
+    const boltz = entry.metadata?.boltz
+    if (boltz && boltz.job_id) {
+      // Prefer molecule_id, fallback to truncated SMILES
+      let label = entry.molecule_id
+      if (!label && entry.smiles) {
+        label = entry.smiles.length > 15 ? entry.smiles.substring(0, 12) + '...' : entry.smiles
+      }
+      mapping[boltz.job_id] = label || 'Unknown Ligand'
+    }
+  }
+  return mapping
+}
+
 export function RunDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -118,6 +138,8 @@ export function RunDetailPage() {
     })
     return filtered.slice(-400)
   }, [logsQuery.data, liveEvents])
+
+  const boltzMapping = useMemo(() => getBoltzMapping(resultsQuery.data), [resultsQuery.data])
 
   const moleculeRecords = useMemo(() => extractMoleculeRecords(resultsQuery.data ?? null), [resultsQuery.data])
   const flatRows = useMemo(
@@ -243,29 +265,40 @@ export function RunDetailPage() {
             <div>Discovering checkpoints…</div>
           ) : checkpointsQuery.data && checkpointsQuery.data.length ? (
             <ul className="run-detail__checkpoints">
-              {checkpointsQuery.data.map((name: string) => (
-                <li key={name}>
-                  <span>{name}</span>
-                  <button
-                    className="ghost"
-                    disabled={!id}
-                    onClick={async () => {
-                      if (!id) return
-                      try {
-                        await downloadFile(
-                          `${apiBase}/runs/${id}/checkpoints/${encodeURIComponent(name)}`,
-                          name
-                        )
-                      } catch (error) {
-                        console.error('Failed to download checkpoint', error)
-                        window.alert('Failed to download checkpoint. Please try again.')
-                      }
-                    }}
-                  >
-                    Download
-                  </button>
-                </li>
-              ))}
+              {checkpointsQuery.data.map((name: string) => {
+                let displayName = name
+                const match = name.match(/^(.+)_model_0\.cif$/)
+                if (match) {
+                  const jobId = match[1]
+                  if (boltzMapping[jobId]) {
+                    displayName = `${boltzMapping[jobId]} (${name})`
+                  }
+                }
+                
+                return (
+                  <li key={name}>
+                    <span>{displayName}</span>
+                    <button
+                      className="ghost"
+                      disabled={!id}
+                      onClick={async () => {
+                        if (!id) return
+                        try {
+                          await downloadFile(
+                            `${apiBase}/runs/${id}/checkpoints/${encodeURIComponent(name)}`,
+                            name
+                          )
+                        } catch (error) {
+                          console.error('Failed to download checkpoint', error)
+                          window.alert('Failed to download checkpoint. Please try again.')
+                        }
+                      }}
+                    >
+                      Download
+                    </button>
+                  </li>
+                )
+              })}
             </ul>
           ) : (
             <div>No checkpoints available.</div>
