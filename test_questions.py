@@ -10,3 +10,6 @@ questions = [
     
 
 ]
+
+
+#  "Starting from caffeine (CN1C=NC2=C1C(=O)N(C(=O)N2C)C), simultaneously optimize for maximum QED (drug-likeness), LogP between 2-4, and also strong binding to UniProt P12345. Enumerate 200 analogs and run 3 BO iterations with batch size 3.",

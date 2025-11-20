@@ -1,18 +1,18 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { login, getSessionToken } from '../api'
+import { Link, useNavigate } from 'react-router-dom'
+import { login, getAccessToken } from '../api'
 import '../index.css'
 
 export function LoginPage() {
   const navigate = useNavigate()
-  const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Check if already logged in
   useEffect(() => {
-    const token = getSessionToken()
+    const token = getAccessToken()
     if (token) {
       navigate('/', { replace: true })
     }
@@ -21,8 +21,13 @@ export function LoginPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     
-    if (!username.trim()) {
-      setError('Username is required')
+    if (!email.trim()) {
+      setError('Email is required')
+      return
+    }
+
+    if (!password.trim()) {
+      setError('Password is required')
       return
     }
 
@@ -31,8 +36,8 @@ export function LoginPage() {
 
     try {
       await login({
-        username: username.trim(),
-        email: email.trim() || undefined,
+        email: email.trim(),
+        password: password,
       })
       
       // Redirect to dashboard
@@ -87,13 +92,13 @@ export function LoginPage() {
               color: '#333',
               fontSize: '0.9rem'
             }}>
-              Username *
+              Email *
             </label>
             <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Enter your username"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="your.email@example.com"
               required
               autoFocus
               style={{
@@ -118,13 +123,14 @@ export function LoginPage() {
               color: '#333',
               fontSize: '0.9rem'
             }}>
-              Email (optional)
+              Password *
             </label>
             <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="your.email@example.com"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter your password"
+              required
               style={{
                 width: '100%',
                 padding: '0.75rem',
@@ -137,13 +143,6 @@ export function LoginPage() {
               onFocus={(e) => e.target.style.borderColor = '#667eea'}
               onBlur={(e) => e.target.style.borderColor = '#e0e0e0'}
             />
-            <p style={{
-              marginTop: '0.5rem',
-              fontSize: '0.8rem',
-              color: '#999'
-            }}>
-              Optional: For notifications and activity tracking
-            </p>
           </div>
 
           {error && (
@@ -218,8 +217,11 @@ export function LoginPage() {
             ℹ️ Session Information:
           </p>
           <ul style={{ margin: 0, paddingLeft: '1.5rem' }}>
-            <li>All experiments tracked under your username</li>
+            <li>Sessions expire after 24 hours of inactivity</li>
           </ul>
+          <p style={{ marginTop: '1rem', fontSize: '0.85rem' }}>
+            Need an account? <Link to="/register">Create one here</Link>.
+          </p>
         </div>
       </div>
 

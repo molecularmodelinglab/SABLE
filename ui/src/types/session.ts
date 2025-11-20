@@ -1,33 +1,71 @@
+export interface AuthUser {
+  id: string;
+  email: string;
+  username: string;
+  auth_provider: string;
+  is_active: boolean;
+  is_verified: boolean;
+  created_at: string;
+  last_login?: string | null;
+  roles?: string[];
+  extra_metadata?: Record<string, unknown> | null;
+}
+
 export interface Session {
   id: string;
   user_id: string;
-  username: string;
-  email?: string;
   created_at: string;
   last_activity: string;
   expires_at: string;
-  ip_address?: string;
-  user_agent?: string;
-  metadata?: Record<string, any>;
-  is_active: boolean;
+  ip_address?: string | null;
 }
 
 export interface LoginRequest {
-  username?: string;
-  user_id?: string;
-  email?: string;
-  metadata?: Record<string, any>;
+  email: string;
+  password: string;
 }
 
 export interface LoginResponse {
-  session_id: string;
-  token: string;
-  user_id: string;
-  username: string;
-  expires_at: string;
+  access_token: string;
+  token_type: string;
+  user: AuthUser;
+  session: Session;
 }
 
-export interface SessionInfo {
-  session: Session;
-  active_sessions: number;
+export interface SessionListResponse {
+  sessions: Session[];
+  total: number;
+}
+
+export interface AuthProfile {
+  user: AuthUser;
+  session: Session | null;
+}
+
+export interface RegisterRequest {
+  email: string;
+  username: string;
+  password: string;
+}
+
+export type RegisterResponse = AuthUser;
+
+export interface PasswordResetInitiateRequest {
+  email: string;
+}
+
+export interface PasswordResetInitiateResponse {
+  message: string;
+  success: boolean;
+  reset_token?: string | null;
+}
+
+export interface PasswordResetConfirmRequest {
+  token: string;
+  new_password: string;
+}
+
+export interface ApiMessageResponse {
+  message: string;
+  success: boolean;
 }

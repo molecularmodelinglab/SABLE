@@ -7,6 +7,7 @@ import sys
 import os
 import json
 import hashlib
+from pathlib import Path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rdkit import Chem
@@ -164,6 +165,18 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
             )
         else:
             boltz_config = state.characterization_config.get('boltz_config', {}) or {}
+
+            if not boltz_config.get('cif_save_dir'):
+                env_cif_dir = os.environ.get("BOLTZ_CIF_DIR")
+                if env_cif_dir:
+                    boltz_config['cif_save_dir'] = env_cif_dir
+                else:
+                    run_paths = getattr(state, 'run_paths', {}) or {}
+                    artifacts_dir = run_paths.get('artifacts')
+                    if artifacts_dir:
+                        boltz_config['cif_save_dir'] = str(Path(artifacts_dir) / "boltz_cifs")
+
+            state.characterization_config['boltz_config'] = boltz_config
             base_url = boltz_config.get('base_url') or os.environ.get("BOLTZ_BASE_URL", "").strip()
             api_token = boltz_config.get('api_token') or os.environ.get("BOLTZ_API_TOKEN", "").strip()
 

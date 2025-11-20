@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: lizard-api
+spec:
+  selector:
+    app: lizard-api
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: lizard-api
+spec:
+  to:
+    kind: Service
+    name: lizard-api
+  port:
+    targetPort: 8000
+  tls:
+    termination: edge

@@ -9,7 +9,7 @@ import {
   getRunLogs,
   getRunResults,
   getRunSummary,
-  getSessionToken,
+  getAccessToken,
   type RunEvent,
   type RunInfo,
   type RunResults,
@@ -28,10 +28,10 @@ type TabKey = (typeof TABS)[number]
 
 // Helper function to download file with authentication
 async function downloadFile(url: string, filename: string) {
-  const token = getSessionToken()
+  const token = getAccessToken()
   const headers: HeadersInit = {}
   if (token) {
-    headers['X-Session-Token'] = token
+    headers['Authorization'] = `Bearer ${token}`
   }
   
   const response = await fetch(url, { headers })
@@ -48,6 +48,26 @@ async function downloadFile(url: string, filename: string) {
   link.click()
   document.body.removeChild(link)
   window.URL.revokeObjectURL(downloadUrl)
+}
+
+function getBoltzMapping(results: any): Record<string, string> {
+  const mapping: Record<string, string> = {}
+  if (!results || !results.experimental_data || !Array.isArray(results.experimental_data)) {
+    return mapping
+  }
+  
+  for (const entry of results.experimental_data) {
+    const boltz = entry.metadata?.boltz
+    if (boltz && boltz.job_id) {
+      // Prefer molecule_id, fallback to truncated SMILES
+      let label = entry.molecule_id
+      if (!label && entry.smiles) {
+        label = entry.smiles.length > 15 ? entry.smiles.substring(0, 12) + '...' : entry.smiles
+      }
+      mapping[boltz.job_id] = label || 'Unknown Ligand'
+    }
+  }
+  return mapping
 }
 
 export function RunDetailPage() {
@@ -119,12 +139,18 @@ export function RunDetailPage() {
     return filtered.slice(-400)
   }, [logsQuery.data, liveEvents])
 
+  const boltzMapping = useMemo(() => getBoltzMapping(resultsQuery.data), [resultsQuery.data])
+
   const moleculeRecords = useMemo(() => extractMoleculeRecords(resultsQuery.data ?? null), [resultsQuery.data])
-  const flatRows = useMemo(() => moleculeRecords.map((record) => ({ candidate: record.id, smiles: record.smiles, ...flattenRecord(record.data) })), [moleculeRecords])
+  const flatRows = useMemo(
+    () => moleculeRecords.map((record) => ({ candidate: record.id, smiles: record.smiles, ...flattenRecord(record.data) })),
+    [moleculeRecords]
+  )
   const numericSeries = useMemo(() => extractNumericSeries(flatRows), [flatRows])
   const numericEntries = useMemo(() => Object.entries(numericSeries).sort((a, b) => b[1].length - a[1].length), [numericSeries])
-  const numericKeys = useMemo(() => numericEntries.slice(0, 3).map(([key]) => key), [numericEntries])
-  const chartSeries = useMemo(() => numericEntries.slice(0, 3), [numericEntries])
+  const numericKeys = useMemo(() => numericEntries.map(([key]) => key).filter((k) => !k.startsWith('metadata')), [numericEntries])
+  const columns = useMemo(() => buildColumns(numericKeys), [numericKeys])
+  const chartSeries = useMemo(() => numericEntries.filter(([key]) => !key.startsWith('metadata')).slice(0, 6), [numericEntries])
 
   if (isLoading) {
     return <div className="run-detail__placeholder">Loading run...</div>
@@ -204,6 +230,12 @@ export function RunDetailPage() {
             <InfoCard label="Results" value={run.results_available ? 'Ready' : 'Not yet'} />
             <InfoCard label="Summary" value={run.summary_available ? 'Ready' : 'Not yet'} />
           </div>
+          {run.prompt && (
+            <div className="run-detail__prompt">
+              <h3>User prompt</h3>
+              <pre>{run.prompt}</pre>
+            </div>
+          )}
           {run.note && (
             <div className="run-detail__note">
               <h3>Launch note</h3>
@@ -233,14 +265,40 @@ export function RunDetailPage() {
             <div>Discovering checkpoints…</div>
           ) : checkpointsQuery.data && checkpointsQuery.data.length ? (
             <ul className="run-detail__checkpoints">
-              {checkpointsQuery.data.map((name: string) => (
-                <li key={name}>
-                  <span>{name}</span>
-                  {id && (
-                    <a href={`${apiBase}/runs/${id}/checkpoints/${encodeURIComponent(name)}`} target="_blank" rel="noreferrer">Download</a>
-                  )}
-                </li>
-              ))}
+              {checkpointsQuery.data.map((name: string) => {
+                let displayName = name
+                const match = name.match(/^(.+)_model_0\.cif$/)
+                if (match) {
+                  const jobId = match[1]
+                  if (boltzMapping[jobId]) {
+                    displayName = `${boltzMapping[jobId]} (${name})`
+                  }
+                }
+                
+                return (
+                  <li key={name}>
+                    <span>{displayName}</span>
+                    <button
+                      className="ghost"
+                      disabled={!id}
+                      onClick={async () => {
+                        if (!id) return
+                        try {
+                          await downloadFile(
+                            `${apiBase}/runs/${id}/checkpoints/${encodeURIComponent(name)}`,
+                            name
+                          )
+                        } catch (error) {
+                          console.error('Failed to download checkpoint', error)
+                          window.alert('Failed to download checkpoint. Please try again.')
+                        }
+                      }}
+                    >
+                      Download
+                    </button>
+                  </li>
+                )
+              })}
             </ul>
           ) : (
             <div>No checkpoints available.</div>
@@ -250,10 +308,21 @@ export function RunDetailPage() {
 
       <section hidden={activeTab !== 'results'}>
         <div className="run-detail__panel">
-          <h2>Results table</h2>
+          <div className="run-detail__panel-header">
+            <h2>Results table</h2>
+            <div className="run-detail__panel-actions">
+              <button
+                className="ghost"
+                disabled={!flatRows.length}
+                onClick={() => handleResultsDownloadCsv(id ?? run.id, columns, flatRows)}
+              >
+                Download CSV
+              </button>
+            </div>
+          </div>
           <ResultsTable
             rows={flatRows}
-            columns={buildColumns(numericKeys)}
+            columns={columns}
           />
         </div>
       </section>
@@ -292,7 +361,7 @@ export function RunDetailPage() {
           <div className="run-detail__charts">
             {chartSeries.length ? (
               chartSeries.map(([metric, values]) => (
-                <DistributionChart key={metric} label={metric} values={values} />
+                <DistributionChart key={metric} label={metric.split('.').pop() ?? metric} values={values} />
               ))
             ) : (
               <div className="distribution-chart__empty">No numeric metrics detected yet.</div>
@@ -325,6 +394,43 @@ function buildColumns(metricKeys: string[]): ResultsColumn[] {
       },
     },
   ]
-  const metricColumns = metricKeys.map((key) => ({ key, label: key }))
+  const metricColumns = metricKeys.map((key) => ({ key, label: key.split('.').pop() ?? key }))
   return [...base, ...metricColumns]
+}
+
+function escapeCsvValue(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? String(value) : ''
+  }
+  const serialized = typeof value === 'string' ? value : JSON.stringify(value)
+  const raw = serialized ?? String(value)
+  const escaped = raw.replace(/"/g, '""')
+  if (/[",\n\r]/.test(raw)) {
+    return `"${escaped}"`
+  }
+  return escaped
+}
+
+function handleResultsDownloadCsv(
+  runId: string,
+  columns: ResultsColumn[],
+  rows: Record<string, unknown>[]
+) {
+  if (!rows.length) return
+
+  const header = columns.map((col) => escapeCsvValue(col.label ?? col.key)).join(',')
+  const data = rows.map((row) =>
+    columns.map((col) => escapeCsvValue(row[col.key])).join(',')
+  )
+  const csvContent = [header, ...data].join('\n')
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${runId}_results.csv`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.URL.revokeObjectURL(url)
 }

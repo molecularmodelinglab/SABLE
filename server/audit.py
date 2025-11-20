@@ -4,6 +4,7 @@ Tracks all user actions, system events, and data access for security auditing,
 compliance, and debugging purposes.
 """
 
+import os
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from enum import Enum
@@ -45,11 +46,13 @@ class AuditEventType(str, Enum):
     WORKFLOW_MODIFIED = "workflow_modified"
     CHECKPOINT_CREATED = "checkpoint_created"
     CHECKPOINT_RESTORED = "checkpoint_restored"
+    RUN_CREATED = "run_created"
     
     # Security events
     UNAUTHORIZED_ACCESS = "unauthorized_access"
     PERMISSION_DENIED = "permission_denied"
     RATE_LIMIT_EXCEEDED = "rate_limit_exceeded"
+    API_REQUEST = "api_request"
 
 
 class AuditSeverity(str, Enum):
@@ -107,7 +110,8 @@ class AuditLogger:
     """Manages audit logging and querying."""
     
     def __init__(self, data_root: Optional[Path] = None):
-        self.data_root = data_root or Path("data")
+        default_root = Path(os.getenv("LIZARD_DATA_ROOT", "data"))
+        self.data_root = data_root or default_root
         self.audit_dir = self.data_root / "audit"
         self.audit_dir.mkdir(parents=True, exist_ok=True)
         

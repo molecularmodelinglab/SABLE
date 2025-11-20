@@ -1,29 +1,171 @@
 services:
-  lizard:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: lizard-postgres
+    environment:
+      POSTGRES_DB: lizard
+      POSTGRES_USER: lizard_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lizard_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lizard_user -d lizard"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - lizard-network
+    restart: unless-stopped
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: lizard-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_password}
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - lizard-network
+    restart: unless-stopped
+
+  # Database Migrations (runs once then exits)
+  migrations:
     build:
       context: .
       dockerfile: Dockerfile
-    image: lizard:latest
-    entrypoint: ["bash", "/app/docker/entrypoint.sh"]
-    command: [] # default: run example prompt
+    container_name: lizard-migrations
+    entrypoint: ["bash", "-lc"]
+    command: ["micromamba run -n lizard alembic upgrade head"]
     environment:
-      - PYTHONUNBUFFERED=1
-    volumes:
-      - ./checkpoints:/app/checkpoints
-      # Uncomment to mount a local config.yml
-      # - ./config.yml:/app/config.yml
-    # Uncomment to pass a custom prompt via command
-    # command: ["run", "Optimize aspirin for better QED and solubility. Enumerate 50 analogs and run 3 iterations."]
+      - DATABASE_URL=postgresql://lizard_user:${POSTGRES_PASSWORD:-lizard_password}@postgres:5432/lizard
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - lizard-network
 
+  # LIZARD API
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    image: anole:latest
-    command: ["bash", "-lc", "uvicorn server.app:app --host 0.0.0.0 --port 8000"]
+    container_name: lizard-api
+    profiles: ["dev", "prod"]
+    entrypoint: ["bash", "-lc"]
+    command: ["micromamba run -n lizard uvicorn server.app:app --host 0.0.0.0 --port 8000 --reload"]
     ports:
       - "8000:8000"
     environment:
       - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://lizard_user:${POSTGRES_PASSWORD:-lizard_password}@postgres:5432/lizard
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-change_this_secret_key_in_production}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - AUTH0_DOMAIN=${AUTH0_DOMAIN}
+      - AUTH0_CLIENT_ID=${AUTH0_CLIENT_ID}
+      - AUTH0_CLIENT_SECRET=${AUTH0_CLIENT_SECRET}
+      - AUTH0_AUDIENCE=${AUTH0_AUDIENCE}
+      - LLM_PROVIDER=${LLM_PROVIDER}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
     volumes:
+      - ./data:/app/data  # For large artifacts (checkpoints, results)
+      - ./logs:/app/logs
+      - .:/app  # Mount source for hot reload in development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+    networks:
+      - lizard-network
+    restart: unless-stopped
+
+  # Frontend development server (Vite)
+  ui:
+    image: node:20-alpine
+    container_name: lizard-ui
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE=${VITE_API_BASE:-http://localhost:8000}
+      - CHOKIDAR_USEPOLLING=1
+    volumes:
+      - ./ui:/app
+      - ui_node_modules:/app/node_modules
+    depends_on:
+      api:
+        condition: service_started
+    networks:
+      - lizard-network
+    profiles: ["dev"]
+    restart: unless-stopped
+
+  # Production frontend served via Nginx with static build
+  frontend:
+    build:
+      context: .
+      dockerfile: ui/Dockerfile
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-/api}
+    container_name: lizard-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_started
+    networks:
+      - lizard-network
+    profiles: ["prod"]
+    restart: unless-stopped
+
+  # CLI/Workflow Runner (original lizard service)
+  lizard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lizard-cli
+    image: lizard:latest
+    entrypoint: ["/bin/bash", "-c"]
+    command: ["sleep infinity"] # Keep container running without auto-starting workflow
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://lizard_user:${POSTGRES_PASSWORD:-lizard_password}@postgres:5432/lizard
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
+      - LLM_PROVIDER=${LLM_PROVIDER}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+    volumes:
+      - ./checkpoints:/app/checkpoints
       - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - lizard-network
+    # command: ["run", "Optimize aspirin for better QED and solubility. Enumerate 50 analogs and run 3 iterations."]
+
+networks:
+  lizard-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  ui_node_modules:

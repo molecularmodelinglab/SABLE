@@ -4,6 +4,8 @@ __pycache__/
 *.pyo
 *.pyd
 *.pkl
+*.egg-info/
+**/*.egg-info/
 
 # VCS
 .git
@@ -37,4 +39,15 @@ dist/
 build/
 
 # Healer large data (if any)
-healer/data/
+# healer/data/
+
+.pytest_cache/
+htmlcov/
+kompose/
+boltz2-api/
+logs/
+data/
+checkpoints/
+test_checkpoints/
+tests/
+docs_md/

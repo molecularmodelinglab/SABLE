@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getCurrentSession, getSessionToken } from '../api'
+import { useQueryClient } from '@tanstack/react-query'
+import { clearAccessToken, getAccessToken } from '../api'
+import { useAuthProfile } from '../hooks/useAuthProfile'
 
 interface AuthGuardProps {
   children: React.ReactNode
@@ -8,37 +10,27 @@ interface AuthGuardProps {
 
 export function AuthGuard({ children }: AuthGuardProps) {
   const navigate = useNavigate()
-  const [isChecking, setIsChecking] = useState(true)
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const queryClient = useQueryClient()
+  const token = getAccessToken()
+  const { data: profile, isLoading, isError } = useAuthProfile()
 
   useEffect(() => {
-    checkAuth()
-  }, [])
-
-  async function checkAuth() {
-    const token = getSessionToken()
-    
     if (!token) {
-      setIsChecking(false)
-      setIsAuthenticated(false)
       navigate('/login', { replace: true })
-      return
     }
+  }, [token, navigate])
 
-    try {
-      // Validate token with server
-      await getCurrentSession()
-      setIsAuthenticated(true)
-    } catch (error) {
-      // Token invalid or expired
-      setIsAuthenticated(false)
-      navigate('/login', { replace: true })
-    } finally {
-      setIsChecking(false)
+  useEffect(() => {
+    if (token && !isLoading && !profile) {
+      if (isError) {
+        clearAccessToken()
+        queryClient.removeQueries({ queryKey: ['auth'] })
+        navigate('/login', { replace: true })
+      }
     }
-  }
+  }, [token, isLoading, profile, isError, navigate, queryClient])
 
-  if (isChecking) {
+  if (!token || isLoading) {
     return (
       <div style={{
         minHeight: '100vh',
@@ -55,7 +47,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
     )
   }
 
-  if (!isAuthenticated) {
+  if (!profile) {
     return null
   }
 

@@ -1,25 +1,46 @@
-import { LoginRequest, LoginResponse, Session } from './types/session'
+import {
+  AuthProfile,
+  AuthUser,
+  LoginRequest,
+  LoginResponse,
+  RegisterRequest,
+  RegisterResponse,
+  Session,
+  SessionListResponse,
+  PasswordResetInitiateRequest,
+  PasswordResetInitiateResponse,
+  PasswordResetConfirmRequest,
+  ApiMessageResponse,
+} from './types/session'
+import {
+  ConversationConfirmRequest,
+  ConversationCreateRunResponse,
+  ConversationMessageRequest,
+  ConversationResponse,
+  ConversationStartRequest,
+} from './types/conversation'
 import { Experiment, ExperimentListResponse } from './types/experiment'
 import { AuditEvent, AuditEventsResponse } from './types/audit'
 import { AnalyticsSummary, HealthCheck } from './types/analytics'
+import { AdminAnalyticsSummary } from './types/admin'
 
 export const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000'
 
-// Session token storage
-let sessionToken: string | null = localStorage.getItem('lizard_session_token')
+// Access token storage
+let accessToken: string | null = localStorage.getItem('lizard_access_token')
 
-export function setSessionToken(token: string) {
-  sessionToken = token
-  localStorage.setItem('lizard_session_token', token)
+export function setAccessToken(token: string) {
+  accessToken = token
+  localStorage.setItem('lizard_access_token', token)
 }
 
-export function clearSessionToken() {
-  sessionToken = null
-  localStorage.removeItem('lizard_session_token')
+export function clearAccessToken() {
+  accessToken = null
+  localStorage.removeItem('lizard_access_token')
 }
 
-export function getSessionToken(): string | null {
-  return sessionToken
+export function getAccessToken(): string | null {
+  return accessToken
 }
 
 export type RunInfo = {
@@ -27,6 +48,7 @@ export type RunInfo = {
   status: string
   created_at: string
   updated_at: string
+  prompt?: string | null
   exit_reason?: string | null
   summary_available: boolean
   results_available: boolean
@@ -36,6 +58,7 @@ export type RunInfo = {
   username?: string | null
   session_id?: string | null
   starting_molecules?: string[]
+  run_id?: string
 }
 
 export type RunEvent = {
@@ -53,9 +76,9 @@ export type RunResults = unknown
 async function request<T>(path: string, init?: RequestInit, parse: 'json' | 'text' = 'json'): Promise<T> {
   const headers = new Headers(init?.headers || {})
   
-  // Add session token if available
-  if (sessionToken) {
-    headers.set('X-Session-Token', sessionToken)
+  // Add authorization token if available
+  if (accessToken) {
+    headers.set('Authorization', `Bearer ${accessToken}`)
   }
   
   const res = await fetch(`${API_BASE}${path}`, {
@@ -90,6 +113,20 @@ export async function getRun(id: string): Promise<RunInfo> {
   return request<RunInfo>(`/runs/${id}`)
 }
 
+// ==================== Admin Run Inspection ====================
+
+export async function listAdminRuns(limit = 100, offset = 0): Promise<RunInfo[]> {
+  const params = new URLSearchParams()
+  params.set('limit', limit.toString())
+  params.set('offset', offset.toString())
+  const data = await request<{ runs: RunInfo[] }>(`/admin/runs?${params}`)
+  return data.runs
+}
+
+export async function getAdminRun(id: string): Promise<RunInfo> {
+  return request<RunInfo>(`/admin/runs/${id}`)
+}
+
 export async function getCheckpoints(id: string): Promise<string[]> {
   return request<string[]>(`/runs/${id}/checkpoints`)
 }
@@ -120,8 +157,13 @@ export async function getRunLogs(id: string, limit = 500): Promise<RunEvent[]> {
 }
 
 export function openEventStream(id: string, onEvent: (evt: RunEvent) => void): () => void {
-  const url = `${API_BASE}/runs/${id}/events`
-  const es = new EventSource(url)
+  const base = API_BASE.replace(/\/$/, '')
+  const url = new URL(`${base}/runs/${id}/events`)
+  const token = getAccessToken()
+  if (token) {
+    url.searchParams.set('access_token', token)
+  }
+  const es = new EventSource(url.toString())
   es.onmessage = (e) => {
     try {
       const data = JSON.parse(e.data) as RunEvent
@@ -147,21 +189,100 @@ export async function login(req: LoginRequest): Promise<LoginResponse> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
   })
-  setSessionToken(response.token)
+  setAccessToken(response.access_token)
+  return response
+}
+
+export async function registerUser(req: RegisterRequest): Promise<RegisterResponse> {
+  const response = await request<RegisterResponse>('/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
   return response
 }
 
 export async function logout(): Promise<void> {
   await request('/auth/logout', { method: 'POST' })
-  clearSessionToken()
+  clearAccessToken()
 }
 
-export async function getCurrentSession(): Promise<Session> {
-  return request<Session>('/auth/session')
+export async function requestPasswordReset(
+  req: PasswordResetInitiateRequest
+): Promise<PasswordResetInitiateResponse> {
+  return request<PasswordResetInitiateResponse>('/auth/forgot-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
 }
 
-export async function listUserSessions(): Promise<{ sessions: Session[] }> {
-  return request<{ sessions: Session[] }>('/auth/sessions')
+export async function confirmPasswordReset(req: PasswordResetConfirmRequest): Promise<ApiMessageResponse> {
+  const response = await request<ApiMessageResponse>('/auth/reset-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  clearAccessToken()
+  return response
+}
+
+// ==================== Conversation Assistant ====================
+
+export async function startConversation(req?: ConversationStartRequest): Promise<ConversationResponse> {
+  return request<ConversationResponse>('/conversations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req ?? {}),
+  })
+}
+
+export async function sendConversationMessage(
+  conversationId: string,
+  req: ConversationMessageRequest
+): Promise<ConversationResponse> {
+  return request<ConversationResponse>(`/conversations/${conversationId}/message`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+}
+
+export async function confirmConversation(
+  conversationId: string,
+  req: ConversationConfirmRequest
+): Promise<ConversationCreateRunResponse> {
+  return request<ConversationCreateRunResponse>(`/conversations/${conversationId}/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+}
+
+export async function abandonConversation(conversationId: string): Promise<{ message: string }> {
+  return request<{ message: string }>(`/conversations/${conversationId}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function getCurrentUser(): Promise<AuthUser> {
+  return request<AuthUser>('/auth/me')
+}
+
+export async function listUserSessions(): Promise<SessionListResponse> {
+  return request<SessionListResponse>('/auth/sessions')
+}
+
+export async function getAuthProfile(): Promise<AuthProfile> {
+  const [user, sessionList] = await Promise.all([
+    getCurrentUser(),
+    listUserSessions().catch(() => ({ sessions: [], total: 0 } as SessionListResponse)),
+  ])
+
+  return {
+    user,
+    session: sessionList.sessions[0] ?? null,
+  }
 }
 
 
@@ -227,5 +348,12 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
 
 export async function getHealthCheck(): Promise<HealthCheck> {
   return request<HealthCheck>('/health')
+}
+
+
+// ==================== Admin Analytics ====================
+
+export async function getAdminAnalyticsSummary(): Promise<AdminAnalyticsSummary> {
+  return request<AdminAnalyticsSummary>('/admin/analytics/summary')
 }
 

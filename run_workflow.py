@@ -112,12 +112,13 @@ class WorkflowRunner:
         
         print(f"Checkpoint loaded: {checkpoint_path}")
         return state
-    
+
     def run(self, 
             user_prompt: str,
             checkpoint_path: Optional[str] = None,
             save_checkpoints: bool = True,
-            event_callback: Optional[callable] = None) -> WorkflowState:
+            event_callback: Optional[callable] = None,
+            run_paths: Optional[dict[str, str]] = None) -> WorkflowState:
         """
         Run the molecular optimization workflow.
         
@@ -131,6 +132,8 @@ class WorkflowRunner:
             Final workflow state
         """
         # Initialize or load state
+        cleanup_workflow_id: Optional[str] = None
+
         if checkpoint_path:
             state = self.load_checkpoint(checkpoint_path)
             print(f"Resuming from checkpoint at iteration {state.current_iteration}")
@@ -146,9 +149,17 @@ class WorkflowRunner:
             else:
                 print("⚠ LLM client not available - will use rule-based extraction only")
         
+        if run_paths:
+            try:
+                state.run_paths.update(run_paths)
+            except Exception:
+                state.run_paths = dict(run_paths)
+
         # Set event callback for streaming logs to UI
         if event_callback:
             state._event_callback = event_callback
+            WorkflowState.register_event_callback(state.workflow_id, event_callback)
+            cleanup_workflow_id = state.workflow_id
         
         try:
             config = {
@@ -166,6 +177,9 @@ class WorkflowRunner:
             if save_checkpoints:
                 self.save_checkpoint(final_state, f"{final_state.workflow_id}_final")
             
+            if event_callback:
+                # Ensure the callback is present on the final state as well
+                setattr(final_state, "_event_callback", event_callback)
             return final_state
             
         except (NodeError, ToolError) as e:
@@ -244,6 +258,9 @@ class WorkflowRunner:
                 self.save_checkpoint(state, f"{state.workflow_id}_error")
             
             raise
+        finally:
+            if cleanup_workflow_id and event_callback:
+                WorkflowState.unregister_event_callback(cleanup_workflow_id)
     
     async def run_async(self,
                        user_prompt: str,
