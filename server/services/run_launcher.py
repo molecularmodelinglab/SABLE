@@ -24,15 +24,11 @@ from run_workflow import WorkflowRunner
 
 
 def start_run(run_id: str) -> None:
-    """Launch workflow execution on a background thread."""
-
-    thread = threading.Thread(
-        target=_run_workflow_background,
-        name=f"workflow-{run_id}",
-        args=(run_id,),
-        daemon=True,
-    )
-    thread.start()
+    """Launch workflow execution as a background task."""
+    from server.tasks.workflow import run_workflow_task
+    
+    # Submit to Celery
+    run_workflow_task.delay(run_id)
 
 
 def get_environment_info() -> Dict[str, str]:
