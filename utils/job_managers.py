@@ -12,6 +12,8 @@ from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Any, Optional, Dict
 
+import redis
+
 from .hpc_client import HPCClient
 
 
@@ -51,6 +53,7 @@ class BaseJobManager(ABC):
         local_output_dir: str,
         job_store_path: str = "jobs.json",
         tool_name: str = "generic",
+        redis_url: Optional[str] = None,
     ) -> None:
         self.hpc = hpc_client
         self.remote_base_dir = remote_base_dir.rstrip("/")
@@ -58,8 +61,17 @@ class BaseJobManager(ABC):
         self.local_output_dir.mkdir(parents=True, exist_ok=True)
         self.job_store_path = Path(job_store_path)
         self.tool_name = tool_name
+        
+        self.redis = None
+        if redis_url:
+            try:
+                self.redis = redis.from_url(redis_url, decode_responses=True)
+                self.redis.ping()
+            except Exception as e:
+                print(f"Warning: Failed to connect to Redis for job storage: {e}")
+                self.redis = None
 
-        if not self.job_store_path.exists():
+        if not self.redis and not self.job_store_path.exists():
             self.job_store_path.write_text("{}", encoding="utf-8")
 
     # ----- public API -----
@@ -100,19 +112,37 @@ class BaseJobManager(ABC):
         )
 
     def _save_record(self, record: JobRecord) -> None:
-        store = self._load_store()
-        store[record.job_id] = asdict(record)
-        self._save_store(store)
+        if self.redis:
+            key = f"job:{record.job_id}"
+            self.redis.set(key, json.dumps(asdict(record), default=str))
+        else:
+            store = self._load_store()
+            store[record.job_id] = asdict(record)
+            self._save_store(store)
 
     def _load_record(self, job_id: str) -> Optional[JobRecord]:
-        store = self._load_store()
-        data = store.get(job_id)
-        if not data:
-            return None
-        return JobRecord(
-            **data,
-            state=JobState(data.get("state", JobState.UNKNOWN)),
-        )
+        if self.redis:
+            key = f"job:{job_id}"
+            data = self.redis.get(key)
+            if not data:
+                return None
+            try:
+                data_dict = json.loads(data)
+                return JobRecord(
+                    **data_dict,
+                    state=JobState(data_dict.get("state", JobState.UNKNOWN)),
+                )
+            except Exception:
+                return None
+        else:
+            store = self._load_store()
+            data = store.get(job_id)
+            if not data:
+                return None
+            return JobRecord(
+                **data,
+                state=JobState(data.get("state", JobState.UNKNOWN)),
+            )
 
     def _update_record(self, record: JobRecord) -> None:
         self._save_record(record)
@@ -133,6 +163,32 @@ class BaseJobManager(ABC):
             return JobState.FAILED
         return JobState.UNKNOWN
     
+    def list_active_jobs(self) -> list[JobRecord]:
+        """List all jobs that are not completed or failed."""
+        active = []
+        if self.redis:
+            # Scan for job:* keys
+            cursor = '0'
+            while cursor != 0:
+                cursor, keys = self.redis.scan(cursor=cursor, match="job:*", count=100)
+                for key in keys:
+                    data = self.redis.get(key)
+                    if data:
+                        try:
+                            d = json.loads(data)
+                            state = JobState(d.get("state", JobState.UNKNOWN))
+                            if state in [JobState.PENDING, JobState.RUNNING, JobState.UNKNOWN]:
+                                active.append(JobRecord(**d, state=state))
+                        except Exception:
+                            pass
+        else:
+            store = self._load_store()
+            for _, data in store.items():
+                state = JobState(data.get("state", JobState.UNKNOWN))
+                if state in [JobState.PENDING, JobState.RUNNING, JobState.UNKNOWN]:
+                    active.append(JobRecord(**data, state=state))
+        return active
+        
 
 class BoltzJobManager(BaseJobManager):
     """
@@ -156,8 +212,9 @@ class BoltzJobManager(BaseJobManager):
         slurm_template_path: str | None = None,
         resources_dir: str | None = None,
         cache_dir_remote: str | None = None,
-        partition: str = "tropshalab",   #TODO: may want to change the default
+        partition: str = "tropshalab",
         qos: str = "gpu_access",
+        redis_url: Optional[str] = None,
     ) -> None:
         super().__init__(
             hpc_client=hpc,
@@ -165,6 +222,7 @@ class BoltzJobManager(BaseJobManager):
             local_output_dir=local_output_dir,
             job_store_path=job_store_path,
             tool_name="boltz",
+            redis_url=redis_url,
         )
         # Load slurm template from file if provided
         if slurm_template_path and Path(slurm_template_path).exists():
@@ -285,10 +343,9 @@ class BoltzJobManager(BaseJobManager):
 #SBATCH --job-name={JOB_NAME}
 #SBATCH --partition={PARTITION}
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=32
-#SBATCH --mem=64GB
+#SBATCH --mem=10GB
 #SBATCH --gres=gpu:1
-#SBATCH --time=01:00:00
+#SBATCH --time=00:06:00
 #SBATCH --qos={QOS}
 #SBATCH --output={REMOTE_LOGS_DIR}/{JOB_NAME}-%j.out
 
