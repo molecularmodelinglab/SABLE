@@ -41,6 +41,7 @@ class AuditEventType(str, Enum):
     SYSTEM_SHUTDOWN = "system_shutdown"
     CONFIG_CHANGED = "config_changed"
     ERROR_OCCURRED = "error_occurred"
+    SYSTEM_ERROR = "system_error"
     
     # Workflow operations
     WORKFLOW_MODIFIED = "workflow_modified"
