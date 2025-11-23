@@ -118,7 +118,9 @@ zstandard==0.24.0
 alembic==1.17.1
 psycopg2-binary==2.9.11
 asyncpg==0.30.0
-redis==7.0.1
+redis==7.1.0
+celery[redis]
+paramiko==4.0.0
 passlib==1.7.4
 bcrypt==3.2.2
 python-jose[cryptography]==3.5.0
