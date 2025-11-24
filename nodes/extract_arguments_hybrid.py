@@ -93,14 +93,19 @@ Extract the following information and respond with a JSON object:
 - molecule_source: How to obtain molecules (generated/provided/enumerated/external_library)
 - max_iterations: Number of optimization rounds (default 10, max 100)
 - batch_size: Molecules per iteration (default 5, max 50)
-- enumeration_size: Size of enumerated library (default 100, max 1000)
+- enumeration_size: Size of enumerated library (default 100, max 2000)
 - llm_confidence: Your confidence in this extraction (0.0-1.0)
 
 Available properties: qed, logp, tpsa, molecular_weight, h_bond_donors, h_bond_acceptors, 
 rotatable_bonds, ring_count, heavy_atom_count, solubility, fsp3, cns_activity, toxicity, 
 binding_affinity, permeability
 
-Note for binding_affinity: This is expressed in Log10 Kd (nM), where lower is better, so we ideally want to minimize.
+Note for binding_affinity: This is expressed in Log10 Kd (nM), where lower is better, so we ideally want to minimize. Only calculate this if a protein target or UNIPROT ID is provided.
+
+If the user doesn't provide a property to optimize, default to qed and logp maximization. Defaults for things like max_iterations, batch_size, and enumeration_size should be applied if not specified.
+
+Sometimes you might be asked to choose a property based on molecule or use case. 
+For example, "choose a property that increases the stimulant activity of caffeine" or "Optimize this molecule: CC(=O)Oc1ccccc1C(=O)O for better ADME properties." In such cases, you should select a relevant property from the list above based on your knowledge.
 
 LLM Confidence score guidelines:
 - 0.9-1.0: All required fields clearly specified, no ambiguity
