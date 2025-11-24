@@ -463,6 +463,7 @@ class BoltzTool(BaseTool):
 
         per_ligand: Dict[str, Any] = {}
         
+        # Try to import Celery tasks
         try:
             from server.tasks.slurm import submit_boltz_job, poll_boltz_job
             use_celery = True
@@ -471,9 +472,7 @@ class BoltzTool(BaseTool):
             use_celery = False
 
         if use_celery:
-            # - submit all jobs in parallel
-            pending_submissions = {}  # ligand_id -> AsyncResult
-            
+            import uuid
             for ligand_id, smiles in data.ligands.items():
                 print(f"[BoltzTool] Preparing submission for ligand '{ligand_id}'.")
                 yaml_text = self._affinity_yaml(
@@ -483,120 +482,21 @@ class BoltzTool(BaseTool):
                     constraints=data.constraints,
                     templates=data.templates,
                 )
-                print(f"[BoltzTool] Submitting ligand '{ligand_id}' via Celery task.")
-                pending_submissions[ligand_id] = submit_boltz_job.delay(yaml_text)
-
-            # - wait for submission confirmation (get job_ids)
-            submitted_jobs = {}  # ligand_id -> job_id
-            for ligand_id, task in pending_submissions.items():
-                try:
-                    submission_result = task.get(timeout=60)
-                    job_id = submission_result.get("job_id")
-                    submitted_jobs[ligand_id] = job_id
-                    print(f"[BoltzTool] Job submitted for '{ligand_id}' with ID: {job_id}")
-                except Exception as e:
-                    print(f"[BoltzTool] Failed to submit job for '{ligand_id}': {e}")
-                    per_ligand[ligand_id] = {"error": f"Submission failed: {e}"}
-
-            # 3. Poll all jobs until completion
-            completed_results = {}  # ligand_id -> result dict
-            start_time = time.time()
-            
-            while len(completed_results) < len(submitted_jobs):
-                if time.time() - start_time > (self.poll_attempts * self.poll_interval):
-                    print("[BoltzTool] Global timeout reached while polling jobs.")
-                    break
-
-                active_jobs = [
-                    (lid, jid) for lid, jid in submitted_jobs.items() 
-                    if lid not in completed_results
-                ]
                 
-                if not active_jobs:
-                    break
-
-                for ligand_id, job_id in active_jobs:
-                    try:
-                        poll_task = poll_boltz_job.delay(job_id)
-                        status_result = poll_task.get(timeout=30)
-                        status = status_result.get("status")
-                        
-                        if status in ["completed", "failed"]:
-                            completed_results[ligand_id] = status_result
-                    except Exception as e:
-                        print(f"[BoltzTool] Error polling job {job_id}: {e}")
+                job_id = str(uuid.uuid4())
+                print(f"[BoltzTool] Submitting ligand '{ligand_id}' via Celery task (Async). Job ID: {job_id}")
                 
-                if len(completed_results) < len(submitted_jobs):
-                    time.sleep(self.poll_interval)
-
-            # 4. Process results
-            for ligand_id, job_id in submitted_jobs.items():
-                final_result = completed_results.get(ligand_id)
-                if not final_result:
-                    final_result = {"status": "timeout", "job_id": job_id}
-
-                outputs_dir = final_result.get("outputs_dir")
-                affinity = None
-                confidence = None
-                cif_url = None
-                saved_cif = None
+                task = submit_boltz_job.delay(yaml_text, job_id=job_id)
                 
-                if outputs_dir:
-                    try:
-                        out_path = Path(outputs_dir)
-                        # Look for affinity_*.json
-                        aff_files = list(out_path.glob(f"**/affinity_{job_id}.json"))
-                        if aff_files:
-                            with open(aff_files[0]) as f:
-                                affinity = json.load(f)
-                        
-                        # Look for confidence_*.json
-                        conf_files = list(out_path.glob(f"**/confidence_{job_id}_model_0.json"))
-                        if conf_files:
-                            with open(conf_files[0]) as f:
-                                confidence = json.load(f)
-                                
-                        # Look for CIF
-                        cif_files = list(out_path.glob(f"**/{job_id}_model_0.cif"))
-                        if cif_files:
-                            cif_src = cif_files[0]
-                            
-                            # Copy CIF to artifacts directory if configured
-                            if self.fetch_cif and self.cif_save_dir:
-                                import shutil
-                                os.makedirs(self.cif_save_dir, exist_ok=True)
-                                dst = os.path.join(self.cif_save_dir, f"{job_id}_model_0.cif")
-                                shutil.copy2(cif_src, dst)
-                                saved_cif = dst
-                                cif_url = f"file://{dst}"
-                            else:
-                                saved_cif = str(cif_src)
-                                cif_url = f"file://{saved_cif}"
-                            
-                    except Exception as e:
-                        print(f"[BoltzTool] Error reading results from {outputs_dir}: {e}")
-
-                entry = {
+                per_ligand[ligand_id] = {
                     "job_id": job_id,
-                    "status": final_result.get("status"),
-                    "outputs_dir": outputs_dir,
-                    "affinity": affinity,
-                    "confidence": confidence,
-                    "cif_url": cif_url,
-                    "cif_file": saved_cif,
+                    "celery_task_id": task.id,
+                    "status": "submitted",
+                    "message": f"Job submitted to HPC queue. Results will be available in /data/runs/{job_id}/artifacts/boltz_cifs"
                 }
-                
-                if affinity is None:
-                    entry["error"] = f"No affinity score returned (status={final_result.get('status')})"
-
-                per_ligand[ligand_id] = entry
-                
-                print(
-                    f"[BoltzTool] Completed ligand '{ligand_id}' job_id={job_id} "
-                    f"affinity={affinity} confidence={confidence}"
-                )
 
         else:
+            # Legacy HTTP path (serial)
             for ligand_id, smiles in data.ligands.items():
                 print(f"[BoltzTool] Preparing submission for ligand '{ligand_id}'.")
                 yaml_text = self._affinity_yaml(
