@@ -6,87 +6,6 @@ from rdkit import Chem
 
 from healer.application.healer import MoleculeHEALER
 from schemas.errors import ToolError
-import threading
-import pickle
-import os
-from pathlib import Path
-import logging
-
-
-# Module-level lazy singleton for the expensive MoleculeHEALER instance. This avoids
-# recreating the object on every tool instantiation or call. Thread-safe via a lock.
-_ENUMERATOR: Optional[MoleculeHEALER] = None
-_ENUMERATOR_LOCK = threading.Lock()
-
-_DEFAULT_CACHE_PATH = Path(__file__).resolve().parents[1].parent / "checkpoints" / "molecule_healer.pkl"
-_CACHE_PATH = _DEFAULT_CACHE_PATH
-_LOGGER = logging.getLogger("enumerator_tool")
-
-
-def _load_from_cache(path: Path) -> Optional[MoleculeHEALER]:
-    try:
-        if path.exists():
-            with path.open("rb") as fh:
-                obj = pickle.load(fh)
-                _LOGGER.info("Loaded MoleculeHEALER from cache %s", path)
-                return obj
-    except Exception as e:
-        _LOGGER.warning("Failed to load cached MoleculeHEALER (%s): %s", path, e)
-    return None
-
-
-def _save_to_cache(obj: MoleculeHEALER, path: Path) -> None:
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        with tmp.open("wb") as fh:
-            pickle.dump(obj, fh, protocol=pickle.HIGHEST_PROTOCOL)
-        # atomic replace
-        os.replace(str(tmp), str(path))
-        _LOGGER.info("Saved MoleculeHEALER to cache %s", path)
-    except Exception as e:
-        _LOGGER.warning("Failed to save MoleculeHEALER to cache (%s): %s", path, e)
-
-
-def get_enumerator(cache_path: Optional[Path] = None) -> MoleculeHEALER:
-    """Return a singleton MoleculeHEALER instance (lazy, thread-safe) with disk caching.
-
-    Behavior:
-    - If a cached pickled instance exists, try to load and return it.
-    - Otherwise construct a new instance, attempt to pickle it to cache, and return it.
-    """
-    global _ENUMERATOR
-    if cache_path is None:
-        cache_path = _CACHE_PATH
-
-    if _ENUMERATOR is not None:
-        return _ENUMERATOR
-
-    with _ENUMERATOR_LOCK:
-        if _ENUMERATOR is not None:
-            return _ENUMERATOR
-
-        loaded = _load_from_cache(cache_path)
-        if loaded is not None:
-            _ENUMERATOR = loaded
-            return _ENUMERATOR
-
-        _LOGGER.info("Constructing MoleculeHEALER (this may be slow)...")
-        _ENUMERATOR = MoleculeHEALER(
-            bb_supplier="US_stock",
-            reaction_tags='all',
-            max_evals_per_comp=700,
-            sim_threshold=0.4,
-            max_bbs_per_comp=10,
-            verbose=2,
-        )
-
-        try:
-            _save_to_cache(_ENUMERATOR, cache_path)
-        except Exception:
-            pass
-
-        return _ENUMERATOR
 
 class EnumeratorInput(BaseModel):
     """Input schema for the EnumeratorTool."""
@@ -114,10 +33,14 @@ class EnumeratorTool(BaseTool):
 
     def __init__(self):
         super().__init__()
-        # Do not eagerly construct the expensive MoleculeHEALER here. Use the
-        # process-wide lazy singleton returned by `get_enumerator()` so the
-        # initialization runs only once.
-        self.enumerator = None
+        self.enumerator = MoleculeHEALER(
+            bb_supplier="US_stock",     # Building blocks source
+            reaction_tags='all',        # List of reaction tags to consider, keep 'all' for all reactions
+            max_evals_per_comp=700,     # Maximum evaluations per composition
+            sim_threshold=0.1,          # Similarity threshold for filtering building blocks
+            max_bbs_per_comp=10 ,       # Limit the maximum number of filtered BBs per composition, 10 is a good trade-off
+            verbose=2                   # Verbosity level for the enumeration process
+        )
 
     def _run(
         self,
@@ -131,9 +54,7 @@ class EnumeratorTool(BaseTool):
         min_frag_size: Optional[int] = 2,
     ) -> Union[Dict[str, str], str]:
         try:
-            enumerator = get_enumerator()
-
-            enumerator.set_query_mol(
+            self.enumerator.set_query_mol(
                 query_mol=molecule,
                 n_compositions=n_compositions,
                 randomize_compositions=randomize_compositions,
@@ -143,12 +64,12 @@ class EnumeratorTool(BaseTool):
                 min_frag_size=min_frag_size
             )
 
-            enumerator.enumerate(
+            self.enumerator.enumerate(
                 optimizer=None,
                 max_evals_per_comp= n_compositions * max_evals_per_comp
                 )
-
-            results_df = enumerator.get_results(calc_similarity=True)
+            
+            results_df = self.enumerator.get_results(calc_similarity=True)
             results_df.drop_duplicates(subset='Product', inplace=True)
 
             if results_df.empty:
