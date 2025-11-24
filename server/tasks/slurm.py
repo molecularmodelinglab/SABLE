@@ -1,4 +1,7 @@
 import os
+import stat
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -13,11 +16,31 @@ def get_job_manager() -> BoltzJobManager:
     hpc_host = os.getenv("HPC_HOST")
     if not hpc_host:
         raise ValueError("HPC_HOST environment variable not set")
-        
+    key_path_env = os.getenv("HPC_SSH_KEY")
+    default_key = str(Path.home() / ".ssh" / "id_rsa")
+    key_filename = key_path_env or default_key
+
+    if not os.path.isfile(key_filename) or not os.access(key_filename, os.R_OK):
+        key_content = os.getenv("HPC_SSH_KEY_CONTENT")
+        if key_content:
+            tf = tempfile.NamedTemporaryFile(prefix="hpc_key_", delete=False)
+            tf.write(key_content.encode("utf-8"))
+            tf.flush()
+            tf.close()
+            os.chmod(tf.name, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
+            key_filename = tf.name
+        else:
+            if key_path_env:
+                raise ValueError(
+                    f"Configured SSH key '{key_path_env}' is not readable by the process. "
+                    "Either mount the key into the container with correct permissions, "
+                    "or set the key contents via the HPC_SSH_KEY_CONTENT environment variable."
+                )
+
     ssh_config = SSHConfig(
         hostname=hpc_host,
         username=os.getenv("HPC_USER", os.getenv("USER", "root")),
-        key_filename=os.getenv("HPC_SSH_KEY", str(Path.home() / ".ssh" / "id_rsa")),
+        key_filename=key_filename,
     )
     
     hpc = HPCClient(ssh_config)
@@ -32,14 +55,14 @@ def get_job_manager() -> BoltzJobManager:
     )
 
 @shared_task(bind=True, name="server.tasks.slurm.submit_boltz_job")
-def submit_boltz_job(self, yaml_text: str) -> Dict[str, Any]:
+def submit_boltz_job(self, yaml_text: str, job_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Submit a Boltz job to the HPC cluster.
     Returns the job record as a dict.
     """
     manager = get_job_manager()
     try:
-        record = manager.submit_job(yaml_text)
+        record = manager.submit_job(yaml_text, job_id=job_id)
         
         audit_logger.log(
             event_type=AuditEventType.SYSTEM_EVENT,
@@ -143,6 +166,26 @@ def monitor_slurm_jobs() -> None:
                 
                 if updated_record.state == JobState.COMPLETED:
                     manager.fetch_results(job.job_id)
+                    try:
+                        cif_path = manager.get_cif_path(job.job_id)
+                        if cif_path:
+                            target_dir = Path(f"/data/runs/{job.job_id}/artifacts/boltz_cifs")
+                            target_dir.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(cif_path, target_dir / Path(cif_path).name)
+                            audit_logger.log(
+                                event_type=AuditEventType.SYSTEM_EVENT,
+                                message=f"Copied CIF artifacts for job {job.job_id}",
+                                severity=AuditSeverity.INFO,
+                                details={"target_dir": str(target_dir)}
+                            )
+                    except Exception as e:
+                        print(f"Error copying artifacts for job {job.job_id}: {e}")
+                        audit_logger.log(
+                            event_type=AuditEventType.SYSTEM_ERROR,
+                            message=f"Failed to copy artifacts for job {job.job_id}: {e}",
+                            severity=AuditSeverity.ERROR,
+                            details={"error": str(e)}
+                        )
                     
         except Exception as e:
             print(f"Error monitoring job {job.job_id}: {e}")
