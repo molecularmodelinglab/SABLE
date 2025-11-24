@@ -4,13 +4,13 @@ from pydantic import BaseModel, Field
 from typing import Type, List, Dict, Any, Union, Optional, Tuple
 from rdkit import Chem
 
-from healer.application.healer import MoleculeHEALER
+from healer.application.healer import MoleculeHEALER, SiteHEALER, FragmentHEALER
 from schemas.errors import ToolError
 
 class EnumeratorInput(BaseModel):
     """Input schema for the EnumeratorTool."""
     molecule: str = Field(..., description="SMILES string of the molecule to enumerate.")
-    enumerator: Optional[Any] = Field(default=" MoleculeHEALER", description="Enumeration method to use (default: ' MoleculeHEALER').")
+    healer_mode: Optional[Any] = Field(default=" MoleculeHEALER", description="Enumeration mode to use (default: ' MoleculeHEALER').")
     n_compositions: Optional[int] = Field(default=10, description="Number of compositions to enumerate (default: 10).")
     sim_threshold: Optional[float] = Field(default=None, description="Similarity threshold for filtering results (default: 0.5).")
     reaction_tags: Optional[List[str]] = Field(default=None, description="List of reaction tags for enumeration (uses a default set if not provided).")
@@ -27,20 +27,53 @@ class EnumeratorTool(BaseTool):
     mapping molecule IDs to their SMILES strings.
     """
     name: str = "Enumerator"
-    enumerator: Optional[Any] = Field(default=" MoleculeHEALER", description="Enumeration method to use (default: ' MoleculeHEALER').")
     description: str = Field(default="Enumerates new molecules from a starting compound using chemical reactions.")
     args_schema: Type[BaseModel] = EnumeratorInput
 
-    def __init__(self):
+    def __init__(self, healer_mode: str = "MoleculeHEALER"):
+        """
+            Initialize HEALER with a specific mode: MoleculeHEALER, FragmentHEALER or SiteHEALER.
+        """
         super().__init__()
-        self.enumerator = MoleculeHEALER(
-            bb_supplier="test",     # Building blocks source
-            reaction_tags='all',        # List of reaction tags to consider, keep 'all' for all reactions
-            max_evals_per_comp=700,     # Maximum evaluations per composition
-            sim_threshold=0.01,          # Similarity threshold for filtering building blocks
-            max_bbs_per_comp=10 ,       # Limit the maximum number of filtered BBs per composition, 10 is a good trade-off
-            verbose=2                   # Verbosity level for the enumeration process
-        )
+        self.healer_mode = healer_mode
+        if healer_mode == "MoleculeHEALER":
+            self.enumerator = MoleculeHEALER(
+                bb_supplier="test",     # Building blocks source
+                reaction_tags='all',        # List of reaction tags to consider, keep 'all' for all reactions
+                max_evals_per_comp=700,     # Maximum evaluations per composition
+                sim_threshold=0.01,          # Similarity threshold for filtering building blocks
+                max_bbs_per_comp=10 ,       # Limit the maximum number of filtered BBs per composition, 10 is a good trade-off
+                verbose=2                   # Verbosity level for the enumeration process
+            )
+        elif healer_mode == "FragmentHEALER":
+            self.enumerator = FragmentHEALER(
+                bb_supplier="test",
+                reaction_tags="all",
+                max_evals_per_comp=700,
+                sim_threshold=0.01,
+                max_bbs_per_comp=10,
+                verbose=2
+            )
+        elif healer_mode == "SiteHEALER":
+            self.enumerator = SiteHEALER(
+                bb_supplier="test",
+                reaction_tags="all",
+                max_evals_per_comp=700,
+                rules={
+                    'MW': (0, 500),
+                    'HBD': (0, 5),
+                    'HBA': (0, 10),
+                    'TPSA': (0, 200),
+                    'RotB': (0, 10),
+                    'Rings': (0, 10),
+                    'ArRings': (0, 5),
+                    'Chiral': (0, 5)
+                },
+                struct_rules=[],
+                verbose=2
+            )
+        else:
+            ValueError(f"Invalid HEALER mode. Got {healer_mode}, need one of MoleculeHEALER, FragmentHEALER or SiteHEALER")
 
     def _run(
         self,
@@ -52,17 +85,28 @@ class EnumeratorTool(BaseTool):
         custom_split_sites: Optional[List[Tuple]] = None,
         retro_tree_depth: Optional[int] = 2,
         min_frag_size: Optional[int] = 2,
+        reactive_sites: Optional[List[int]] = None,
     ) -> Union[Dict[str, str], str]:
         try:
-            self.enumerator.set_query_mol(
-                query_mol=molecule,
-                n_compositions=n_compositions,
-                randomize_compositions=randomize_compositions,
-                random_seed=random_seed,
-                custom_split_sites=custom_split_sites,
-                retro_tree_depth=retro_tree_depth,
-                min_frag_size=min_frag_size
-            )
+            if self.healer_mode == "MoleculeHEALER":
+                self.enumerator.set_query_mol(
+                    query_mol=molecule,
+                    n_compositions=n_compositions,
+                    randomize_compositions=randomize_compositions,
+                    random_seed=random_seed,
+                    custom_split_sites=custom_split_sites,
+                    retro_tree_depth=retro_tree_depth,
+                    min_frag_size=min_frag_size
+                )
+            elif self.healer_mode == "FragmentHEALER":
+                self.enumerator.set_query_mol(
+                    query_mol=molecule,
+                )
+            elif self.healer_mode == "SiteHEALER":
+                self.enumerator.set_query_mol(
+                    query_mol=molecule,
+                    reactive_sites=reactive_sites,
+                )
 
             self.enumerator.enumerate(
                 optimizer=None,
@@ -85,6 +129,7 @@ class EnumeratorTool(BaseTool):
             # Format the output as a dictionary of {id: smiles}
             enumerated_molecules_dict = {f"mol_{i}": smi for i, smi in enumerate(enumerated_molecules_list)}
 
+        # TODO: Remove commented legacy code
         # try:
         #     n_comps = n_compositions if n_compositions is not None else 10
         #     sim_thresh = sim_threshold if sim_threshold is not None else 0.01
