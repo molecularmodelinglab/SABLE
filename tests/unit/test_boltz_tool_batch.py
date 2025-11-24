@@ -19,48 +19,35 @@ class TestBoltzToolBatch(unittest.TestCase):
         mock_slurm = MagicMock()
         
         mock_submit = MagicMock()
-        mock_poll = MagicMock()
+        # poll is not used in async mode
         
         mock_slurm.submit_boltz_job = mock_submit
-        mock_slurm.poll_boltz_job = mock_poll
 
         mock_submit_task = MagicMock()
-        mock_submit_task.get.return_value = {"job_id": "job_123"}
+        mock_submit_task.id = "celery_task_123"
         mock_submit.delay.return_value = mock_submit_task
 
-        mock_poll_task = MagicMock()
-        mock_poll_task.get.return_value = {
-            "status": "completed", 
-            "outputs_dir": "/tmp/mock_outputs",
-            "job_id": "job_123"
-        }
-        mock_poll.delay.return_value = mock_poll_task
-
         with patch.dict(sys.modules, {"server.tasks.slurm": mock_slurm}):
-            with patch("pathlib.Path.glob") as mock_glob, \
-                 patch("builtins.open", unittest.mock.mock_open(read_data='{"affinity": -9.5}')) as mock_file:
-                
-                mock_glob.side_effect = [
-                    [MagicMock()], # affinity
-                    [], # confidence
-                    []  # cif
-                ]
-                
-                result_json = self.tool._run(
-                    ligands={"lig1": "CCO"},
-                    polymers=[{"chain_id": "A", "sequence": "AAAA"}]
-                )
+            result_json = self.tool._run(
+                ligands={"lig1": "CCO"},
+                polymers=[{"chain_id": "A", "sequence": "AAAA"}]
+            )
 
         result = json.loads(result_json)
 
         self.assertEqual(result["count"], 1)
-        self.assertIn("lig1", result["per_ligand"])
-        self.assertEqual(result["per_ligand"]["lig1"]["job_id"], "job_123")
-        self.assertEqual(result["per_ligand"]["lig1"]["affinity"], {"affinity": -9.5})
+        entry = result["per_ligand"]["lig1"]
+        self.assertEqual(entry["status"], "submitted")
+        self.assertEqual(entry["celery_task_id"], "celery_task_123")
+        self.assertIn("job_id", entry)
+        self.assertIn("message", entry)
         
         mock_submit.delay.assert_called_once()
-
-        mock_poll.delay.assert_called()
+        
+        # Verify job_id was passed to delay
+        _, kwargs = mock_submit.delay.call_args
+        self.assertIn("job_id", kwargs)
+        self.assertEqual(kwargs["job_id"], entry["job_id"])
 
 if __name__ == "__main__":
     unittest.main()
