@@ -34,7 +34,7 @@ class EnumeratorTool(BaseTool):
     def __init__(self):
         super().__init__()
         self.enumerator = MoleculeHEALER(
-            bb_supplier="test",     # Building blocks source
+            bb_supplier="US_stock",     # Building blocks source
             reaction_tags='all',        # List of reaction tags to consider, keep 'all' for all reactions
             max_evals_per_comp=700,     # Maximum evaluations per composition
             sim_threshold=0.01,          # Similarity threshold for filtering building blocks
@@ -75,8 +75,6 @@ class EnumeratorTool(BaseTool):
             if results_df.empty:
                 return "No molecules were generated that met the criteria."
 
-            # Limit the number of molecules to n_compositions
-            # results_df = results_df.head(int(n_compositions))
             enumerated_molecules_list = results_df['Product'].to_list()
 
             if not enumerated_molecules_list:
@@ -84,49 +82,6 @@ class EnumeratorTool(BaseTool):
 
             # Format the output as a dictionary of {id: smiles}
             enumerated_molecules_dict = {f"mol_{i}": smi for i, smi in enumerate(enumerated_molecules_list)}
-
-        # try:
-        #     n_comps = n_compositions if n_compositions is not None else 10
-        #     sim_thresh = sim_threshold if sim_threshold is not None else 0.01
-        #     rxn_tags = reaction_tags if reaction_tags is not None else ['amide coupling', 'amide', 'C-N bond formation', 'C-N', 'alkylation', 'N-arylation', 'azole', 'amination']
-        #     bb_source = building_blocks if building_blocks is not None else "EU_stock"
-        #     custom_sites = custom_comp_sites if custom_comp_sites is not None else []
-            
-        #     print("Molecule to enumerate:", molecule)
-        #     enumerator = MoleculeEnumerator(
-        #         n_compositions=n_comps,
-        #         molecule=molecule,
-        #         building_blocks=bb_source,
-        #         reaction_tags=rxn_tags,
-        #         custom_comp_sites=custom_sites,
-        #         sim_threshold=sim_thresh,
-        #     )
-
-        #     enumerator.enumerate()
-        #     results_df = enumerator.get_results()
-
-        #     # Basic sanity: ensure Product column exists and has strings
-        #     if 'Product' not in results_df.columns:
-        #         raise ToolError("Enumerator did not return a 'Product' column.", tool="Enumerator", code="BAD_OUTPUT")
-
-        #     results_df = results_df.dropna(subset=['Product']).copy()
-
-        #     # Validate SMILES strictly; keep boolean only
-        #     results_df['Valid'] = results_df['Product'].map(self.validate_smiles)
-        #     results_df = results_df[results_df['Valid']]
-
-        #     if results_df.empty:
-        #         raise ToolError("No molecules were generated that met the criteria.", tool="Enumerator", code="NO_RESULTS")
-
-        #     # Limit the number of molecules to n_compositions
-        #     if len(results_df) > n_comps:
-        #         limited_df = results_df.head(int(n_comps))
-        #     else:
-        #         limited_df = results_df
-        #     enumerated_molecules_list = limited_df['Product'].tolist()
-
-        #     if not enumerated_molecules_list:
-        #         raise ToolError("No molecules were generated that met the criteria.", tool="Enumerator", code="NO_RESULTS")
 
             # Format the output as a dictionary of {id: smiles}
             enumerated_molecules_dict = {f"mol_{i}": smi for i, smi in enumerate(enumerated_molecules_list)}
@@ -152,7 +107,6 @@ class EnumeratorTool(BaseTool):
                 Chem.SanitizeMol(mol, catchErrors=True)
             except Exception:
                 return False
-            # Optional: reject multi-fragment molecules
             if '.' in smiles_string:
                 try:
                     frags = Chem.GetMolFrags(mol, asMols=True)
