@@ -237,8 +237,9 @@ class BoltzJobManager(BaseJobManager):
 
     # ----- public interface used by FastAPI -----
 
-    def submit_job(self, yaml_text: str) -> JobRecord:
-        job_id = self._create_job_id()
+    def submit_job(self, yaml_text: str, job_id: Optional[str] = None) -> JobRecord:
+        if job_id is None:
+            job_id = self._create_job_id()
 
         # Remote dirs for this job
         remote_job_dir = f"{self.remote_base_dir}/{job_id}"
