@@ -37,6 +37,7 @@ class AuditEventType(str, Enum):
     DATA_EXPORT = "data_export"
     
     # System events
+    SYSTEM_EVENT = "system_event"
     SYSTEM_START = "system_start"
     SYSTEM_SHUTDOWN = "system_shutdown"
     CONFIG_CHANGED = "config_changed"
