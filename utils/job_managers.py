@@ -159,7 +159,17 @@ class BaseJobManager(ABC):
             return JobState.RUNNING
         if "COMPLETED" in text or "CD" in text:
             return JobState.COMPLETED
-        if "FAILED" in text or "F " in text or "TIMEOUT" in text:
+        failure_indicators = (
+            "FAILED",
+            "F ",
+            "TIMEOUT",
+            "CANCELLED",
+            "NODE_FAIL",
+            "PREEMPT",
+            "BOOT_FAIL",
+            "OUT_OF_MEMORY",
+        )
+        if any(keyword in text for keyword in failure_indicators):
             return JobState.FAILED
         return JobState.UNKNOWN
     
@@ -212,7 +222,7 @@ class BoltzJobManager(BaseJobManager):
         slurm_template_path: str | None = None,
         resources_dir: str | None = None,
         cache_dir_remote: str | None = None,
-        partition: str = "tropshalab",
+        partition: str = "l40-gpu",
         qos: str = "gpu_access",
         redis_url: Optional[str] = None,
     ) -> None:
