@@ -34,7 +34,7 @@ class EnumeratorTool(BaseTool):
     def __init__(self):
         super().__init__()
         self.enumerator = MoleculeHEALER(
-            bb_supplier="US_stock",     # Building blocks source
+            bb_supplier="test",     # Building blocks source
             reaction_tags='all',        # List of reaction tags to consider, keep 'all' for all reactions
             max_evals_per_comp=700,     # Maximum evaluations per composition
             sim_threshold=0.1,          # Similarity threshold for filtering building blocks
