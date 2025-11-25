@@ -270,84 +270,64 @@ class BoltzTool(BaseTool):
             path = "/" + path
         return f"{self.base_url}{path}"
 
-    def _get_json(self, path: str) -> Dict[str, Any]:
-        url = self._build_url(path)
-        headers = {
-            "Authorization": f"Bearer {self.api_token}",
-        }
-        try:
-            resp = self.session.get(url, headers=headers, timeout=self.timeout)
-        except Exception as exc:
-            raise ToolException(f"GET {url} failed: {exc}")
+    def _wait_for_celery_jobs(
+        self,
+        pending_jobs: Dict[str, str],
+        per_ligand: Dict[str, Dict[str, Any]],
+        poll_proxy,
+    ) -> None:
+        if not poll_proxy or not pending_jobs:
+            return
 
-        if resp.status_code // 100 != 2:
-            try:
-                payload = resp.json()
-            except Exception:
-                payload = {"text": resp.text}
-            raise ToolException(
-                f"GET {url} returned HTTP {resp.status_code}: {payload}"
-            )
+        attempts = 0
+        while pending_jobs and attempts < self.poll_attempts:
+            for ligand_id in list(pending_jobs.keys()):
+                job_id = pending_jobs[ligand_id]
+                try:
+                    result = poll_proxy(job_id, emit_audit=False)
+                except Exception as exc:
+                    print(f"[BoltzTool] Polling job {job_id} failed: {exc}")
+                    continue
 
-        try:
-            return resp.json()
-        except Exception as exc:
-            raise ToolException(f"Failed to parse JSON from {url}: {exc}")
+                entry = per_ligand.get(ligand_id)
+                if not entry:
+                    pending_jobs.pop(ligand_id, None)
+                    continue
 
-    def _maybe_wait_for_result(self, initial_payload: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Poll for job completion. If affinity already present, return immediately.
-        Otherwise poll indefinitely until job completes or fails.
-        """
-        if initial_payload.get("affinity") is not None:
-            print("[BoltzTool] Received affinity in initial response, skipping poll.")
-            return initial_payload
+                status = (result.get("status") or "").lower()
+                entry["status"] = status or entry.get("status", "submitted")
 
-        job_id = initial_payload.get("job_id")
-        if not job_id:
-            print("[BoltzTool] No job_id returned; cannot poll.")
-            return initial_payload
+                if status == "completed":
+                    entry.update(
+                        {
+                            "affinity": result.get("affinity"),
+                            "confidence": result.get("confidence"),
+                            "outputs_dir": result.get("outputs_dir"),
+                            "cif_path": result.get("cif_path"),
+                        }
+                    )
+                    print(f"[BoltzTool] Boltz job {job_id} completed for ligand '{ligand_id}'.")
+                    pending_jobs.pop(ligand_id, None)
+                elif status == "failed":
+                    entry.update(
+                        {
+                            "error": result.get("error", "Boltz job failed on HPC"),
+                            "outputs_dir": result.get("outputs_dir"),
+                        }
+                    )
+                    print(f"[BoltzTool] Boltz job {job_id} failed for ligand '{ligand_id}'.")
+                    pending_jobs.pop(ligand_id, None)
+                else:
+                    entry["message"] = f"Boltz job {job_id} status: {status or 'pending'}"
 
-        last_payload = dict(initial_payload)
-
-        if self.latency_seconds > 0:
-            print(f"[BoltzTool] Waiting {self.latency_seconds}s before polling job {job_id}.")
-            time.sleep(self.latency_seconds)
-
-        # Poll indefinitely until completion or failure
-        attempt = 0
-        while True:
-            attempt += 1
-            print(f"[BoltzTool] Poll attempt {attempt} for job {job_id}.")
-            
-            try:
-                refreshed = self._get_json(f"/jobs/{job_id}")
-            except ToolException as e:
-                print(f"[BoltzTool] Poll attempt {attempt} failed to fetch job {job_id} status: {e}")
+            if pending_jobs:
                 time.sleep(self.poll_interval)
-                continue
+                attempts += 1
 
-            if isinstance(refreshed, dict):
-                last_payload.update({k: v for k, v in refreshed.items() if v is not None})
-                
-                status = last_payload.get("status")
-                
-                # Job completed successfully
-                if last_payload.get("affinity") is not None or status == "completed":
-                    print(f"[BoltzTool] Job {job_id} completed on attempt {attempt}.")
-                    break
-                
-                # Job failed
-                if status == "failed":
-                    print(f"[BoltzTool] Job {job_id} failed: {last_payload.get('error')}")
-                    break
-                
-                # Still running, keep polling
-                print(f"[BoltzTool] Job {job_id} status: {status}, continuing to poll...")
-
-            time.sleep(self.poll_interval)
-
-        return last_payload
+        if pending_jobs:
+            print(
+                f"[BoltzTool] Timeout reached waiting for {len(pending_jobs)} Celery Boltz job(s) to finish."
+            )
 
     def _pick_ligand_id(self, used: set[str]) -> str:
         """Pick a ligand chain ID that doesn't collide with polymer IDs."""
@@ -401,59 +381,6 @@ class BoltzTool(BaseTool):
             doc["templates"] = templates
         return yaml.safe_dump(doc, sort_keys=False)
 
-    # HTTP helpers
-    def _post_json(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
-        url = self._build_url(path)
-        headers = {
-            "Authorization": f"Bearer {self.api_token}",
-            "Content-Type": "application/json",
-        }
-        attempt = 0
-        last_exc: Optional[Exception] = None
-        while attempt <= self.max_retries:
-            try:
-                payload_str = json.dumps(body)
-                print(
-                    f"[BoltzTool] POST {url} (attempt {attempt + 1}/{self.max_retries + 1}) "
-                    f"payload_len={len(payload_str)}"
-                )
-                resp = self.session.post(url, headers=headers, data=payload_str, timeout=self.timeout)
-                if resp.status_code // 100 == 2:
-                    print(f"[BoltzTool] POST {url} succeeded with status {resp.status_code}")
-                    return resp.json()
-                try:
-                    payload = resp.json()
-                except Exception:
-                    payload = {"text": resp.text}
-                raise ToolException(
-                    f"Server error {resp.status_code} at {url}. "
-                    f"stderr: {payload.get('stderr','')} stdout: {payload.get('stdout','')}"
-                )
-            except Exception as e:
-                last_exc = e
-                print(f"[BoltzTool] POST {url} failed on attempt {attempt + 1}: {e}")
-                if attempt == self.max_retries:
-                    break
-                time.sleep(0.6 * (attempt + 1))
-                attempt += 1
-        raise ToolException(f"Request failed after retries: {last_exc}")
-    
-    def _download_cif_if_wanted(self, cif_url: Optional[str], job_id: str) -> Optional[str]:
-        if not (self.fetch_cif and cif_url and self.cif_save_dir):
-            return None
-        url = self._build_url(str(cif_url))
-        headers = {"Authorization": f"Bearer {self.api_token}"}
-        r = self.session.get(url, headers=headers, timeout=self.timeout, stream=True)
-        if r.status_code != 200:
-            return None
-        os.makedirs(self.cif_save_dir, exist_ok=True)
-        dst = os.path.join(self.cif_save_dir, f"{job_id}_model_0.cif")
-        with open(dst, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1 << 16):
-                if chunk:
-                    f.write(chunk)
-        return dst
-
     def _run(self, **kwargs) -> str:
         """Run Boltz affinity submission for multiple ligands."""
         data = BoltzInput.model_validate(kwargs)  # pydantic v2
@@ -462,100 +389,41 @@ class BoltzTool(BaseTool):
         ligand_chain_id = self._pick_ligand_id(self._collect_used_chain_ids(data.polymers))
 
         per_ligand: Dict[str, Any] = {}
-        
-        # Try to import Celery tasks
+
         try:
-            from server.tasks.slurm import submit_boltz_job, poll_boltz_job
-            use_celery = True
-        except ImportError:
-            print("[BoltzTool] Celery tasks not available, falling back to HTTP.")
-            use_celery = False
+            from server.tasks.slurm import submit_boltz_job, poll_boltz_job_once
+        except ImportError as exc:
+            raise ToolException(
+                "Boltz submission Celery tasks are unavailable; install `server.tasks.slurm`."
+            ) from exc
 
-        if use_celery:
-            import uuid
-            for ligand_id, smiles in data.ligands.items():
-                print(f"[BoltzTool] Preparing submission for ligand '{ligand_id}'.")
-                yaml_text = self._affinity_yaml(
-                    protein_sequences=protein_entries,
-                    ligand_smiles=smiles,
-                    ligand_chain_id=ligand_chain_id,
-                    constraints=data.constraints,
-                    templates=data.templates,
-                )
-                
-                job_id = str(uuid.uuid4())
-                print(f"[BoltzTool] Submitting ligand '{ligand_id}' via Celery task (Async). Job ID: {job_id}")
-                
-                task = submit_boltz_job.delay(yaml_text, job_id=job_id)
-                
-                per_ligand[ligand_id] = {
-                    "job_id": job_id,
-                    "celery_task_id": task.id,
-                    "status": "submitted",
-                    "message": f"Job submitted to HPC queue. Results will be available in /data/runs/{job_id}/artifacts/boltz_cifs"
-                }
-
-        else:
-            # Legacy HTTP path (serial)
-            for ligand_id, smiles in data.ligands.items():
-                print(f"[BoltzTool] Preparing submission for ligand '{ligand_id}'.")
-                yaml_text = self._affinity_yaml(
-                    protein_sequences=protein_entries,
-                    ligand_smiles=smiles,
-                    ligand_chain_id=ligand_chain_id,
-                    constraints=data.constraints,
-                    templates=data.templates,
-                )
-                
-                print(
-                    f"[BoltzTool] Submitting ligand '{ligand_id}' to /submit_yaml_text with chain '{ligand_chain_id}'."
-                )
-                resp = self._post_json("/submit_yaml_text", {"yaml_text": yaml_text})
-                if isinstance(resp, dict):
-                    resp = self._maybe_wait_for_result(resp)
-                saved_cif = self._download_cif_if_wanted(resp.get("cif_url"), job_id=resp.get("job_id", ""))
-
-            job_id = resp.get("job_id")
-            affinity = resp.get("affinity")
-            confidence = resp.get("confidence")
-
-            print(
-                f"[BoltzTool] Completed ligand '{ligand_id}' job_id={job_id} "
-                f"affinity={affinity} confidence={confidence}"
+        pending_jobs: Dict[str, str] = {}
+        import uuid
+        for ligand_id, smiles in data.ligands.items():
+            print(f"[BoltzTool] Preparing submission for ligand '{ligand_id}'.")
+            yaml_text = self._affinity_yaml(
+                protein_sequences=protein_entries,
+                ligand_smiles=smiles,
+                ligand_chain_id=ligand_chain_id,
+                constraints=data.constraints,
+                templates=data.templates,
             )
 
-            entry: Dict[str, Any] = {
+            job_id = str(uuid.uuid4())
+            print(f"[BoltzTool] Submitting ligand '{ligand_id}' via Celery task (Async). Job ID: {job_id}")
+
+            task = submit_boltz_job.delay(yaml_text, job_id=job_id)
+
+            per_ligand[ligand_id] = {
                 "job_id": job_id,
-                "outputs_dir": resp.get("outputs_dir"),
-                "affinity": affinity,
-                "confidence": confidence,
-                "cif_url": resp.get("cif_url"),
-                "cif_file": saved_cif,
+                "celery_task_id": task.id,
+                "status": "submitted",
+                "message": f"Job submitted to HPC queue. Results will be available in /data/runs/{job_id}/artifacts/boltz_cifs"
             }
+            pending_jobs[ligand_id] = job_id
 
-            # If the service did not return an affinity score
-            if affinity is None:
-                # Try to gather a helpful server-side message from known keys
-                server_msg = None
-                for k in ("error", "message", "stderr", "stdout", "status"):
-                    v = resp.get(k) if isinstance(resp, dict) else None
-                    if v:
-                        server_msg = v
-                        break
-
-                payload_summary = {}
-                if isinstance(resp, dict):
-                    for k in ("job_id", "status", "outputs_dir", "cif_url"):
-                        if resp.get(k) is not None:
-                            payload_summary[k] = resp.get(k)
-
-                entry["error"] = (
-                    f"No affinity score returned for ligand '{ligand_id}'"
-                    f" (job_id={job_id}). Server message: {server_msg!r}."
-                    f" Payload summary: {json.dumps(payload_summary, ensure_ascii=False)}"
-                )
-
-            per_ligand[ligand_id] = entry
+        if pending_jobs:
+            self._wait_for_celery_jobs(pending_jobs, per_ligand, poll_boltz_job_once)
 
         return json.dumps(
             {"count": len(per_ligand), "base_url": self.base_url, "ligand_chain_id": ligand_chain_id, "per_ligand": per_ligand},
