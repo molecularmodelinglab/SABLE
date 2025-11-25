@@ -1,3 +1,4 @@
+import json
 import os
 import stat
 import shutil
@@ -54,6 +55,75 @@ def get_job_manager() -> BoltzJobManager:
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
     )
 
+
+def _load_json_file(path: Path) -> Optional[Dict[str, Any]]:
+    if not path or not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
+def poll_boltz_job_once(job_id: str, *, emit_audit: bool = True) -> Dict[str, Any]:
+    manager = get_job_manager()
+    record = manager.get_status(job_id)
+    if not record:
+        return {"status": "unknown", "job_id": job_id}
+
+    result = {
+        "job_id": record.job_id,
+        "slurm_job_id": record.slurm_job_id,
+        "status": record.state.value.lower(),
+    }
+
+    if record.state == JobState.COMPLETED:
+        if not record.local_output_dir:
+            manager.fetch_results(job_id)
+            record = manager.get_status(job_id) or record
+            if emit_audit:
+                audit_logger.log(
+                    event_type=AuditEventType.SYSTEM_EVENT,
+                    message=f"Boltz job {job_id} completed and results downloaded",
+                    severity=AuditSeverity.INFO,
+                    details={
+                        "job_id": job_id,
+                        "slurm_job_id": record.slurm_job_id,
+                        "output_dir": record.local_output_dir,
+                    },
+                )
+
+        result["outputs_dir"] = record.local_output_dir
+        if record.local_output_dir:
+            local_output_path = Path(record.local_output_dir)
+            try:
+                paths = manager._pred_paths(record.job_id, local_output_path)
+                affinity_data = _load_json_file(paths["affinity"])
+                confidence_data = _load_json_file(paths["confidence"])
+                if affinity_data is not None:
+                    result["affinity"] = affinity_data
+                if confidence_data is not None:
+                    result["confidence"] = confidence_data
+                if paths["cif"].is_file():
+                    result["cif_path"] = str(paths["cif"])
+            except Exception:
+                pass
+
+    elif record.state == JobState.FAILED:
+        result["error"] = "Job failed on HPC"
+        if emit_audit:
+            audit_logger.log(
+                event_type=AuditEventType.SYSTEM_ERROR,
+                message=f"Boltz job {job_id} failed on HPC",
+                severity=AuditSeverity.ERROR,
+                details={
+                    "job_id": job_id,
+                    "slurm_job_id": record.slurm_job_id,
+                },
+            )
+
+    return result
+
 @shared_task(bind=True, name="server.tasks.slurm.submit_boltz_job")
 def submit_boltz_job(self, yaml_text: str, job_id: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -91,57 +161,8 @@ def submit_boltz_job(self, yaml_text: str, job_id: Optional[str] = None) -> Dict
 
 @shared_task(bind=True, name="server.tasks.slurm.poll_boltz_job")
 def poll_boltz_job(self, job_id: str) -> Dict[str, Any]:
-    """
-    Check the status of a Boltz job.
-    If completed, downloads results.
-    """
-    manager = get_job_manager()
-    
-    # Check status (this updates the local record)
-    record = manager.get_status(job_id)
-    
-    if not record:
-        return {"status": "unknown", "job_id": job_id}
-        
-    result = {
-        "job_id": record.job_id,
-        "slurm_job_id": record.slurm_job_id,
-        "status": record.state.value.lower(),
-    }
-    
-    if record.state == JobState.COMPLETED:
-        # Download results if not already done
-        if not record.local_output_dir:
-            manager.fetch_results(job_id)
-            # Reload record to get local path
-            record = manager.get_status(job_id)
-            
-            audit_logger.log(
-                event_type=AuditEventType.SYSTEM_EVENT,
-                message=f"Boltz job {job_id} completed and results downloaded",
-                severity=AuditSeverity.INFO,
-                details={
-                    "job_id": job_id,
-                    "slurm_job_id": record.slurm_job_id,
-                    "output_dir": record.local_output_dir
-                }
-            )
-            
-        result["outputs_dir"] = record.local_output_dir
-        
-    elif record.state == JobState.FAILED:
-        result["error"] = "Job failed on HPC"
-        audit_logger.log(
-            event_type=AuditEventType.SYSTEM_ERROR,
-            message=f"Boltz job {job_id} failed on HPC",
-            severity=AuditSeverity.ERROR,
-            details={
-                "job_id": job_id,
-                "slurm_job_id": record.slurm_job_id
-            }
-        )
-        
-    return result
+    """Celery wrapper that delegates to Poll helper."""
+    return poll_boltz_job_once(job_id)
 
 @shared_task(name="server.tasks.slurm.monitor_slurm_jobs")
 def monitor_slurm_jobs() -> None:
