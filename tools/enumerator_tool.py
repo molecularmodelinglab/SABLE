@@ -1,6 +1,6 @@
 import healer.healer.utils.rdkit_monkey_patch as rdkit_monkey_patch
 from langchain.tools import BaseTool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 from typing import Type, List, Dict, Any, Union, Optional, Tuple
 from rdkit import Chem
 
@@ -10,7 +10,7 @@ from schemas.errors import ToolError
 class EnumeratorInput(BaseModel):
     """Input schema for the EnumeratorTool."""
     molecule: str = Field(..., description="SMILES string of the molecule to enumerate.")
-    healer_mode: Optional[Any] = Field(default=" MoleculeHEALER", description="Enumeration mode to use (default: ' MoleculeHEALER').")
+    healer_mode: Optional[Any] = Field(default="MoleculeHEALER", description="Enumeration mode to use (default: ' MoleculeHEALER').")
     n_compositions: Optional[int] = Field(default=10, description="Number of compositions to enumerate (default: 10).")
     sim_threshold: Optional[float] = Field(default=None, description="Similarity threshold for filtering results (default: 0.5).")
     reaction_tags: Optional[List[str]] = Field(default=None, description="List of reaction tags for enumeration (uses a default set if not provided).")
@@ -29,15 +29,21 @@ class EnumeratorTool(BaseTool):
     name: str = "Enumerator"
     description: str = Field(default="Enumerates new molecules from a starting compound using chemical reactions.")
     args_schema: Type[BaseModel] = EnumeratorInput
+    healer_mode: str = Field(default="MoleculeHEALER", description="HEALER enumeration mode: MoleculeHEALER, FragmentHEALER, or SiteHEALER")
+    
+    # Use PrivateAttr to exclude enumerator from Pydantic field validation
+    _enumerator: Any = PrivateAttr(default=None)
+    
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def __init__(self, healer_mode: str = "MoleculeHEALER"):
+    def __init__(self, healer_mode: str = "MoleculeHEALER", **kwargs):
         """
-            Initialize HEALER with a specific mode: MoleculeHEALER, FragmentHEALER or SiteHEALER.
+        Initialize HEALER with a specific mode: MoleculeHEALER, FragmentHEALER or SiteHEALER.
         """
-        super().__init__()
-        self.healer_mode = healer_mode
-        if healer_mode == "MoleculeHEALER":
-            self.enumerator = MoleculeHEALER(
+        super().__init__(healer_mode=healer_mode, **kwargs)
+        mode = self.healer_mode
+        if mode == "MoleculeHEALER":
+            self._enumerator = MoleculeHEALER(
                 bb_supplier="test",     # Building blocks source
                 reaction_tags='all',        # List of reaction tags to consider, keep 'all' for all reactions
                 max_evals_per_comp=700,     # Maximum evaluations per composition
@@ -45,8 +51,8 @@ class EnumeratorTool(BaseTool):
                 max_bbs_per_comp=10 ,       # Limit the maximum number of filtered BBs per composition, 10 is a good trade-off
                 verbose=2                   # Verbosity level for the enumeration process
             )
-        elif healer_mode == "FragmentHEALER":
-            self.enumerator = FragmentHEALER(
+        elif mode == "FragmentHEALER":
+            self._enumerator = FragmentHEALER(
                 bb_supplier="test",
                 reaction_tags="all",
                 max_evals_per_comp=700,
@@ -54,8 +60,8 @@ class EnumeratorTool(BaseTool):
                 max_bbs_per_comp=10,
                 verbose=2
             )
-        elif healer_mode == "SiteHEALER":
-            self.enumerator = SiteHEALER(
+        elif mode == "SiteHEALER":
+            self._enumerator = SiteHEALER(
                 bb_supplier="test",
                 reaction_tags="all",
                 max_evals_per_comp=700,
@@ -73,7 +79,7 @@ class EnumeratorTool(BaseTool):
                 verbose=2
             )
         else:
-            ValueError(f"Invalid HEALER mode. Got {healer_mode}, need one of MoleculeHEALER, FragmentHEALER or SiteHEALER")
+            raise ValueError(f"Invalid HEALER mode. Got {mode}, need one of MoleculeHEALER, FragmentHEALER or SiteHEALER")
 
     def _run(
         self,
@@ -89,7 +95,7 @@ class EnumeratorTool(BaseTool):
     ) -> Union[Dict[str, str], str]:
         try:
             if self.healer_mode == "MoleculeHEALER":
-                self.enumerator.set_query_mol(
+                self._enumerator.set_query_mol(
                     query_mol=molecule,
                     n_compositions=n_compositions,
                     randomize_compositions=randomize_compositions,
@@ -99,21 +105,21 @@ class EnumeratorTool(BaseTool):
                     min_frag_size=min_frag_size
                 )
             elif self.healer_mode == "FragmentHEALER":
-                self.enumerator.set_query_mol(
+                self._enumerator.set_query_mol(
                     query_mol=molecule,
                 )
             elif self.healer_mode == "SiteHEALER":
-                self.enumerator.set_query_mol(
+                self._enumerator.set_query_mol(
                     query_mol=molecule,
                     reactive_sites=reactive_sites,
                 )
 
-            self.enumerator.enumerate(
+            self._enumerator.enumerate(
                 optimizer=None,
                 max_evals_per_comp= n_compositions * max_evals_per_comp
                 )
             
-            results_df = self.enumerator.get_results(calc_similarity=True)
+            results_df = self._enumerator.get_results(calc_similarity=True)
             results_df.drop_duplicates(subset='Product', inplace=True)
 
             if results_df.empty:
