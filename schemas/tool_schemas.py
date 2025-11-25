@@ -15,10 +15,18 @@ class EnumerationStrategy(str, Enum):
     SIMILARITY_BASED = "similarity_based"
 
 
+class HealerMode(str, Enum):
+    """High-level HEALER enumeration modes used by the EnumeratorTool."""
+    MOLECULE_HEALER = "MoleculeHEALER"
+    SITE_HEALER = "SiteHEALER"
+    FRAGMENT_HEALER = "FragmentHEALER"
+
+
 class EnumerationRequest(BaseModel):
     """Request for molecule enumeration."""
     starting_smiles: str
     strategy: EnumerationStrategy = EnumerationStrategy.REACTION_BASED
+    healer_mode: Optional[HealerMode] = Field(default=HealerMode.MOLECULE_HEALER, description="Which HEALER mode to use: MoleculeHEALER, SiteHEALER or FragmentHEALER.")
     max_molecules: int = Field(default=100, ge=1, le=10000)
     diversity_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
     property_filters: Optional[Dict[str, tuple[float, float]]] = None
