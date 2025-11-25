@@ -91,6 +91,7 @@ Extract the following information and respond with a JSON object:
 - target_properties: List of objects with property_name, optimization_mode (MAX/MIN/MATCH), weight, bounds (tuple)
 - proteins: List of objects describing protein chains with chain_id (A, B, ...), and either sequence or uniprot_id (optional fields: msa, cyclic, modifications)
 - molecule_source: How to obtain molecules (generated/provided/enumerated/external_library)
+- healer_mode: If enumerating, which HEALER mode to use (MoleculeHEALER/SiteHEALER/FragmentHEALER)
 - max_iterations: Number of optimization rounds (default 10, max 100)
 - batch_size: Molecules per iteration (default 5, max 50)
 - enumeration_size: Size of enumerated library (default 100, max 2000)
@@ -106,6 +107,11 @@ If the user doesn't provide a property to optimize, default to qed and logp maxi
 
 Sometimes you might be asked to choose a property based on molecule or use case. 
 For example, "choose a property that increases the stimulant activity of caffeine" or "Optimize this molecule: CC(=O)Oc1ccccc1C(=O)O for better ADME properties." In such cases, you should select a relevant property from the list above based on your knowledge.
+
+For healer_mode, if the user requests enumeration or analogs/derivatives, choose an appropriate HEALER mode based on context:
+- If the user mentions fragments or provides a SMILES with multiple fragments ('.'), use FragmentHEALER.
+- If the user asks to vary a side chain, R-group, grow or attach R groups, or fix a scaffold, use SiteHEALER.
+- Otherwise, default to MoleculeHEALER for general enumeration requests.
 
 LLM Confidence score guidelines:
 - 0.9-1.0: All required fields clearly specified, no ambiguity
@@ -343,7 +349,17 @@ Respond with valid JSON only.
             parsed['molecule_source'] = MoleculeSource.PROVIDED.value
         else:
             parsed['molecule_source'] = MoleculeSource.GENERATED.value
-        
+
+        healer_mode = None
+        if 'fragment' in prompt_lower or '.' in prompt and re.search(r"\w+\.\w+", prompt):
+            healer_mode = 'FragmentHEALER'
+        elif any(k in prompt_lower for k in ['r-group', 'r group', 'rgroups', 'r-groups', 'attach r', 'grow', 'vary', 'fix the', 'fix']) and any(k in prompt_lower for k in ['side chain', 'side-chain', 'scaffold', 'attach', 'r group', 'r-group', 'imidzole', 'imidazole', 'grow my small molecule', 'r group analogs']):
+            healer_mode = 'SiteHEALER'
+        else:
+            healer_mode = 'MoleculeHEALER'
+
+        parsed['healer_mode'] = healer_mode
+
         # Extract enumeration size if mentioned
         enum_match = re.search(r'(\d+)\s*(?:molecules?|compounds?|analogs?|derivatives?)', prompt_lower)
         if enum_match:
