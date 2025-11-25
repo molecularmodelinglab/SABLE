@@ -57,11 +57,18 @@ class WorkflowRunner:
         
         # Temporarily remove llm_client before pickling (it's not serializable)
         llm_client_backup = None
+        event_callback_backup = None
         if isinstance(state, dict):
             llm_client_backup = state_dict.pop('llm_client', None)
+            event_callback_backup = state_dict.pop('_event_callback', None)
         else:
             llm_client_backup = getattr(state, 'llm_client', None)
             state.llm_client = None
+            try:
+                event_callback_backup = getattr(state, '_event_callback', None)
+                setattr(state, '_event_callback', None)
+            except Exception:
+                event_callback_backup = None
         
         try:
             with open(checkpoint_path, 'wb') as f:
@@ -71,9 +78,15 @@ class WorkflowRunner:
             if isinstance(state, dict):
                 if llm_client_backup is not None:
                     state_dict['llm_client'] = llm_client_backup
+                if event_callback_backup is not None:
+                    state_dict['_event_callback'] = event_callback_backup
             else:
                 state.llm_client = llm_client_backup
-        
+                try:
+                    if event_callback_backup is not None:
+                        setattr(state, '_event_callback', event_callback_backup)
+                except Exception:
+                    pass
         json_path = self.checkpoint_dir / f"{checkpoint_name}.json"
         with open(json_path, 'w') as f:
             # Create a JSON-safe copy without llm_client and event_callback
