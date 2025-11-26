@@ -19,7 +19,7 @@ binding_affinity, permeability
 Note for binding_affinity: This is expressed in Log10 Kd (nM), where lower is better, so we ideally want to minimize. Only calculate this if a protein target or UNIPROT ID is provided.
 
 For healer_mode, if the user requests enumeration or analogs/derivatives, choose an appropriate HEALER mode based on context:
-- If the user mentions fragments or provides a SMILES with multiple fragments ('.'), use FragmentHEALER.
+- If the user mentions fragments or provides a SMILES with multiple fragments ('.'), use FragmentHEALER. If you have fragments, then the starting smiles should be joined with '.'. This will make the starting_molecules SMILES_A.SMILES_B...
 - If the user asks to vary a side chain, R-group, grow or attach R groups, or fix a scaffold, use SiteHEALER.
 - Otherwise, default to MoleculeHEALER for general enumeration requests.
 
