@@ -14,7 +14,7 @@ Required Environment Variables:
 import os
 from typing import Protocol, Optional
 from pathlib import Path
-from system import prompt as system_instruction
+from .system import prompt as system_instruction
 
 try:
     from dotenv import load_dotenv
@@ -56,13 +56,13 @@ class OpenAIClient:
         self.model = model
         self.system_prompt = system_prompt
 
-    def generate(self, system: str, prompt: str) -> str:
+    def generate(self, prompt: str) -> str:
         """Generates a response using the OpenAI ChatCompletion endpoint."""
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": system},
+                    {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": prompt},
                 ],
             )
