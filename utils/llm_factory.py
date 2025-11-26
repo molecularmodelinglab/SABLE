@@ -14,11 +14,10 @@ Required Environment Variables:
 import os
 from typing import Protocol, Optional
 from pathlib import Path
+from system import prompt as system_instruction
 
-# Load environment variables from .env file if it exists
 try:
     from dotenv import load_dotenv
-    # Look for .env in the project root
     env_path = Path(__file__).parent.parent / '.env'
     if env_path.exists():
         load_dotenv(env_path)
@@ -26,7 +25,6 @@ try:
 except ImportError:
     print("Note: python-dotenv not installed. Using system environment variables only.")
 
-# Use try-except blocks to handle missing dependencies gracefully
 try:
     import openai
 except ImportError:
@@ -51,18 +49,20 @@ class LLMClient(Protocol):
 class OpenAIClient:
     """Wrapper for the OpenAI API client."""
 
-    def __init__(self, api_key: str, model: str = "gpt-4-turbo"):
+    def __init__(self, base_url: str, api_key: str, system_prompt: str, model: str = "gpt-5-chat"):
         if not openai:
             raise ImportError("The 'openai' library is not installed. Please install it with 'pip install openai'.")
-        self.client = openai.OpenAI(api_key=api_key)
+        self.client = openai.OpenAI(base_url=base_url, api_key=api_key)
         self.model = model
+        self.system_prompt = system_prompt
 
-    def generate(self, prompt: str) -> str:
+    def generate(self, system: str, prompt: str) -> str:
         """Generates a response using the OpenAI ChatCompletion endpoint."""
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
+                    {"role": "system", "content": system},
                     {"role": "user", "content": prompt},
                 ],
             )
@@ -108,11 +108,13 @@ def get_llm_client() -> Optional[LLMClient]:
 
     if provider == "openai":
         api_key = os.environ.get("OPENAI_API_KEY")
+        base_url = os.environ.get("OPENAI_URL")
+        model = os.environ.get("OPENAI_MODEL", "gpt-5-chat")
         if not api_key:
             print("Warning: LLM_PROVIDER is 'openai' but OPENAI_API_KEY is not set.")
             return None
         print("Initializing OpenAI client...")
-        return OpenAIClient(api_key=api_key)
+        return OpenAIClient(base_url=base_url, api_key=api_key, model=model, system_prompt=system_instruction)
 
     elif provider == "gemini":
         api_key = os.environ.get("GOOGLE_API_KEY")
@@ -127,5 +129,4 @@ def get_llm_client() -> Optional[LLMClient]:
         return None
 
     else:
-        # No provider specified, so no client will be used.
         return None
