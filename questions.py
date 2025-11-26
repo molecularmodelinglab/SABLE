@@ -31,17 +31,13 @@ questions = {
     "Find improved analogs of amoxicillin with QED > 0.6, fewer than 3 hydrogen bond donors, and LogP between 0-2. Enumerate 100 molecules, optimize for 6 iterations.",
     "Optimize ranitidine derivatives for oral bioavailability: maximize QED, keep TPSA < 80 Ų, LogP between 1-3, and molecular weight < 400 Da. Generate 180 analogs, batch size 5.",
     "Starting from levothyroxine, create 300 derivatives and optimize for improved drug-likeness (QED > 0.75) and reduced molecular complexity (fewer rotatable bonds, target < 8). Run 15 iterations.",
-    "I'm working on improving a p38 MAPK inhibitor for rheumatoid arthritis. Starting compound: c1ccc(cc1)C(=O)Nc2cccc(c2)C(F)(F)F. Need better drug-likeness, oral bioavailability (LogP 2-3.5, TPSA < 75), and maintained target binding (UniProt Q16539). Enumerate 200 analogs.",
-    "We have a CDK2 inhibitor hit from virtual screening: Nc1nc(Nc2ccccc2)nc2[nH]cnc12. Use lead optimization to add R-groups. Optimize for: binding to CDK2 (UniProt P24941), selectivity over related kinases (moderate LogP ~2.5), QED > 0.75, MW < 400. Generate 180 variants, 10 iterations, batch size 6.",
     "Improve this failed drug candidate (high clearance, poor PK): ketoconazole. Optimize for reduced metabolism (lower LogP, reduce CYP interaction sites), maintained antifungal activity profile, QED > 0.7, MW < 500. Enumerate 200 molecules, 12 iterations.",
-    "Merge properties from two fragments - Fragment A (high binding affinity, poor ADME) and Fragment B (good ADME, weak binding). Starting SMILEs: c1ccccc1CN and CC(=O)Nc1ccccc1O. Optimize merged analogs for both binding to target (UniProt P00533) and drug-likeness. Generate 150 molecules, 8 iterations.",
     "Starting from acyclovir (Nc1nc(=O)c2ncn(COCCO)c2[nH]1), design prodrug derivatives with improved oral absorption (higher LogP 1-3, balanced TPSA) that can convert to active form. Focus on QED and ADME properties. Enumerate 120 molecules, 8 iterations.",
     "Starting from diclofenac, find the best analog for QED in the minimum number of iterations. Enumerate 50 molecules, batch size 10.",
     "Starting from caffeine (CN1C=NC2=C1C(=O)N(C(=O)N2C)C), simultaneously optimize for maximum QED (drug-likeness), minimum TPSA (<60 Ų), and LogP between 2-4. Enumerate 200 analogs and run 10 BO iterations with batch size 8.",
     "Starting from aspirin, create the largest possible chemical space by enumerating 500 molecules, then use Bayesian optimization to find compounds with QED > 0.8 and LogP > 3.0. Run 15 iterations with batch size 10.",
     "Find improved analogs of ibuprofen with higher QED in the minimum number of iterations. Enumerate 100 molecules and optimize with batch size 3. The system should converge to QED > 0.7 within 5 iterations.",
     "Optimize morphine derivatives for maximum CNS penetration (high LogP, low TPSA) while maintaining drug-likeness (QED > 0.6). Target LogP > 4.0 and TPSA < 40 Ų. Enumerate 200 analogs, 12 iterations.",
-   
         
     ],
 
@@ -102,6 +98,9 @@ questions = {
     "Optimize the BRAF inhibitor vemurafenib for: (1) stronger binding to BRAF V600E mutant (UniProt P15056), (2) QED > 0.75, (3) improved CNS exclusion (lower LogP, higher TPSA), and (4) MW < 450 Da. Enumerate 200 analogs, 10 iterations.",
     "Starting from the HIV protease inhibitor ritonavir, simultaneously optimize for binding to HIV-1 protease (UniProt P03367), improved drug-likeness (QED > 0.7), and better oral bioavailability (TPSA < 100, LogP 3-5, MW < 650). Generate 300 molecules, 12 iterations, batch size 8.",
     "Find analogs of the kinase inhibitor imatinib with improved binding to BCR-ABL (UniProt P00519), reduced off-target binding potential (lower lipophilicity, target LogP 2-3), maintained drug-likeness (QED > 0.75), and reduced molecular weight (< 450 Da). Enumerate 250 molecules, 10 iterations.",
+    "I'm working on improving a p38 MAPK inhibitor for rheumatoid arthritis. Starting compound: c1ccc(cc1)C(=O)Nc2cccc(c2)C(F)(F)F. Need better drug-likeness, oral bioavailability (LogP 2-3.5, TPSA < 75), and maintained target binding (UniProt Q16539). Enumerate 200 analogs.",
+    "We have a CDK2 inhibitor hit from virtual screening: Nc1nc(Nc2ccccc2)nc2[nH]cnc12. Use lead optimization to add R-groups. Optimize for: binding to CDK2 (UniProt P24941), selectivity over related kinases (moderate LogP ~2.5), QED > 0.75, MW < 400. Generate 180 variants, 10 iterations, batch size 6.",
+    "Merge properties from two fragments - Fragment A (high binding affinity, poor ADME) and Fragment B (good ADME, weak binding). Starting SMILEs: c1ccccc1CN and CC(=O)Nc1ccccc1O. Optimize merged analogs for both binding to target (UniProt P00533) and drug-likeness. Generate 150 molecules, 8 iterations.",
 
     ],
 
