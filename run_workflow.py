@@ -115,7 +115,6 @@ class WorkflowRunner:
         with open(checkpoint_path, 'rb') as f:
             state = pickle.load(f)
         
-        # Reinitialize LLM client after loading (it wasn't serialized)
         print("Reinitializing LLM client...")
         state.llm_client = get_llm_client()
         if state.llm_client:
@@ -154,7 +153,6 @@ class WorkflowRunner:
             state = WorkflowState(user_prompt=user_prompt)
             print(f"Starting new workflow: {state.workflow_id}")
             
-            # Initialize LLM client for argument extraction
             print("Initializing LLM client...")
             state.llm_client = get_llm_client()
             if state.llm_client:
@@ -176,7 +174,7 @@ class WorkflowRunner:
         
         try:
             config = {
-                "recursion_limit": 50,
+                "recursion_limit": 100,
                 "debug": True
             }
             result = self.graph.invoke(state, config=config)
@@ -186,7 +184,6 @@ class WorkflowRunner:
             elif isinstance(result, dict) and "status" in result:
                 final_state = WorkflowState(**result)
 
-            # Save final checkpoint
             if save_checkpoints:
                 self.save_checkpoint(final_state, f"{final_state.workflow_id}_final")
             
@@ -203,7 +200,6 @@ class WorkflowRunner:
             print(f"Error Message: {e}")
             print(f"Error Code: {getattr(e, 'code', 'N/A')}")
             
-            # Print workflow context for debugging
             print(f"\n📋 Workflow Context at Failure:")
             print(f"   Workflow ID: {state.workflow_id}")
             print(f"   Status: {state.status}")
@@ -239,7 +235,6 @@ class WorkflowRunner:
             state.status = "failed"
             state.exit_reason = getattr(e, "code", None) or str(e)
             
-            # Enhanced error logging with full context
             error_context = {
                 "error_type": type(e).__name__,
                 "error_message": str(e),
@@ -266,7 +261,6 @@ class WorkflowRunner:
             state.status = "failed"
             state.exit_reason = str(e)
             
-            # Save error checkpoint
             if save_checkpoints:
                 self.save_checkpoint(state, f"{state.workflow_id}_error")
             
@@ -349,7 +343,6 @@ def main():
     
     args = parser.parse_args()
     
-    # Handle example mode
     if args.example:
         prompt = "Optimize aspirin for better QED. Enumerate 50 analogs and run 5 iterations of optimization."
         print(f"Running example: {prompt}")
