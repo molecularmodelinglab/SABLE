@@ -7,7 +7,7 @@ from .optimizer.configs import BayesianOptimizationInput
 
 try:
     from baybe import Campaign
-    from baybe.objectives import SingleTargetObjective, DesirabilityObjective
+    from baybe.objectives import SingleTargetObjective, DesirabilityObjective, ParetoObjective
     from baybe.parameters import SubstanceParameter
     from baybe.searchspace import SearchSpace
     from baybe.targets import NumericalTarget
@@ -75,7 +75,8 @@ class BayesianOptimizationTool(BaseTool):
                 objective = SingleTargetObjective(target=baybe_targets[0])
             else:
                 weights = [t.weight for t in targets]
-                objective = DesirabilityObjective(targets=baybe_targets, weights=weights)
+                # objective = DesirabilityObjective(targets=baybe_targets, weights=weights)
+                objective = ParetoObjective(targets=baybe_targets)
 
             # Create Campaign
             campaign = Campaign(searchspace=searchspace, objective=objective)
