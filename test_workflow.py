@@ -2,7 +2,8 @@ import os
 import traceback
 from run_workflow import WorkflowRunner
 from schemas.state import ExperimentResult, WorkflowState, WorkflowStatus
-from test_questions import questions
+from questions import questions
+from time import sleep
 
 CHECKPOINT_DIR = "test_checkpoints"
 
@@ -12,17 +13,14 @@ def test_basic_workflow():
     print("Testing basic molecular optimization workflow...")
     print("=" * 50)
 
-    # test_prompts = [
-    #     "Optimize aspirin for better QED. Use 20 molecules and 3 iterations.",
-    #     "Find analogs of caffeine with improved drug-likeness. Enumerate 50 derivatives.",
-    #     "Improve the TPSA and LogP of ibuprofen through molecular optimization.",
-    # ]
-    test_prompts = questions  # Use full set from test_questions.py
+    test_prompts = questions["admet"]
 
     runner = WorkflowRunner(checkpoint_dir=CHECKPOINT_DIR)
 
     for i, prompt in enumerate(test_prompts, 1):
         print(f"\n--- Test {i}: Running prompt: '{prompt}' ---")
+        if i % 30 == 0:
+            sleep(20)
         try:
             state = runner.run(user_prompt=prompt, save_checkpoints=True)
 
@@ -125,7 +123,7 @@ def main():
     # test_empty_starting_molecules_triggers_error()
     test_basic_workflow()
     print("\n" + "=" * 50)
-    print("🎉 All tests completed successfully! 🎉")
+    # print("🎉 All tests completed successfully! 🎉")
     print("\nTo run the workflow with a custom prompt:")
     print("  python run_workflow.py 'Your optimization prompt here'")
     print("\nTo run with the example prompt:")
