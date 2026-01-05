@@ -15,7 +15,7 @@ questions = {
     "Start with Omeprazole and optimize for minimum TPSA. I don't have specific iteration constraints, just run until convergence.",
     "Optimize Metoprolol for better metabolic stability. Focus on reducing the number of rotatable bonds.",
     "Find me a derivative of Fluoxetine with a higher QED. Feel free to explore the chemical space around it.",
-    "Here is a fragment: c1ccccc1N. Grow this into a drug-like molecule with a QED > 0.6."
+    # "Here is a fragment: c1ccccc1N. Grow this into a drug-like molecule with a QED > 0.6."
     "Starting from atorvastatin, optimize for high QED and low TPSA.",
     "I want to improve both the drug-likeness and lipophilicity of diazepam.",
     "Find captopril analogs that are more drug-like but also more permeable (lower TPSA).",
