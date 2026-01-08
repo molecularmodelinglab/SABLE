@@ -12,7 +12,6 @@ from schemas.errors import NodeError, ToolError
 from utils.telemetry import emit_event
 from tools.enumerator_tool import EnumeratorTool
 
-
 def enumerate_molecules_node(state: WorkflowState) -> Dict[str, Any]:
     """
     Enumerate molecules from starting molecules using the EnumeratorTool.
