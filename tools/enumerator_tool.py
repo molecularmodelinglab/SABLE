@@ -1,11 +1,13 @@
-import healer.healer.utils.rdkit_monkey_patch as rdkit_monkey_patch
+import healer.utils.rdkit_monkey_patch as rdkit_monkey_patch
 from langchain.tools import BaseTool
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 from typing import Type, List, Dict, Any, Union, Optional, Tuple
 from rdkit import Chem
 
-from healer.application.healer import MoleculeHEALER, SiteHEALER, FragmentHEALER
+from healer import MoleculeHEALER, SiteHEALER, FragmentHEALER
 from schemas.errors import ToolError
+
+from healer.domain import get_repository
 
 class EnumeratorInput(BaseModel):
     """Input schema for the EnumeratorTool."""
@@ -44,27 +46,26 @@ class EnumeratorTool(BaseTool):
         mode = self.healer_mode
         if mode == "MoleculeHEALER":
             self._enumerator = MoleculeHEALER(
-                bb_supplier="EU_stock",     # Building blocks source
+                bb_source="US_stock",     # Building blocks source
                 reaction_tags='all',        # List of reaction tags to consider, keep 'all' for all reactions
-                max_evals_per_comp=700,     # Maximum evaluations per composition
-                sim_threshold=0.6,          # Similarity threshold for filtering building blocks
-                max_bbs_per_comp=10 ,       # Limit the maximum number of filtered BBs per composition, 10 is a good trade-off
-                verbose=2                   # Verbosity level for the enumeration process
+                sim_threshold=0.3,          # Similarity threshold for filtering building blocks
+                verbose=2,                  # Verbosity level for the enumeration process
+                max_bbs_per_frag=10,
+                bb_repository=get_repository("US_stock")
             )
         elif mode == "FragmentHEALER":
             self._enumerator = FragmentHEALER(
-                bb_supplier="EU_stock",
+                bb_source="US_stock",
                 reaction_tags="all",
-                max_evals_per_comp=700,
-                sim_threshold=0.6,
-                max_bbs_per_comp=10,
-                verbose=2
+                max_bbs_per_frag=10,
+                sim_threshold=0.3,
+                verbose=2,
+                bb_repository=get_repository("US_stock")
             )
         elif mode == "SiteHEALER":
             self._enumerator = SiteHEALER(
-                bb_supplier="EU_stock",
+                bb_source="US_stock",
                 reaction_tags="all",
-                max_evals_per_comp=700,
                 rules={
                     'MW': (0, 500),
                     'HBD': (0, 5),
@@ -76,7 +77,8 @@ class EnumeratorTool(BaseTool):
                     'Chiral': (0, 5)
                 },
                 struct_rules=[],
-                verbose=2
+                verbose=2,
+                bb_repository=get_repository("US_stock")
             )
         else:
             raise ValueError(f"Invalid HEALER mode. Got {mode}, need one of MoleculeHEALER, FragmentHEALER or SiteHEALER")
@@ -84,8 +86,8 @@ class EnumeratorTool(BaseTool):
     def _run(
         self,
         molecule: str,
-        n_compositions: Optional[int] = 50,
-        max_evals_per_comp: Optional[int] = 1,
+        n_compositions: Optional[int] = 100,
+        max_evals_per_comp: Optional[int] = 50_000,
         randomize_compositions: Optional[bool] = False,
         random_seed: Optional[int] = 42,
         custom_split_sites: Optional[List[Tuple]] = None,
@@ -116,10 +118,12 @@ class EnumeratorTool(BaseTool):
 
             self._enumerator.enumerate(
                 optimizer=None,
-                max_evals_per_comp= n_compositions * max_evals_per_comp
+                max_total_products=10_000,
+                max_products_per_comp=1_000,
+                max_evals_per_comp=max_evals_per_comp
                 )
             
-            results_df = self._enumerator.get_results(calc_similarity=True)
+            results_df = self._enumerator.get_results(calc_similarity=True, calc_properties=False)
             results_df.drop_duplicates(subset='Product', inplace=True)
 
             if results_df.empty:
@@ -132,9 +136,7 @@ class EnumeratorTool(BaseTool):
 
             # Format the output as a dictionary of {id: smiles}
             enumerated_molecules_dict = {f"mol_{i}": smi for i, smi in enumerate(enumerated_molecules_list)}
-
-            # Format the output as a dictionary of {id: smiles}
-            enumerated_molecules_dict = {f"mol_{i}": smi for i, smi in enumerate(enumerated_molecules_list)}
+    
             print(f"EnumeratorTool generated {len(enumerated_molecules_dict)} molecules.")
             return enumerated_molecules_dict
 
