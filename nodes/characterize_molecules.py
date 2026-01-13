@@ -3,6 +3,7 @@ Characterize molecules using the selected tool(s).
 """
 
 from typing import Dict, Any, List
+import asyncio
 import sys
 import os
 import json
@@ -197,12 +198,12 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                         poll_attempts=boltz_config.get('poll_attempts'),
                     )
 
-                    response = boltz_tool._run(
+                    response = asyncio.run(boltz_tool._arun(
                         ligands=ligands_map,
                         polymers=polymers_payload,
                         constraints=boltz_config.get('constraints'),
                         templates=boltz_config.get('templates'),
-                    )
+                    ))
 
                     print("✅ Boltz tool returned response")
 
