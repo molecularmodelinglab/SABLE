@@ -2,7 +2,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Dict, Optional, Any, List, Union
+from typing import Dict, Optional, Any, List, Union, Literal
 
 import requests
 import yaml
@@ -13,6 +13,10 @@ from langchain.tools import BaseTool
 class ToolException(Exception):
     """Custom exception for tool errors."""
     pass
+
+
+# Execution mode type
+ExecutionMode = Literal["api", "celery"]
 
 
 class Polymer(BaseModel):
@@ -86,6 +90,7 @@ class BoltzTool(BaseTool):
     _poll_interval: float = PrivateAttr(5.0)
     _poll_attempts: int = PrivateAttr(0)
     _uniprot_cache: Dict[str, str] = PrivateAttr(default_factory=dict)
+    _execution_mode: ExecutionMode = PrivateAttr("api")
 
     def __init__(
         self,
@@ -99,8 +104,19 @@ class BoltzTool(BaseTool):
         latency_seconds: Optional[float] = None,
         poll_interval: Optional[float] = None,
         poll_attempts: Optional[int] = None,
+        execution_mode: Optional[ExecutionMode] = None,
     ):
         super().__init__()
+        
+        # Determine execution mode: API preferred, fallback to Celery if API not configured
+        env_mode = os.environ.get("BOLTZ_EXECUTION_MODE", "").lower()
+        if execution_mode:
+            self.execution_mode = execution_mode
+        elif env_mode in ("api", "celery"):
+            self.execution_mode = env_mode  # type: ignore
+        else:
+            self.execution_mode = "api" 
+
         self.base_url = (base_url or os.environ.get("BOLTZ_BASE_URL", "")).rstrip("/")
         self.api_token = api_token or os.environ.get("BOLTZ_API_TOKEN", "")
         self.timeout = timeout
@@ -138,8 +154,31 @@ class BoltzTool(BaseTool):
         self.poll_interval = poll_interval if poll_interval is not None else 5.0
         self.poll_attempts = poll_attempts if poll_attempts is not None else 120  # 10min total
 
-        if not self.base_url or not self.api_token:
-            raise ToolException("Missing BOLTZ_BASE_URL and/or BOLTZ_API_TOKEN configuration.")
+        # Validate configuration based on execution mode
+        if self.execution_mode == "api":
+            if not self.base_url or not self.api_token:
+                # Try to fall back to Celery mode if API not configured
+                try:
+                    from server.tasks.slurm import submit_boltz_job
+                    print("[BoltzTool] API not configured, falling back to Celery execution mode.")
+                    self.execution_mode = "celery"
+                except ImportError:
+                    raise ToolException(
+                        "Missing BOLTZ_BASE_URL and/or BOLTZ_API_TOKEN configuration, "
+                        "and Celery tasks are not available as fallback."
+                    )
+        elif self.execution_mode == "celery":
+            try:
+                from server.tasks.slurm import submit_boltz_job
+            except ImportError:
+                if self.base_url and self.api_token:
+                    print("[BoltzTool] Celery tasks not available, falling back to API execution mode.")
+                    self.execution_mode = "api"
+                else:
+                    raise ToolException(
+                        "Celery execution mode requested but tasks are unavailable, "
+                        "and API is not configured as fallback."
+                    )
 
     @property
     def base_url(self) -> str:
@@ -226,6 +265,16 @@ class BoltzTool(BaseTool):
         attempts = int(value or 0)
         self._poll_attempts = max(0, attempts)
 
+    @property
+    def execution_mode(self) -> ExecutionMode:
+        return self._execution_mode
+
+    @execution_mode.setter
+    def execution_mode(self, value: ExecutionMode) -> None:
+        if value not in ("api", "celery"):
+            raise ValueError(f"execution_mode must be 'api' or 'celery', got '{value}'")
+        self._execution_mode = value
+
     # UniProt helpers
     def _fetch_uniprot_seq(self, uniprot_id: str, timeout: float = 10.0) -> str:
         uid = uniprot_id.strip()
@@ -269,6 +318,150 @@ class BoltzTool(BaseTool):
         if not path.startswith("/"):
             path = "/" + path
         return f"{self.base_url}{path}"
+
+    # -------------------------------------------------------------------------
+    # API Mode: HTTP helpers for remote Boltz API
+    # -------------------------------------------------------------------------
+
+    def _get_json(self, path: str) -> Dict[str, Any]:
+        """GET request to the Boltz API."""
+        url = self._build_url(path)
+        headers = {
+            "Authorization": f"Bearer {self.api_token}",
+        }
+        try:
+            resp = self.session.get(url, headers=headers, timeout=self.timeout)
+        except Exception as exc:
+            raise ToolException(f"GET {url} failed: {exc}")
+
+        if resp.status_code // 100 != 2:
+            try:
+                payload = resp.json()
+            except Exception:
+                payload = {"text": resp.text}
+            raise ToolException(
+                f"GET {url} returned HTTP {resp.status_code}: {payload}"
+            )
+
+        try:
+            return resp.json()
+        except Exception as exc:
+            raise ToolException(f"Failed to parse JSON from {url}: {exc}")
+
+    def _post_json(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        """POST JSON to the Boltz API with retries."""
+        url = self._build_url(path)
+        headers = {
+            "Authorization": f"Bearer {self.api_token}",
+            "Content-Type": "application/json",
+        }
+        attempt = 0
+        last_exc: Optional[Exception] = None
+        while attempt <= self.max_retries:
+            try:
+                payload_str = json.dumps(body)
+                print(
+                    f"[BoltzTool] POST {url} (attempt {attempt + 1}/{self.max_retries + 1}) "
+                    f"payload_len={len(payload_str)}"
+                )
+                resp = self.session.post(url, headers=headers, data=payload_str, timeout=self.timeout)
+                if resp.status_code // 100 == 2:
+                    print(f"[BoltzTool] POST {url} succeeded with status {resp.status_code}")
+                    return resp.json()
+                try:
+                    payload = resp.json()
+                except Exception:
+                    payload = {"text": resp.text}
+                raise ToolException(
+                    f"Server error {resp.status_code} at {url}. "
+                    f"stderr: {payload.get('stderr','')} stdout: {payload.get('stdout','')}"
+                )
+            except Exception as e:
+                last_exc = e
+                print(f"[BoltzTool] POST {url} failed on attempt {attempt + 1}: {e}")
+                if attempt == self.max_retries:
+                    break
+                time.sleep(0.6 * (attempt + 1))
+                attempt += 1
+        raise ToolException(f"Request failed after retries: {last_exc}")
+
+    def _maybe_wait_for_result(self, initial_payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Poll for job completion (API mode). If affinity already present, return immediately.
+        Otherwise poll indefinitely until job completes or fails.
+        """
+        if initial_payload.get("affinity") is not None:
+            print("[BoltzTool] Received affinity in initial response, skipping poll.")
+            return initial_payload
+
+        job_id = initial_payload.get("job_id")
+        if not job_id:
+            print("[BoltzTool] No job_id returned; cannot poll.")
+            return initial_payload
+
+        last_payload = dict(initial_payload)
+
+        if self.latency_seconds > 0:
+            print(f"[BoltzTool] Waiting {self.latency_seconds}s before polling job {job_id}.")
+            time.sleep(self.latency_seconds)
+
+        # Poll indefinitely until completion or failure
+        attempt = 0
+        while True:
+            attempt += 1
+            print(f"[BoltzTool] Poll attempt {attempt} for job {job_id}.")
+            
+            try:
+                refreshed = self._get_json(f"/jobs/{job_id}")
+            except ToolException as e:
+                print(f"[BoltzTool] Poll attempt {attempt} failed to fetch job {job_id} status: {e}")
+                time.sleep(self.poll_interval)
+                continue
+
+            if isinstance(refreshed, dict):
+                last_payload.update({k: v for k, v in refreshed.items() if v is not None})
+                
+                status = last_payload.get("status")
+                
+                if last_payload.get("affinity") is not None or status == "completed":
+                    print(f"[BoltzTool] Job {job_id} completed on attempt {attempt}.")
+                    break
+                
+                if status == "failed":
+                    print(f"[BoltzTool] Job {job_id} failed: {last_payload.get('error')}")
+                    break
+                
+                # Still running, keep polling
+                print(f"[BoltzTool] Job {job_id} status: {status}, continuing to poll...")
+
+            time.sleep(self.poll_interval)
+
+        return last_payload
+
+    def _download_cif_if_wanted(self, cif_url: Optional[str], job_id: str) -> Optional[str]:
+        """Download CIF file from API if configured."""
+        if not (self.fetch_cif and cif_url and self.cif_save_dir):
+            return None
+        url = self._build_url(str(cif_url))
+        headers = {"Authorization": f"Bearer {self.api_token}"}
+        try:
+            r = self.session.get(url, headers=headers, timeout=self.timeout, stream=True)
+            if r.status_code != 200:
+                return None
+            os.makedirs(self.cif_save_dir, exist_ok=True)
+            dst = os.path.join(self.cif_save_dir, f"{job_id}_model_0.cif")
+            with open(dst, "wb") as f:
+                for chunk in r.iter_content(chunk_size=1 << 16):
+                    if chunk:
+                        f.write(chunk)
+            return dst
+        except Exception as e:
+            print(f"[BoltzTool] Failed to download CIF: {e}")
+            return None
+
+    # -------------------------------------------------------------------------
+    # Celery Mode: SSH/SLURM job submission helpers
+    # -------------------------------------------------------------------------
 
     def _wait_for_celery_jobs(
         self,
@@ -381,15 +574,93 @@ class BoltzTool(BaseTool):
             doc["templates"] = templates
         return yaml.safe_dump(doc, sort_keys=False)
 
-    def _run(self, **kwargs) -> str:
-        """Run Boltz affinity submission for multiple ligands."""
-        data = BoltzInput.model_validate(kwargs)  # pydantic v2
+    # -------------------------------------------------------------------------
+    # API Mode: Run implementation
+    # -------------------------------------------------------------------------
 
+    def _run_api_mode(self, data: BoltzInput) -> str:
+        """Run Boltz affinity submission via remote API."""
         protein_entries = self._protein_entries_from_polymers(data.polymers)
         ligand_chain_id = self._pick_ligand_id(self._collect_used_chain_ids(data.polymers))
 
         per_ligand: Dict[str, Any] = {}
+        for ligand_id, smiles in data.ligands.items():
+            print(f"[BoltzTool:API] Preparing submission for ligand '{ligand_id}'.")
+            yaml_text = self._affinity_yaml(
+                protein_sequences=protein_entries,
+                ligand_smiles=smiles,
+                ligand_chain_id=ligand_chain_id,
+                constraints=data.constraints,
+                templates=data.templates,
+            )
+            print(
+                f"[BoltzTool:API] Submitting ligand '{ligand_id}' to /submit_yaml_text with chain '{ligand_chain_id}'."
+            )
+            resp = self._post_json("/submit_yaml_text", {"yaml_text": yaml_text})
+            if isinstance(resp, dict):
+                resp = self._maybe_wait_for_result(resp)
 
+            saved_cif = self._download_cif_if_wanted(resp.get("cif_url"), job_id=resp.get("job_id", ""))
+
+            job_id = resp.get("job_id")
+            affinity = resp.get("affinity")
+            confidence = resp.get("confidence")
+
+            print(
+                f"[BoltzTool:API] Completed ligand '{ligand_id}' job_id={job_id} "
+                f"affinity={affinity} confidence={confidence}"
+            )
+
+            entry: Dict[str, Any] = {
+                "job_id": job_id,
+                "outputs_dir": resp.get("outputs_dir"),
+                "affinity": affinity,
+                "confidence": confidence,
+                "cif_url": resp.get("cif_url"),
+                "cif_file": saved_cif,
+            }
+
+            # If the service did not return an affinity score
+            if affinity is None:
+                # Try to gather a helpful server-side message from known keys
+                server_msg = None
+                for k in ("error", "message", "stderr", "stdout", "status"):
+                    v = resp.get(k) if isinstance(resp, dict) else None
+                    if v:
+                        server_msg = v
+                        break
+
+                payload_summary = {}
+                if isinstance(resp, dict):
+                    for k in ("job_id", "status", "outputs_dir", "cif_url"):
+                        if resp.get(k) is not None:
+                            payload_summary[k] = resp.get(k)
+
+                entry["error"] = (
+                    f"No affinity score returned for ligand '{ligand_id}'"
+                    f" (job_id={job_id}). Server message: {server_msg!r}."
+                    f" Payload summary: {json.dumps(payload_summary, ensure_ascii=False)}"
+                )
+
+            per_ligand[ligand_id] = entry
+
+        return json.dumps(
+            {
+                "count": len(per_ligand),
+                "base_url": self.base_url,
+                "ligand_chain_id": ligand_chain_id,
+                "execution_mode": "api",
+                "per_ligand": per_ligand,
+            },
+            ensure_ascii=False,
+        )
+
+    # -------------------------------------------------------------------------
+    # Celery Mode: Run implementation
+    # -------------------------------------------------------------------------
+
+    def _run_celery_mode(self, data: BoltzInput) -> str:
+        """Run Boltz affinity submission via Celery/SLURM."""
         try:
             from server.tasks.slurm import submit_boltz_job, poll_boltz_job_once
         except ImportError as exc:
@@ -397,10 +668,15 @@ class BoltzTool(BaseTool):
                 "Boltz submission Celery tasks are unavailable; install `server.tasks.slurm`."
             ) from exc
 
+        protein_entries = self._protein_entries_from_polymers(data.polymers)
+        ligand_chain_id = self._pick_ligand_id(self._collect_used_chain_ids(data.polymers))
+
+        per_ligand: Dict[str, Any] = {}
         pending_jobs: Dict[str, str] = {}
+        
         import uuid
         for ligand_id, smiles in data.ligands.items():
-            print(f"[BoltzTool] Preparing submission for ligand '{ligand_id}'.")
+            print(f"[BoltzTool:Celery] Preparing submission for ligand '{ligand_id}'.")
             yaml_text = self._affinity_yaml(
                 protein_sequences=protein_entries,
                 ligand_smiles=smiles,
@@ -410,7 +686,7 @@ class BoltzTool(BaseTool):
             )
 
             job_id = str(uuid.uuid4())
-            print(f"[BoltzTool] Submitting ligand '{ligand_id}' via Celery task (Async). Job ID: {job_id}")
+            print(f"[BoltzTool:Celery] Submitting ligand '{ligand_id}' via Celery task (Async). Job ID: {job_id}")
 
             task = submit_boltz_job.delay(yaml_text, job_id=job_id)
 
@@ -426,10 +702,29 @@ class BoltzTool(BaseTool):
             self._wait_for_celery_jobs(pending_jobs, per_ligand, poll_boltz_job_once)
 
         return json.dumps(
-            {"count": len(per_ligand), "base_url": self.base_url, "ligand_chain_id": ligand_chain_id, "per_ligand": per_ligand},
+            {
+                "count": len(per_ligand),
+                "base_url": self.base_url,
+                "ligand_chain_id": ligand_chain_id,
+                "execution_mode": "celery",
+                "per_ligand": per_ligand,
+            },
             ensure_ascii=False,
         )
 
+    def _run(self, **kwargs) -> str:
+        """Run Boltz affinity submission for multiple ligands."""
+        data = BoltzInput.model_validate(kwargs)  # pydantic v2
+
+        print(f"[BoltzTool] Using execution mode: {self.execution_mode}")
+
+        if self.execution_mode == "api":
+            return self._run_api_mode(data)
+        else:
+            return self._run_celery_mode(data)
+
     async def _arun(self, **kwargs) -> str:
-        """Async run not implemented for BoltzTool."""
-        raise NotImplementedError("Use the synchronous .run() for now.")
+        """Async run - delegates to sync for now but could be enhanced for true async."""
+        # For API mode, we could implement true async with aiohttp in the future
+        # For now, run synchronously
+        return self._run(**kwargs)
