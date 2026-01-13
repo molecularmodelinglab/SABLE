@@ -2,12 +2,9 @@ questions = {
     "general": [
 
     "Optimize sertraline for better properties.",
-    "I need improved versions of metformin.",
     "Can you find better warfarin analogs with higher QED and good LogP?",
-    "Starting from morphine, optimize for CNS penetration.",
     "Make ciprofloxacin more drug-like and lipophilic.",
     "Find analogs of sildenafil with better bioavailability metrics.",
-    "Improve codeine for modern drug standards.",
     "Optimize this molecule: CC(=O)Oc1ccccc1C(=O)O for better ADME properties.",
     "Improve the solubility of Atorvastatin while maintaining its current drug-likeness score.",
     "Take molecule CC1=C(C=C(C=C1)NC(=O)C2=CC=C(C=C2)CN3CCN(CC3)C)NC4=NC=CC(=N4)C5=CN=CC=C5 and optimize it for blood-brain barrier penetration.",
