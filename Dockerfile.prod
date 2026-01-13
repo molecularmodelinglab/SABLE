@@ -32,13 +32,7 @@ RUN grep -viE '^(rdkit\b|.*git\+.*healer.*)' requirements.txt > /tmp/requirement
  && micromamba run -n lizard python -m pip install --no-cache-dir -r /tmp/requirements.base.txt --constraint constraints-cpu.txt \
  && rm -f /tmp/requirements.base.txt
 
-COPY --chown=$MAMBA_USER:$MAMBA_USER healer/ ./healer/
-
-RUN if [ -f healer/pyproject.toml ] || [ -f healer/setup.py ]; then \
-            micromamba run -n lizard python -m pip install -e ./healer; \
-        else \
-            echo "healer source not found (skipping install)"; \
-        fi
+ENV HEALER_DATA_DIR=/app/building_blocks
 
 COPY --chown=$MAMBA_USER:$MAMBA_USER . .
 
