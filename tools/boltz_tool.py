@@ -1,9 +1,11 @@
+import asyncio
 import json
 import os
 import time
 from pathlib import Path
 from typing import Dict, Optional, Any, List, Union, Literal
 
+import aiohttp
 import requests
 import yaml
 from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
@@ -84,6 +86,7 @@ class BoltzTool(BaseTool):
     _timeout: float = PrivateAttr(900.0)  # Default 15min for synchronous server
     _max_retries: int = PrivateAttr(1)
     _session: Optional[requests.Session] = PrivateAttr(default=None)
+    _async_session: Optional[aiohttp.ClientSession] = PrivateAttr(default=None)
     _fetch_cif: bool = PrivateAttr(True)
     _cif_save_dir: str = PrivateAttr("./boltz_cifs")
     _latency_seconds: float = PrivateAttr(0.0)
@@ -460,6 +463,158 @@ class BoltzTool(BaseTool):
             return None
 
     # -------------------------------------------------------------------------
+    # API Mode: Async HTTP helpers for non-blocking operations
+    # -------------------------------------------------------------------------
+
+    async def _get_async_session(self) -> aiohttp.ClientSession:
+        """Get or create async session."""
+        if self._async_session is None or self._async_session.closed:
+            timeout = aiohttp.ClientTimeout(total=self.timeout)
+            self._async_session = aiohttp.ClientSession(timeout=timeout)
+        return self._async_session
+
+    async def _close_async_session(self) -> None:
+        """Close async session if open."""
+        if self._async_session is not None and not self._async_session.closed:
+            await self._async_session.close()
+
+    async def _get_json_async(self, path: str) -> Dict[str, Any]:
+        """Async GET request to the Boltz API."""
+        url = self._build_url(path)
+        headers = {"Authorization": f"Bearer {self.api_token}"}
+        
+        session = await self._get_async_session()
+        try:
+            async with session.get(url, headers=headers) as resp:
+                if resp.status // 100 != 2:
+                    try:
+                        payload = await resp.json()
+                    except Exception:
+                        payload = {"text": await resp.text()}
+                    raise ToolException(
+                        f"GET {url} returned HTTP {resp.status}: {payload}"
+                    )
+                return await resp.json()
+        except aiohttp.ClientError as exc:
+            raise ToolException(f"GET {url} failed: {exc}")
+
+    async def _post_json_async(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        """Async POST JSON to the Boltz API with retries."""
+        url = self._build_url(path)
+        headers = {
+            "Authorization": f"Bearer {self.api_token}",
+            "Content-Type": "application/json",
+        }
+        
+        session = await self._get_async_session()
+        attempt = 0
+        last_exc: Optional[Exception] = None
+        
+        while attempt <= self.max_retries:
+            try:
+                payload_str = json.dumps(body)
+                print(
+                    f"[BoltzTool:Async] POST {url} (attempt {attempt + 1}/{self.max_retries + 1}) "
+                    f"payload_len={len(payload_str)}"
+                )
+                async with session.post(url, headers=headers, data=payload_str) as resp:
+                    if resp.status // 100 == 2:
+                        print(f"[BoltzTool:Async] POST {url} succeeded with status {resp.status}")
+                        return await resp.json()
+                    try:
+                        payload = await resp.json()
+                    except Exception:
+                        payload = {"text": await resp.text()}
+                    raise ToolException(
+                        f"Server error {resp.status} at {url}. "
+                        f"stderr: {payload.get('stderr','')} stdout: {payload.get('stdout','')}"
+                    )
+            except Exception as e:
+                last_exc = e
+                print(f"[BoltzTool:Async] POST {url} failed on attempt {attempt + 1}: {e}")
+                if attempt == self.max_retries:
+                    break
+                await asyncio.sleep(0.6 * (attempt + 1))
+                attempt += 1
+        
+        raise ToolException(f"Request failed after retries: {last_exc}")
+
+    async def _maybe_wait_for_result_async(self, initial_payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Async poll for job completion (API mode). If affinity already present, return immediately.
+        Otherwise poll indefinitely until job completes or fails.
+        """
+        if initial_payload.get("affinity") is not None:
+            print("[BoltzTool:Async] Received affinity in initial response, skipping poll.")
+            return initial_payload
+
+        job_id = initial_payload.get("job_id")
+        if not job_id:
+            print("[BoltzTool:Async] No job_id returned; cannot poll.")
+            return initial_payload
+
+        last_payload = dict(initial_payload)
+
+        if self.latency_seconds > 0:
+            print(f"[BoltzTool:Async] Waiting {self.latency_seconds}s before polling job {job_id}.")
+            await asyncio.sleep(self.latency_seconds)
+
+        # Poll indefinitely until completion or failure
+        attempt = 0
+        while True:
+            attempt += 1
+            print(f"[BoltzTool:Async] Poll attempt {attempt} for job {job_id}.")
+            
+            try:
+                refreshed = await self._get_json_async(f"/jobs/{job_id}")
+            except ToolException as e:
+                print(f"[BoltzTool:Async] Poll attempt {attempt} failed to fetch job {job_id} status: {e}")
+                await asyncio.sleep(self.poll_interval)
+                continue
+
+            if isinstance(refreshed, dict):
+                last_payload.update({k: v for k, v in refreshed.items() if v is not None})
+                
+                status = last_payload.get("status")
+                
+                if last_payload.get("affinity") is not None or status == "completed":
+                    print(f"[BoltzTool:Async] Job {job_id} completed on attempt {attempt}.")
+                    break
+                
+                if status == "failed":
+                    print(f"[BoltzTool:Async] Job {job_id} failed: {last_payload.get('error')}")
+                    break
+                
+                print(f"[BoltzTool:Async] Job {job_id} status: {status}, continuing to poll...")
+
+            await asyncio.sleep(self.poll_interval)
+
+        return last_payload
+
+    async def _download_cif_if_wanted_async(self, cif_url: Optional[str], job_id: str) -> Optional[str]:
+        """Async download CIF file from API if configured."""
+        if not (self.fetch_cif and cif_url and self.cif_save_dir):
+            return None
+        url = self._build_url(str(cif_url))
+        headers = {"Authorization": f"Bearer {self.api_token}"}
+        
+        try:
+            session = await self._get_async_session()
+            async with session.get(url, headers=headers) as r:
+                if r.status != 200:
+                    return None
+                os.makedirs(self.cif_save_dir, exist_ok=True)
+                dst = os.path.join(self.cif_save_dir, f"{job_id}_model_0.cif")
+                with open(dst, "wb") as f:
+                    async for chunk in r.content.iter_chunked(1 << 16):
+                        if chunk:
+                            f.write(chunk)
+                return dst
+        except Exception as e:
+            print(f"[BoltzTool:Async] Failed to download CIF: {e}")
+            return None
+
+    # -------------------------------------------------------------------------
     # Celery Mode: SSH/SLURM job submission helpers
     # -------------------------------------------------------------------------
 
@@ -655,6 +810,105 @@ class BoltzTool(BaseTool):
             ensure_ascii=False,
         )
 
+    async def _run_api_mode_async(self, data: BoltzInput) -> str:
+        """Run Boltz affinity submission via remote API (async with concurrent processing)."""
+        protein_entries = self._protein_entries_from_polymers(data.polymers)
+        ligand_chain_id = self._pick_ligand_id(self._collect_used_chain_ids(data.polymers))
+
+        async def process_ligand(ligand_id: str, smiles: str) -> tuple[str, Dict[str, Any]]:
+            """Process a single ligand asynchronously."""
+            print(f"[BoltzTool:API:Async] Preparing submission for ligand '{ligand_id}'.")
+            yaml_text = self._affinity_yaml(
+                protein_sequences=protein_entries,
+                ligand_smiles=smiles,
+                ligand_chain_id=ligand_chain_id,
+                constraints=data.constraints,
+                templates=data.templates,
+            )
+            print(
+                f"[BoltzTool:API:Async] Submitting ligand '{ligand_id}' to /submit_yaml_text with chain '{ligand_chain_id}'."
+            )
+            resp = await self._post_json_async("/submit_yaml_text", {"yaml_text": yaml_text})
+            if isinstance(resp, dict):
+                resp = await self._maybe_wait_for_result_async(resp)
+
+            saved_cif = await self._download_cif_if_wanted_async(resp.get("cif_url"), job_id=resp.get("job_id", ""))
+
+            job_id = resp.get("job_id")
+            affinity = resp.get("affinity")
+            confidence = resp.get("confidence")
+
+            print(
+                f"[BoltzTool:API:Async] Completed ligand '{ligand_id}' job_id={job_id} "
+                f"affinity={affinity} confidence={confidence}"
+            )
+
+            entry: Dict[str, Any] = {
+                "job_id": job_id,
+                "outputs_dir": resp.get("outputs_dir"),
+                "affinity": affinity,
+                "confidence": confidence,
+                "cif_url": resp.get("cif_url"),
+                "cif_file": saved_cif,
+            }
+
+            # If the service did not return an affinity score
+            if affinity is None:
+                # Try to gather a helpful server-side message from known keys
+                server_msg = None
+                for k in ("error", "message", "stderr", "stdout", "status"):
+                    v = resp.get(k) if isinstance(resp, dict) else None
+                    if v:
+                        server_msg = v
+                        break
+
+                payload_summary = {}
+                if isinstance(resp, dict):
+                    for k in ("job_id", "status", "outputs_dir", "cif_url"):
+                        if resp.get(k) is not None:
+                            payload_summary[k] = resp.get(k)
+
+                entry["error"] = (
+                    f"No affinity score returned for ligand '{ligand_id}'"
+                    f" (job_id={job_id}). Server message: {server_msg!r}."
+                    f" Payload summary: {json.dumps(payload_summary, ensure_ascii=False)}"
+                )
+
+            return ligand_id, entry
+
+        # Process all ligands concurrently
+        print(f"[BoltzTool:API:Async] Processing {len(data.ligands)} ligands concurrently...")
+        tasks = [process_ligand(ligand_id, smiles) for ligand_id, smiles in data.ligands.items()]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Collect results
+        per_ligand: Dict[str, Any] = {}
+        for result in results:
+            if isinstance(result, Exception):
+                print(f"[BoltzTool:API:Async] Error processing ligand: {result}")
+                # Create error entry for failed ligand
+                per_ligand[f"unknown_{len(per_ligand)}"] = {
+                    "error": str(result),
+                    "job_id": None,
+                }
+            else:
+                ligand_id, entry = result
+                per_ligand[ligand_id] = entry
+
+        # Clean up async session
+        await self._close_async_session()
+
+        return json.dumps(
+            {
+                "count": len(per_ligand),
+                "base_url": self.base_url,
+                "ligand_chain_id": ligand_chain_id,
+                "execution_mode": "api_async",
+                "per_ligand": per_ligand,
+            },
+            ensure_ascii=False,
+        )
+
     # -------------------------------------------------------------------------
     # Celery Mode: Run implementation
     # -------------------------------------------------------------------------
@@ -713,7 +967,7 @@ class BoltzTool(BaseTool):
         )
 
     def _run(self, **kwargs) -> str:
-        """Run Boltz affinity submission for multiple ligands."""
+        """Run Boltz affinity submission for multiple ligands (sync)."""
         data = BoltzInput.model_validate(kwargs)  # pydantic v2
 
         print(f"[BoltzTool] Using execution mode: {self.execution_mode}")
@@ -724,7 +978,15 @@ class BoltzTool(BaseTool):
             return self._run_celery_mode(data)
 
     async def _arun(self, **kwargs) -> str:
-        """Async run - delegates to sync for now but could be enhanced for true async."""
-        # For API mode, we could implement true async with aiohttp in the future
-        # For now, run synchronously
-        return self._run(**kwargs)
+        """Async run - uses async API mode for concurrent processing, falls back to sync for Celery."""
+        data = BoltzInput.model_validate(kwargs)
+
+        print(f"[BoltzTool:Async] Using execution mode: {self.execution_mode}")
+
+        if self.execution_mode == "api":
+            # Use async API mode for concurrent ligand processing
+            return await self._run_api_mode_async(data)
+        else:
+            # Celery mode doesn't have async implementation yet, use sync
+            print("[BoltzTool:Async] Celery mode running synchronously")
+            return self._run_celery_mode(data)
