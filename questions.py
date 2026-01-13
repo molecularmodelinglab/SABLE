@@ -81,15 +81,15 @@ questions = {
 
     "protein_specific": [
     
-    "Starting from caffeine (CN1C=NC2=C1C(=O)N(C(=O)N2C)C), simultaneously optimize for maximum QED (drug-likeness), LogP between 2-4, and also strong binding to UniProt P12345. Enumerate 200 analogs and run 3 BO iterations with batch size 3.",
+    # "Starting from caffeine (CN1C=NC2=C1C(=O)N(C(=O)N2C)C), simultaneously optimize for maximum QED (drug-likeness), LogP between 2-4, and also strong binding to UniProt P12345. Enumerate 200 analogs and run 3 BO iterations with batch size 3.",
     "Starting from Gefitinib, optimize for binding affinity against EGFR (UniProt P00533). We want to minimize the predicted pIC50 (maximize potency) while keeping QED > 0.7. Run 20 BO iterations.",
     "Start with Imatinib. Optimize specifically for binding to the BCR-Abl T315I mutant (gatekeeper mutation). Enumerate 200 analogs and run 10 BO iterations.",
     "Optimize a starting pan-kinase inhibitor C1=CC=C(C=C1)NC2=NC=NC3=C2C=CN3. Maximize binding to BRAF while minimizing binding to EGFR. (Dual objective).",
     "Starting with the inhibitor Venetoclax, generate smaller analogs (MW < 800) that maintain high affinity for BCL-2. Use a large enumeration space of 500 molecules.",
-    """Design dual-target inhibitors: Starting from methotrexate (dihydrofolate reductase inhibitor), optimize for binding to both DHFR (UniProt P00374) and thymidylate synthase (UniProt P04818). 
-                                                 Also optimize QED > 0.7 and cancer-relevant ADME (moderate LogP 0-2). Enumerate 200 molecules, 12 iterations.""",
-    """Polypharmacology optimization: Starting from aripiprazole, optimize for multi-target binding (D2 receptor UniProt P14416, 5-HT1A receptor UniProt P08908, 5-HT2A receptor UniProt P28223)
-          while maintaining antipsychotic drug-like properties (QED > 0.7, LogP 3-5, CNS penetration). Generate 250 molecules, 10 iterations, batch size 8.""",
+    # """Design dual-target inhibitors: Starting from methotrexate (dihydrofolate reductase inhibitor), optimize for binding to both DHFR (UniProt P00374) and thymidylate synthase (UniProt P04818). 
+    #                                              Also optimize QED > 0.7 and cancer-relevant ADME (moderate LogP 0-2). Enumerate 200 molecules, 12 iterations.""",
+    # """Polypharmacology optimization: Starting from aripiprazole, optimize for multi-target binding (D2 receptor UniProt P14416, 5-HT1A receptor UniProt P08908, 5-HT2A receptor UniProt P28223)
+    #       while maintaining antipsychotic drug-like properties (QED > 0.7, LogP 3-5, CNS penetration). Generate 250 molecules, 10 iterations, batch size 8.""",
     "Starting from oseltamivir (CCOC(=O)C1C(CC(CC1NC(=O)C)N)C=C), optimize for maximum QED and strong binding to influenza neuraminidase (UniProt P03496). Enumerate 200 analogs, run 5 BO iterations with batch size 5.",
     "Find erlotinib derivatives with improved binding to EGFR kinase domain (UniProt P00533) while maintaining QED > 0.7 and optimizing ADME properties (LogP 2-4, TPSA < 80). Generate 250 molecules, 8 iterations, batch size 6.",
     "Optimize the BRAF inhibitor vemurafenib for: (1) stronger binding to BRAF V600E mutant (UniProt P15056), (2) QED > 0.75, (3) improved CNS exclusion (lower LogP, higher TPSA), and (4) MW < 450 Da. Enumerate 200 analogs, 10 iterations.",
