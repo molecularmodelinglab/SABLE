@@ -62,7 +62,7 @@ services:
     container_name: lizard-api
     profiles: ["dev", "prod"]
     entrypoint: ["bash", "-lc"]
-    command: ["micromamba run -n lizard uvicorn server.app:app --host 0.0.0.0 --port 8000 --reload"]
+    command: ["micromamba run -n lizard uvicorn server.app:app --host 0.0.0.0 --port 8000"]
     ports:
       - "8000:8000"
     environment:
