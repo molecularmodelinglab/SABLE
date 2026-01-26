@@ -20,11 +20,15 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
+RUN micromamba run -n lizard python -m pip install --upgrade pip \
+ && micromamba run -n lizard python -m pip install --no-cache \
+    torch==2.8.0 \
+    --index-url https://download.pytorch.org/whl/cpu
 
 COPY requirements.txt ./
 COPY constraints-cpu.txt ./
 RUN grep -viE '^(rdkit\b)' requirements.txt > requirements.base.txt || true \
- && micromamba run -n lizard python -m pip install --upgrade pip \
+#  && micromamba run -n lizard python -m pip install --upgrade pip \
  && micromamba run -n lizard python -m pip install --no-cache-dir -r requirements.base.txt --constraint constraints-cpu.txt
 
 

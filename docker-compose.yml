@@ -80,6 +80,7 @@ services:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
+      - MOLECULAR_FP=${MOLECULAR_FP:-MORDRED}
     volumes:
       - ./data:/app/data  # For large artifacts (checkpoints, results)
       - ./logs:/app/logs
@@ -120,6 +121,7 @@ services:
       - REMOTE_BASE_DIR=${REMOTE_BASE_DIR}
       - BOLTZ_RESOURCES_DIR=${BOLTZ_RESOURCES_DIR}
       - HPC_SSH_KEY=/app/secrets/hpc_ssh_key
+      - MOLECULAR_FP=${MOLECULAR_FP:-MORDRED}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -151,6 +153,7 @@ services:
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
       - SECRET_KEY=${SECRET_KEY:-change_this_secret_key_in_production}
       - ENVIRONMENT=${ENVIRONMENT:-development}
+      - MOLECULAR_FP=${MOLECULAR_FP:-MORDRED}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -237,7 +240,7 @@ services:
       - LLM_PROVIDER=${LLM_PROVIDER}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-    volumes:
+      - MOLECULAR_FP=${MOLECULAR_FP:-MORDRED}
       - ./checkpoints:/app/checkpoints
       - ./data:/app/data
     depends_on:
