@@ -222,7 +222,7 @@ class BoltzJobManager(BaseJobManager):
         slurm_template_path: str | None = None,
         resources_dir: str | None = None,
         cache_dir_remote: str | None = None,
-        partition: str = "l40-gpu",
+        partition: str = "tropshalab",
         qos: str = "gpu_access",
         redis_url: Optional[str] = None,
     ) -> None:
@@ -354,33 +354,44 @@ class BoltzJobManager(BaseJobManager):
 #SBATCH --job-name={JOB_NAME}
 #SBATCH --partition={PARTITION}
 #SBATCH --nodes=1
-#SBATCH --mem=10GB
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=20GB
 #SBATCH --gres=gpu:1
-#SBATCH --time=00:06:00
+#SBATCH --time=00:30:00
 #SBATCH --qos={QOS}
 #SBATCH --output={REMOTE_LOGS_DIR}/{JOB_NAME}-%j.out
+
+set -euo pipefail
 
 hostname
 nvidia-smi
 
 module load apptainer/1.4.1
+export BOLTZ_RESOURCES_DIR={BOLTZ_RESOURCES_DIR}
+export BOLTZ_IMAGE=${{BOLTZ_RESOURCES_DIR}}/image/boltz.sif
+
 
 export BOLTZ_INPUT_DIR={REMOTE_INPUT_DIR}
 export BOLTZ_OUTPUT_DIR={REMOTE_OUTPUT_DIR}
-export BOLTZ_RESOURCES_DIR={BOLTZ_RESOURCES_DIR}
-export BOLTZ_IMAGE=${{BOLTZ_RESOURCES_DIR}}/image/boltz.sif
 export BOLTZ_CACHE_DIR={REMOTE_CACHE_DIR}
+
+export APPTAINER_FUSE_TIMEOUT=120
 mkdir -p $BOLTZ_OUTPUT_DIR
+mkdir -p $BOLTZ_CACHE_DIR
+
 
 apptainer exec \\
     --nv \\
-    --bind $BOLTZ_INPUT_DIR:/root/boltz_input \\
-    --bind $BOLTZ_OUTPUT_DIR:/root/boltz_output \\
-    --bind $BOLTZ_CACHE_DIR:/root/.boltz \\
+    --bind $BOLTZ_INPUT_DIR:/input:rw \\
+    --bind $BOLTZ_OUTPUT_DIR:/output:rw \\
+    --bind $BOLTZ_CACHE_DIR:/cache:rw \\
     $BOLTZ_IMAGE \\
-    boltz predict /root/boltz_input/{YAML_FILENAME} \\
-    --cache=/root/.boltz \\
-    --out_dir=/root/boltz_output
+    boltz predict {REMOTE_INPUT_DIR}/{YAML_FILENAME} \\
+    --cache /cache \\
+    --out_dir {REMOTE_OUTPUT_DIR} \\
+    --num_workers 0 \\
+    --use_msa_server
 """
 
     def _render_slurm_script(
