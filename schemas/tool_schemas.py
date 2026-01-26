@@ -1,7 +1,7 @@
 """
 Schemas for tool inputs and outputs in the workflow.
 """
-
+import os
 from typing import List, Dict, Any, Optional, Union
 from pydantic import BaseModel, Field
 from enum import Enum
@@ -61,7 +61,7 @@ class BORecommendationRequest(BaseModel):
     targets: List[Dict[str, Any]]  # Target configurations
     measurements: Optional[List[Dict[str, Any]]] = None  # Previous measurements
     batch_size: int = Field(default=5, ge=1)
-    encoding: str = "MORDRED"
+    encoding: str = os.getenv("MOLECULAR_FP", "MORDRED")
 
 
 class BORecommendationResult(BaseModel):

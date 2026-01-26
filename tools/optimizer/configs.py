@@ -1,4 +1,4 @@
-import pandas as pd
+import os
 from typing import Type, List, Dict, Any, Optional, Union
 from pydantic import BaseModel, Field, field_validator
 import json
@@ -22,7 +22,7 @@ class BayesianOptimizationInput(BaseModel):
     """Input schema for the Bayesian Optimization Tool."""
     targets: str = Field(..., description="A JSON string representing a list of optimization targets. Each target should be a dictionary with 'name' and 'mode' keys. Example: '[{\"name\": \"QED\", \"mode\": \"MAX\"}]'")
     batch_size: int = Field(default=5, description="Number of molecules to recommend in the next batch.")
-    encoding: str = Field(default="MORDRED", description="Molecular encoding strategy for SubstanceParameter (e.g., 'MORDRED', 'RDKIT', 'MorganFP').")
+    encoding: str = Field(default=os.getenv("MOLECULAR_FP", "MORDRED"), description="Molecular encoding strategy for SubstanceParameter (e.g., 'MORDRED', 'RDKIT', 'MorganFP').")
     measurement_data: Optional[Union[List[Dict[str, Any]], str]] = Field(default=None, description="Optional list of dictionaries representing previous measurements OR a string key to retrieve measurement data from memory (e.g., 'measurement_data'). Each dict needs the search space ID key (e.g., 'Molecule_ID') and target keys.")
     search_space_id_column: Optional[str] = Field(default="Molecule_ID", description="The key/column name used for molecule IDs in the measurement_data.")
 

@@ -23,7 +23,7 @@ except ImportError:
     class SubstanceParameter: pass
     class SearchSpace: pass
     class NumericalTarget: pass
-    def get_canonical_smiles(s): return s # Dummy function
+    def get_canonical_smiles(s): return s
 
 class BayesianOptimizationTool(BaseTool):
     """
@@ -60,7 +60,8 @@ class BayesianOptimizationTool(BaseTool):
             substance_param = SubstanceParameter(
                 name=search_space_id_column, 
                 data=canonical_search_space, 
-                encoding=encoding
+                encoding=encoding,
+                kwargs_fingerprint={"radius": 3, "fp_size": 2048, "count": True}
             )
             searchspace = SearchSpace.from_product(parameters=[substance_param])
 

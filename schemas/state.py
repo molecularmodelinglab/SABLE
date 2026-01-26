@@ -3,7 +3,7 @@
 This module defines the Pydantic models that represent the complete state
 of the molecular optimization workflow as it flows through a LangGraph graph.
 """
-
+import os
 from datetime import datetime
 from enum import Enum
 from threading import RLock
@@ -61,7 +61,7 @@ class BOConfiguration(BaseModel):
     n_initial_points: int = Field(default=10, ge=1)
     max_iterations: int = Field(default=4, ge=1)
     encoding: str = Field(
-        default="MORDRED", description="Molecular encoding/fingerprint method."
+        default=os.getenv("MOLECULAR_FP", "MORDRED"), description="Molecular encoding/fingerprint method."
     )
     convergence_threshold: Optional[float] = 1e-6
     exploration_weight: float = Field(default=0.1, ge=0.0)
