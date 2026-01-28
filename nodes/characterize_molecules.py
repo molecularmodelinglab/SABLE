@@ -233,9 +233,32 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                                         break
                             if affinity_value is None:
                                 continue
+
+                            affinity_reliability = affinity.get('affinity_probability_binary')
+                            if affinity_reliability is None:
+                                affinity_reliability = affinity.get('affinity_probability_binary1')
                         else:
                             affinity_value = affinity
+                            affinity_reliability = None
+
+                        if affinity_reliability is not None and float(affinity_reliability) < 0.5:
+                            print(f"⚠️  Excluding ligand '{ligand_id}' binding affinity: reliability {affinity_reliability:.3f} < 0.5 threshold")
+                            boltz_metadata[ligand_id] = {
+                                'excluded': True,
+                                'reason': 'low_affinity_reliability',
+                                'affinity_probability_binary': affinity_reliability,
+                                'affinity': affinity_value
+                            }
+                            continue
                         
+                        confidence_value = None
+                        confidence = info.get('confidence')
+                        if confidence is not None:
+                            if isinstance(confidence, dict):
+                                confidence_value = confidence.get('confidence_score') or confidence.get('ptm')
+                            else:
+                                confidence_value = confidence
+
                         results.setdefault(ligand_id, {})
                         results[ligand_id]['binding_affinity'] = float(affinity_value)
                         
@@ -243,16 +266,12 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                         if isinstance(affinity, dict):
                             results[ligand_id]['binding_affinity_details'] = affinity
                         
-                        if info.get('confidence') is not None:
-                            confidence = info['confidence']
+                        if confidence_value is not None:
                             # Handle confidence as dict
+                            results[ligand_id]['binding_affinity_confidence'] = float(confidence_value)
                             if isinstance(confidence, dict):
-                                conf_value = confidence.get('confidence_score') or confidence.get('ptm')
-                                if conf_value is not None:
-                                    results[ligand_id]['binding_affinity_confidence'] = float(conf_value)
+
                                 results[ligand_id]['binding_affinity_confidence_details'] = confidence
-                            else:
-                                results[ligand_id]['binding_affinity_confidence'] = float(confidence)
                         
                         boltz_metadata[ligand_id] = info
 
