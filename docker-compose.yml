@@ -81,6 +81,7 @@ services:
       - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
       - MOLECULAR_FP=${MOLECULAR_FP:-MORDRED}
+      - MULTI_OPT_TYPE=${MULTI_OPT_TYPE:-pareto}
     volumes:
       - ./data:/app/data  # For large artifacts (checkpoints, results)
       - ./logs:/app/logs
@@ -122,6 +123,7 @@ services:
       - BOLTZ_RESOURCES_DIR=${BOLTZ_RESOURCES_DIR}
       - HPC_SSH_KEY=/app/secrets/hpc_ssh_key
       - MOLECULAR_FP=${MOLECULAR_FP:-MORDRED}
+      - MULTI_OPT_TYPE=${MULTI_OPT_TYPE:-pareto}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -154,6 +156,7 @@ services:
       - SECRET_KEY=${SECRET_KEY:-change_this_secret_key_in_production}
       - ENVIRONMENT=${ENVIRONMENT:-development}
       - MOLECULAR_FP=${MOLECULAR_FP:-MORDRED}
+      - MULTI_OPT_TYPE=${MULTI_OPT_TYPE:-pareto}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -241,6 +244,7 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - MOLECULAR_FP=${MOLECULAR_FP:-MORDRED}
+      - MULTI_OPT_TYPE=${MULTI_OPT_TYPE:-pareto}
       - ./checkpoints:/app/checkpoints
       - ./data:/app/data
     depends_on:
