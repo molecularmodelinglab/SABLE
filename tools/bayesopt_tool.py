@@ -1,3 +1,4 @@
+import os
 from typing import Type, List, Dict, Any, Optional, Union
 from pydantic import BaseModel, Field
 from langchain.tools import BaseTool
@@ -53,7 +54,6 @@ class BayesianOptimizationTool(BaseTool):
         search_space: Optional[Dict[str, Any]] = None,
     ) -> Union[List[str], str]:
         try:
-            # Create BayBE parameters from the search space
             canonical_search_space = {
                 id_: get_canonical_smiles(smi) for id_, smi in search_space.items()
             }
@@ -61,33 +61,32 @@ class BayesianOptimizationTool(BaseTool):
                 name=search_space_id_column, 
                 data=canonical_search_space, 
                 encoding=encoding,
-                kwargs_fingerprint={"radius": 3, "fp_size": 2048, "count": True}
+                kwargs_fingerprint={"radius": 3, "fp_size": 2048, "count": True} if encoding == "ECFP" else {}
             )
             searchspace = SearchSpace.from_product(parameters=[substance_param])
-
-            # Create BayBE targets
+            
+            if len(targets) == 1:
+                targets[0].transformation = None
             baybe_targets = [
                 NumericalTarget(name=t.name, mode=t.mode, bounds=t.bounds, transformation=t.transformation)
                 for t in targets
             ]
 
-            # Create objective
             if len(baybe_targets) == 1:
                 objective = SingleTargetObjective(target=baybe_targets[0])
             else:
                 weights = [t.weight for t in targets]
-                # objective = DesirabilityObjective(targets=baybe_targets, weights=weights)
-                objective = ParetoObjective(targets=baybe_targets)
+                if os.getenv("MULTI_OPT_TYPE", "desirability").lower() == "pareto":
+                    objective = ParetoObjective(targets=baybe_targets)
+                else:
+                    objective = DesirabilityObjective(targets=baybe_targets, weights=weights)
 
-            # Create Campaign
             campaign = Campaign(searchspace=searchspace, objective=objective)
 
-            # Add measurements if provided
             if measurement_data:
                 df_measurements = pd.DataFrame(measurement_data)
                 campaign.add_measurements(df_measurements)
 
-            # Get recommendations
             recommendations_df = campaign.recommend(batch_size=int(batch_size))
             
             results = recommendations_df[search_space_id_column].tolist()
