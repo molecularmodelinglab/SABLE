@@ -223,7 +223,6 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                         
                         # Handle affinity as dict (Boltz returns multiple prediction values)
                         if isinstance(affinity, dict):
-                            # Extract primary affinity value (use affinity_pred_value as primary metric)
                             affinity_value = affinity.get('affinity_pred_value')
                             if affinity_value is None:
                                 # Fallback to first numeric value if primary key not found
@@ -241,39 +240,74 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                             affinity_value = affinity
                             affinity_reliability = None
 
-                        if affinity_reliability is not None and float(affinity_reliability) < 0.5:
-                            print(f"⚠️  Excluding ligand '{ligand_id}' binding affinity: reliability {affinity_reliability:.3f} < 0.5 threshold")
-                            boltz_metadata[ligand_id] = {
-                                'excluded': True,
-                                'reason': 'low_affinity_reliability',
-                                'affinity_probability_binary': affinity_reliability,
-                                'affinity': affinity_value
-                            }
-                            continue
-                        
-                        confidence_value = None
-                        confidence = info.get('confidence')
-                        if confidence is not None:
-                            if isinstance(confidence, dict):
-                                confidence_value = confidence.get('confidence_score') or confidence.get('ptm')
+
+                        original_affinity_value = float(affinity_value)
+                        penalized = False
+
+                        if affinity_reliability is not None:
+                            reliability = float(affinity_reliability)
+                            penalty_baseline = 10.0
+                            affinity_value = original_affinity_value * reliability + penalty_baseline * (1 - reliability)
+                            
+                            if reliability < 0.5:
+                                penalized = True
+                                print(f"⚠️  Low reliability for ligand '{ligand_id}': {reliability:.3f}, "
+                                      f"affinity {original_affinity_value:.3f} -> {affinity_value:.3f}")
                             else:
-                                confidence_value = confidence
+                                print(f"✓  Weighted affinity for ligand '{ligand_id}': reliability {reliability:.3f}, "
+                                      f"affinity {original_affinity_value:.3f} -> {affinity_value:.3f}")
 
-                        results.setdefault(ligand_id, {})
-                        results[ligand_id]['binding_affinity'] = float(affinity_value)
                         
-                        # Store full affinity dict in metadata
-                        if isinstance(affinity, dict):
-                            results[ligand_id]['binding_affinity_details'] = affinity
-                        
-                        if confidence_value is not None:
-                            # Handle confidence as dict
-                            results[ligand_id]['binding_affinity_confidence'] = float(confidence_value)
-                            if isinstance(confidence, dict):
+                        # confidence_value = None
+                        # confidence = info.get('confidence')
+                        # if confidence is not None:
+                        #     if isinstance(confidence, dict):
+                        #         confidence_value = confidence.get('confidence_score') or confidence.get('ptm')
+                        #     else:
+                        #         confidence_value = confidence
 
-                                results[ligand_id]['binding_affinity_confidence_details'] = confidence
+                        # results.setdefault(ligand_id, {})
+                        # results[ligand_id]['binding_affinity'] = float(affinity_value)
                         
-                        boltz_metadata[ligand_id] = info
+                        # # Store full affinity dict in metadata
+                        # if isinstance(affinity, dict):
+                        #     results[ligand_id]['binding_affinity_details'] = affinity
+                        
+                        # if confidence_value is not None:
+                        #     # Handle confidence as dict
+                        #     results[ligand_id]['binding_affinity_confidence'] = float(confidence_value)
+                        #     if isinstance(confidence, dict):
+
+                        #         results[ligand_id]['binding_affinity_confidence_details'] = confidence
+
+                        # if penalized:
+                        #     results[ligand_id]['binding_affinity_penalized'] = True
+                        #     results[ligand_id]['binding_affinity_original'] = info.get('affinity')
+                        #     boltz_metadata[ligand_id] = {
+                        #         **info,
+                        #         'penalized': True,
+                        #         'penalty_reason': 'low_affinity_reliability',
+                        #         'affinity_probability_binary': affinity_reliability,
+                        #         'original_affinity': info.get('affinity')
+                        #     }
+                        # else:
+                        #     boltz_metadata[ligand_id] = info
+
+                        if penalized:
+                            results[ligand_id]['binding_affinity_penalized'] = True
+                        
+                        results[ligand_id]['binding_affinity_original'] = original_affinity_value
+                        results[ligand_id]['binding_affinity_reliability'] = affinity_reliability
+                        
+                        boltz_metadata[ligand_id] = {
+                            **info,
+                            'reliability_weighted': True,
+                            'original_affinity_value': original_affinity_value,
+                            'affinity_probability_binary': affinity_reliability,
+                            'penalized': penalized
+                        }
+
+
 
                     missing_affinity = set(ligands_map.keys()) - set(per_ligand.keys())
                     if missing_affinity:
