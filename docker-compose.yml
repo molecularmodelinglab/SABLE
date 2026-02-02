@@ -62,7 +62,7 @@ services:
     container_name: lizard-api
     profiles: ["dev", "prod"]
     entrypoint: ["bash", "-lc"]
-    command: ["micromamba run -n lizard uvicorn server.app:app --host 0.0.0.0 --port 8000 --reload"]
+    command: ["micromamba run -n lizard uvicorn server.app:app --host 0.0.0.0 --port 8000"]
     ports:
       - "8000:8000"
     environment:
@@ -78,10 +78,13 @@ services:
       - LLM_PROVIDER=${LLM_PROVIDER}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
+      - MOLECULAR_FP=${MOLECULAR_FP:-MORDRED}
     volumes:
       - ./data:/app/data  # For large artifacts (checkpoints, results)
       - ./logs:/app/logs
-      - .:/app  # Mount source for hot reload in development
+      - .:/app
     depends_on:
       postgres:
         condition: service_healthy
@@ -89,6 +92,94 @@ services:
         condition: service_healthy
       migrations:
         condition: service_completed_successfully
+    networks:
+      - lizard-network
+    restart: unless-stopped
+
+  # Celery Worker
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lizard-worker
+    profiles: ["dev", "prod"]
+    entrypoint: ["bash", "-lc"]
+    command: ["micromamba run -n lizard celery -A server.tasks.celery_app worker --loglevel=info"]
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://lizard_user:${POSTGRES_PASSWORD:-lizard_password}@postgres:5432/lizard
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-change_this_secret_key_in_production}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - LLM_PROVIDER=${LLM_PROVIDER}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - HPC_HOST=${HPC_HOST}
+      - HPC_USER=${HPC_USER}
+      - REMOTE_BASE_DIR=${REMOTE_BASE_DIR}
+      - BOLTZ_RESOURCES_DIR=${BOLTZ_RESOURCES_DIR}
+      - HPC_SSH_KEY=/app/secrets/hpc_ssh_key
+      - MOLECULAR_FP=${MOLECULAR_FP:-MORDRED}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - .:/app
+      - ./secrets/hpc_ssh_key:/app/secrets/hpc_ssh_key:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - lizard-network
+    restart: unless-stopped
+
+  # Celery Beat (Scheduler)
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lizard-beat
+    profiles: ["dev", "prod"]
+    entrypoint: ["bash", "-lc"]
+    command: ["micromamba run -n lizard celery -A server.tasks.celery_app beat --loglevel=info --schedule /app/data/celerybeat-schedule"]
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://lizard_user:${POSTGRES_PASSWORD:-lizard_password}@postgres:5432/lizard
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-change_this_secret_key_in_production}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - MOLECULAR_FP=${MOLECULAR_FP:-MORDRED}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - lizard-network
+    restart: unless-stopped
+
+  # Flower (Celery Monitoring)
+  flower:
+    image: mher/flower
+    container_name: lizard-flower
+    profiles: ["dev"]
+    environment:
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
+      - FLOWER_PORT=5555
+    ports:
+      - "5555:5555"
+    depends_on:
+      redis:
+        condition: service_healthy
     networks:
       - lizard-network
     restart: unless-stopped
@@ -149,7 +240,7 @@ services:
       - LLM_PROVIDER=${LLM_PROVIDER}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-    volumes:
+      - MOLECULAR_FP=${MOLECULAR_FP:-MORDRED}
       - ./checkpoints:/app/checkpoints
       - ./data:/app/data
     depends_on:
@@ -169,3 +260,7 @@ volumes:
   postgres_data:
   redis_data:
   ui_node_modules:
+
+secrets:
+  hpc_ssh_key:
+    file: ${HPC_SSH_KEY:-./secrets/hpc_ssh_key}

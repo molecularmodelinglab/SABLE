@@ -1,7 +1,7 @@
 """
 Setup node for initializing the workflow configuration.
 """
-
+import os
 from typing import Dict, Any
 from schemas.state import WorkflowState, BOConfiguration, TargetProperty, OptimizationMode, WorkflowStatus
 
@@ -30,7 +30,7 @@ def setup_node(state: WorkflowState) -> Dict[str, Any]:
         batch_size=batch_size,
         max_iterations=state.max_iterations,
         n_initial_points=min(10, state.parsed_arguments.get('enumeration_size', 100) // 10),
-        encoding="MORDRED"  # Default encoding
+        encoding=os.getenv("MOLECULAR_FP", "MORDRED")
     )
     
     if state.molecule_source:

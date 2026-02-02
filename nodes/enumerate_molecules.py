@@ -12,7 +12,6 @@ from schemas.errors import NodeError, ToolError
 from utils.telemetry import emit_event
 from tools.enumerator_tool import EnumeratorTool
 
-
 def enumerate_molecules_node(state: WorkflowState) -> Dict[str, Any]:
     """
     Enumerate molecules from starting molecules using the EnumeratorTool.
@@ -37,22 +36,40 @@ def enumerate_molecules_node(state: WorkflowState) -> Dict[str, Any]:
             details={"hint": "Provide starting_molecules or adjust molecule_source"},
         )
     
-    enumerator = EnumeratorTool()
-    
     # Determine enumeration parameters
     max_molecules = state.parsed_arguments.get('enumeration_size', 100)
-    
+    healer_mode = state.parsed_arguments.get('healer_mode', 'MoleculeHEALER')
+
     all_molecules = {}
     molecule_counter = 0
+
+    if healer_mode == "MoleculeHEALER":
+        mol_enumerator = EnumeratorTool(healer_mode=healer_mode)
+    elif healer_mode == "FragmentHEALER":
+        frag_enumerator = EnumeratorTool(healer_mode=healer_mode)
+    elif healer_mode == "SiteHEALER":
+        site_enumerator = EnumeratorTool(healer_mode=healer_mode)
     
     for starting_smiles in state.starting_molecules:
         try:
             # Call the enumerator tool
-            print(f"Enumerating: {min(max_molecules // len(state.starting_molecules), 100)}")
-            result = enumerator._run(
-                molecule=starting_smiles,
-                n_compositions=min(max_molecules // len(state.starting_molecules), 100),
-            )
+            print(f"Enumerating: {min(max_molecules // len(state.starting_molecules), 100)} using mode {healer_mode}")
+            if healer_mode == "MoleculeHEALER":
+                result = mol_enumerator._run(
+                    molecule=starting_smiles,
+                    n_compositions=min(max_molecules // len(state.starting_molecules), 100),
+                )
+            elif healer_mode == "FragmentHEALER":
+                result = frag_enumerator._run(
+                    molecule=starting_smiles,
+                    n_compositions=min(max_molecules // len(state.starting_molecules), 100),
+                )
+            elif healer_mode == "SiteHEALER":
+                result = site_enumerator._run(
+                    molecule=starting_smiles,
+                    n_compositions=min(max_molecules // len(state.starting_molecules), 100),
+                )
+
 
             # Validate tool output
             if isinstance(result, str):

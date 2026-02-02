@@ -20,21 +20,20 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
+RUN micromamba run -n lizard python -m pip install --upgrade pip \
+ && micromamba run -n lizard python -m pip install --no-cache \
+    torch==2.8.0 \
+    --index-url https://download.pytorch.org/whl/cpu
 
 COPY requirements.txt ./
-RUN grep -viE '^(rdkit\b|.*git\+.*healer.*)' requirements.txt > requirements.base.txt || true \
- && micromamba run -n lizard python -m pip install --upgrade pip \
+COPY constraints-cpu.txt ./
+RUN grep -viE '^(rdkit\b)' requirements.txt > requirements.base.txt || true \
+#  && micromamba run -n lizard python -m pip install --upgrade pip \
  && micromamba run -n lizard python -m pip install --no-cache-dir -r requirements.base.txt --constraint constraints-cpu.txt
 
-COPY --chown=$MAMBA_USER:$MAMBA_USER healer/ ./healer/
 
-# Install healer in editable mode
-RUN if [ -f healer/pyproject.toml ] || [ -f healer/setup.py ]; then \
-            micromamba run -n lizard python -m pip install -e ./healer; \
-        else \
-            echo "healer source not found (skipping install)"; \
-        fi
-
+## add env variables 
+ENV HEALER_DATA_DIR=/app/building_blocks
 
 # Copy the source
 COPY --chown=$MAMBA_USER:$MAMBA_USER . .

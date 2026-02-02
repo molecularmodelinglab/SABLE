@@ -79,7 +79,7 @@ def bo_iteration_node(state: WorkflowState) -> Dict[str, Any]:
             result = bo_tool._run(
                 targets=state.targets,
                 batch_size=state.bo_config.batch_size if state.bo_config else 5,
-                encoding=state.bo_config.encoding if state.bo_config else "MORDRED",
+                encoding=state.bo_config.encoding if state.bo_config else os.getenv("MOLECULAR_FP", "MORDRED"),
                 measurement_data=measurement_data if measurement_data else None,
                 search_space=state.search_space,
             )
