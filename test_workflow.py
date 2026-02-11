@@ -13,7 +13,18 @@ def test_basic_workflow():
     print("Testing basic molecular optimization workflow...")
     print("=" * 50)
 
-    test_prompts = questions["admet"]
+    # test_prompts = questions["natural_products"]
+
+    test_prompts = [
+                    "Start with Omeprazole and optimize for minimum TPSA. Use a batch size of 60 and run for 15 iterations",
+                    "Start with CCCCCCc1cccc(c1)NC(=O)C(CCP(=O)(O)O)N and optimize for maximize TPSA. Use a batch size of 60 and run for 15 iterations",
+                    "Start with Omeprazole and optimize for minimize LogP. Use a batch size of 60 and run for 15 iterations",
+                    "Start with CCCCCCc1cccc(c1)NC(=O)C(CCP(=O)(O)O)N and optimize for maximum LogP. Use a batch size of 60 and run for 15 iterations",
+                    "Start with Omeprazole and optimize for maximum LogP and TPSA. Use a batch size of 60 and run for 15 iterations",
+                    "Start with Omeprazole and optimize for minimum LogP and TPSA. Use a batch size of 60 and run for 15 iterations",
+                    "Start with Omeprazole and optimize for minimum LogP and maximum TPSA. Use a batch size of 60 and run for 15 iterations",
+                    "Start with CCCCCCc1cccc(c1)NC(=O)C(CCP(=O)(O)O)N and optimize for maximum LogP and minimum TPSA. Use a batch size of 60 and run for 15 iterations"
+                    ]
 
     runner = WorkflowRunner(checkpoint_dir=CHECKPOINT_DIR)
 
