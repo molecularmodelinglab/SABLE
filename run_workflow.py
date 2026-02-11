@@ -174,7 +174,7 @@ class WorkflowRunner:
         
         try:
             config = {
-                "recursion_limit": 100,
+                "recursion_limit": 50000,
                 "debug": True
             }
             result = self.graph.invoke(state, config=config)
