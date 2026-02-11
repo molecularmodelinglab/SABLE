@@ -37,7 +37,7 @@ class EnumeratorTool(BaseTool):
     _enumerator: Any = PrivateAttr(default=None)
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
-
+    STOCK: str = "test"
     def __init__(self, healer_mode: str = "MoleculeHEALER", **kwargs):
         """
         Initialize HEALER with a specific mode: MoleculeHEALER, FragmentHEALER or SiteHEALER.
@@ -46,25 +46,25 @@ class EnumeratorTool(BaseTool):
         mode = self.healer_mode
         if mode == "MoleculeHEALER":
             self._enumerator = MoleculeHEALER(
-                bb_source="US_stock",     # Building blocks source
+                bb_source=self.STOCK,     # Building blocks source
                 reaction_tags='all',        # List of reaction tags to consider, keep 'all' for all reactions
                 sim_threshold=0.3,          # Similarity threshold for filtering building blocks
                 verbose=2,                  # Verbosity level for the enumeration process
                 max_bbs_per_frag=10,
-                bb_repository=get_repository("US_stock")
+                bb_repository=get_repository(self.STOCK)
             )
         elif mode == "FragmentHEALER":
             self._enumerator = FragmentHEALER(
-                bb_source="US_stock",
+                bb_source=self.STOCK,
                 reaction_tags="all",
                 max_bbs_per_frag=10,
                 sim_threshold=0.3,
                 verbose=2,
-                bb_repository=get_repository("US_stock")
+                bb_repository=get_repository(self.STOCK)
             )
         elif mode == "SiteHEALER":
             self._enumerator = SiteHEALER(
-                bb_source="US_stock",
+                bb_source=self.STOCK,
                 reaction_tags="all",
                 rules={
                     'MW': (0, 500),
@@ -78,7 +78,7 @@ class EnumeratorTool(BaseTool):
                 },
                 struct_rules=[],
                 verbose=2,
-                bb_repository=get_repository("US_stock")
+                bb_repository=get_repository(self.STOCK)
             )
         else:
             raise ValueError(f"Invalid HEALER mode. Got {mode}, need one of MoleculeHEALER, FragmentHEALER or SiteHEALER")
@@ -87,12 +87,12 @@ class EnumeratorTool(BaseTool):
         self,
         molecule: str,
         n_compositions: Optional[int] = 100,
-        max_evals_per_comp: Optional[int] = 50_000,
+        max_evals_per_comp: Optional[int] = 500_000,
         randomize_compositions: Optional[bool] = False,
         random_seed: Optional[int] = 42,
         custom_split_sites: Optional[List[Tuple]] = None,
         retro_tree_depth: Optional[int] = 2,
-        min_frag_size: Optional[int] = 2,
+        min_frag_size: Optional[int] = 3, #2,
         reactive_sites: Optional[List[int]] = None,
     ) -> Union[Dict[str, str], str]:
         try:
@@ -118,15 +118,16 @@ class EnumeratorTool(BaseTool):
 
             self._enumerator.enumerate(
                 optimizer=None,
-                max_total_products=10_000,
-                max_products_per_comp=1_000,
+                # max_total_products=10_000,
+                # max_products_per_comp=2_000,
                 max_evals_per_comp=max_evals_per_comp
                 )
             
             results_df = self._enumerator.get_results(calc_similarity=True, calc_properties=False)
             results_df.drop_duplicates(subset='Product', inplace=True)
-
-            results_df = results_df[results_df['Similarity_to_query'] >= 0.25]
+            
+            # if self.STOCK != "test":
+            #     results_df = results_df[results_df['Similarity_to_query'] >= 0.25]
 
             if results_df.empty:
                 return "No molecules were generated that met the criteria."
