@@ -76,7 +76,7 @@ class ExperimentResult(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
     timestamp: datetime = Field(default_factory=datetime.now)
     source: str = Field(
-        default="llm_simulation",
+        default="computational",
         description="Source of the result (e.g., 'experimental', 'computational').",
     )
 
