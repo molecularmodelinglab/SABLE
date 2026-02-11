@@ -1,4 +1,5 @@
 import os
+from re import match
 from typing import Type, List, Dict, Any, Optional, Union
 from pydantic import BaseModel, Field
 from langchain.tools import BaseTool
@@ -6,25 +7,15 @@ import pandas as pd
 
 from .optimizer.configs import BayesianOptimizationInput
 
-try:
-    from baybe import Campaign
-    from baybe.objectives import SingleTargetObjective, DesirabilityObjective, ParetoObjective
-    from baybe.parameters import SubstanceParameter
-    from baybe.searchspace import SearchSpace
-    from baybe.targets import NumericalTarget
-    from baybe.utils.chemistry import get_canonical_smiles
-    BAYBE_AVAILABLE = True
-except ImportError:
-    BAYBE_AVAILABLE = False
-    # Define dummy classes if BayBE is not installed to avoid import errors
-    class Campaign: pass
-    class SingleTargetObjective: pass
-    class MultiTargetObjective: pass
-    class DesirabilityObjective: pass
-    class SubstanceParameter: pass
-    class SearchSpace: pass
-    class NumericalTarget: pass
-    def get_canonical_smiles(s): return s
+from baybe import Campaign
+from baybe.objectives import SingleTargetObjective, DesirabilityObjective, ParetoObjective
+from baybe.parameters import SubstanceParameter
+from baybe.searchspace import SearchSpace
+from baybe.targets import NumericalTarget
+from baybe.acquisition import qUpperConfidenceBound
+from baybe.utils.chemistry import get_canonical_smiles
+BAYBE_AVAILABLE = True
+
 
 class BayesianOptimizationTool(BaseTool):
     """
@@ -61,16 +52,27 @@ class BayesianOptimizationTool(BaseTool):
                 name=search_space_id_column, 
                 data=canonical_search_space, 
                 encoding=encoding,
-                kwargs_fingerprint={"radius": 3, "fp_size": 2048, "count": True} if encoding == "ECFP" else {}
+                # kwargs_fingerprint={"radius": 3, "fp_size": 2048, "count": True} if encoding == "ECFP" else {}
+                kwargs_fingerprint={"radius": 3, "fp_size": 2048} if encoding == "ECFP" else {}
             )
             searchspace = SearchSpace.from_product(parameters=[substance_param])
             
             if len(targets) == 1:
                 targets[0].transformation = None
-            baybe_targets = [
-                NumericalTarget(name=t.name, mode=t.mode, bounds=t.bounds, transformation=t.transformation)
-                for t in targets
-            ]
+            # baybe_targets = [
+            #     NumericalTarget(name=t.name, mode=t.mode, bounds=t.bounds, transformation=t.transformation)
+            #     for t in targets
+            # ]
+
+            baybe_targets = []
+            for t in targets:
+                if t.mode == "MAX":
+                    baybe_targets.append(NumericalTarget(name=t.name, minimize=False))
+                elif t.mode == "MIN":
+                    baybe_targets.append(NumericalTarget(name=t.name, minimize=True))
+                elif t.mode == "MATCH":
+                    baybe_targets.append(NumericalTarget.match_triangular(name=t.name, match_value=(t.bounds[0]+t.bounds[1])/2, cutoffs=(t.bounds[0], t.bounds[1]))) 
+          
 
             if len(baybe_targets) == 1:
                 objective = SingleTargetObjective(target=baybe_targets[0])
@@ -79,9 +81,9 @@ class BayesianOptimizationTool(BaseTool):
                 if os.getenv("MULTI_OPT_TYPE", "desirability").lower() == "pareto":
                     objective = ParetoObjective(targets=baybe_targets)
                 else:
-                    objective = DesirabilityObjective(targets=baybe_targets, weights=weights)
-
-            campaign = Campaign(searchspace=searchspace, objective=objective)
+                    objective = DesirabilityObjective(targets=baybe_targets, weights=weights, require_normalization=False)
+                print(f"Using multi-objective optimization with type: {os.getenv('MULTI_OPT_TYPE', 'desirability').lower()}")
+            campaign = Campaign(searchspace=searchspace, objective=objective)#, acquisition_function=qUpperConfidenceBound(beta=0.1))
 
             if measurement_data:
                 df_measurements = pd.DataFrame(measurement_data)
