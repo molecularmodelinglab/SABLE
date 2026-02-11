@@ -64,8 +64,27 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
     })
     
     if not state.current_bo_recommendations:
-        emit_event(state, kind="no_recommendations", node="characterize_molecules", severity="error")
-        raise NodeError("No molecules to characterize for this iteration", node="characterize_molecules", code="EMPTY_BATCH")
+        # If workflow is already completed (e.g., from BO node), just pass through
+        if state.status == "completed":
+            state.log("characterize_molecules_skipped", {
+                "reason": "workflow_already_completed",
+                "exit_reason": state.exit_reason
+            })
+            print(f"⏭️  Skipping characterization - workflow already completed: {state.exit_reason}")
+            return state
+        
+        # Otherwise, end gracefully
+        emit_event(state, kind="no_recommendations", node="characterize_molecules", severity="warning")
+        state.status = "completed"
+        state.exit_reason = "NO_MOLECULES_TO_CHARACTERIZE"
+        state.log("characterize_molecules_no_batch", {
+            "message": "No molecules to characterize for this iteration. Ending campaign gracefully.",
+            "iteration": state.current_iteration,
+            "total_tested": len(state.experimental_results)
+        })
+        print(f"⚠️  No molecules to characterize. Ending campaign gracefully.")
+        print(f"   Total molecules tested: {len(state.experimental_results)}")
+        return state
     
     # Get tool choice
     raw_tool_choice = state.characterization_config.get('tool', CharacterizationTool.AUTO)
