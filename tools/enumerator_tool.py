@@ -37,7 +37,7 @@ class EnumeratorTool(BaseTool):
     _enumerator: Any = PrivateAttr(default=None)
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    STOCK: str = "test"
+    STOCK: str = "US_stock"
     def __init__(self, healer_mode: str = "MoleculeHEALER", **kwargs):
         """
         Initialize HEALER with a specific mode: MoleculeHEALER, FragmentHEALER or SiteHEALER.
