@@ -27,10 +27,11 @@ RUN micromamba run -n lizard python -m pip install --upgrade pip \
 
 COPY requirements.txt ./
 COPY constraints-cpu.txt ./
-RUN grep -viE '^(rdkit\b)' requirements.txt > requirements.base.txt || true \
+RUN cp requirements.txt requirements.base.txt \
 #  && micromamba run -n lizard python -m pip install --upgrade pip \
  && micromamba run -n lizard python -m pip install --no-cache-dir -r requirements.base.txt --constraint constraints-cpu.txt
 
+RUN micromamba run -n lizard python -m pip install baybe[chem]==0.14.1 --no-cache-dir
 
 ## add env variables 
 ENV HEALER_DATA_DIR=/app/building_blocks

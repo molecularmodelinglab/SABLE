@@ -1,7 +1,6 @@
 annotated-types==0.7.0
 anyio==4.10.0
 attrs==25.3.0
-baybe==0.13.2
 cachetools==5.5.2
 cattrs==25.2.0
 certifi==2025.8.3
@@ -20,7 +19,6 @@ google-auth-httplib2==0.2.0
 google-genai==1.32.0
 google-generativeai==0.8.5
 googleapis-common-protos==1.70.0
-gpytorch==1.14
 greenlet==3.2.4
 grpcio==1.74.0
 grpcio-status==1.71.2
