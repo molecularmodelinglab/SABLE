@@ -126,8 +126,8 @@ class EnumeratorTool(BaseTool):
             results_df = self._enumerator.get_results(calc_similarity=True, calc_properties=False)
             results_df.drop_duplicates(subset='Product', inplace=True)
             
-            # if self.STOCK != "test":
-            #     results_df = results_df[results_df['Similarity_to_query'] >= 0.25]
+            if self.STOCK != "test":
+                results_df = results_df[results_df['Similarity_to_query'] >= 0.25]
 
             if results_df.empty:
                 return "No molecules were generated that met the criteria."
