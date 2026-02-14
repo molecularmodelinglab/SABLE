@@ -1,4 +1,5 @@
 import healer.utils.rdkit_monkey_patch as rdkit_monkey_patch
+import time
 from langchain.tools import BaseTool
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 from typing import Type, List, Dict, Any, Union, Optional, Tuple
@@ -96,6 +97,7 @@ class EnumeratorTool(BaseTool):
         reactive_sites: Optional[List[int]] = None,
     ) -> Union[Dict[str, str], str]:
         try:
+            started_at = time.perf_counter()
             if self.healer_mode == "MoleculeHEALER":
                 self._enumerator.set_query_mol(
                     query_mol=molecule,
@@ -139,8 +141,12 @@ class EnumeratorTool(BaseTool):
 
             # Format the output as a dictionary of {id: smiles}
             enumerated_molecules_dict = {f"mol_{i}": smi for i, smi in enumerate(enumerated_molecules_list)}
+            elapsed = time.perf_counter() - started_at
     
-            print(f"EnumeratorTool generated {len(enumerated_molecules_dict)} molecules.")
+            print(
+                f"EnumeratorTool generated {len(enumerated_molecules_dict)} molecules "
+                f"in {elapsed:.2f}s."
+            )
             return enumerated_molecules_dict
 
         except ToolError:

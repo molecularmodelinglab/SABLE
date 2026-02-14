@@ -172,6 +172,10 @@ class WorkflowState(BaseModel):
         default_factory=dict,
         description="Filesystem paths provisioned for this run (inputs, outputs, artifacts, etc.).",
     )
+    profiling: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Timing and profiling metadata collected during workflow execution.",
+    )
 
     llm_client: Optional[Any] = Field(
         default=None, exclude=True

@@ -5,6 +5,7 @@ Includes state persistence and checkpointing.
 
 import json
 import pickle
+import time
 from datetime import datetime
 from typing import Optional, Any
 from pathlib import Path
@@ -173,6 +174,7 @@ class WorkflowRunner:
             cleanup_workflow_id = state.workflow_id
         
         try:
+            workflow_started_at = time.perf_counter()
             config = {
                 "recursion_limit": 50000,
                 "debug": True
@@ -183,6 +185,15 @@ class WorkflowRunner:
                 final_state = result
             elif isinstance(result, dict) and "status" in result:
                 final_state = WorkflowState(**result)
+
+            workflow_elapsed = round(time.perf_counter() - workflow_started_at, 3)
+            final_state.profiling.setdefault("workflow", {})
+            final_state.profiling["workflow"]["elapsed_seconds"] = workflow_elapsed
+            final_state.log("workflow_timing", {
+                "elapsed_seconds": workflow_elapsed,
+                "iterations_completed": final_state.current_iteration,
+            })
+            print(f"⏱️  Workflow completed in {workflow_elapsed:.2f}s")
 
             if save_checkpoints:
                 self.save_checkpoint(final_state, f"{final_state.workflow_id}_final")

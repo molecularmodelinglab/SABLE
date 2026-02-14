@@ -3,6 +3,7 @@ Bayesian Optimization iteration node.
 """
 
 from typing import Dict, Any, List
+import time
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -21,6 +22,12 @@ def bo_iteration_node(state: WorkflowState) -> Dict[str, Any]:
     print(f"   - Max iterations: {state.max_iterations}")
     print(f"   - Status: {state.status}")
     print(f"   - Should continue: {state.should_continue()}")
+
+    node_started_at = time.perf_counter()
+    state.profiling.setdefault("iteration_timers", {})
+    state.profiling["iteration_timers"].setdefault(str(state.current_iteration), {
+        "started_at": time.time()
+    })
 
     state.log("bo_iteration_started", {
         "iteration": state.current_iteration,
@@ -99,7 +106,8 @@ def bo_iteration_node(state: WorkflowState) -> Dict[str, Any]:
 
                 state.log("bo_iteration_completed", {
                     "recommended_ids": valid_ids,
-                    "recommendation_count": len(valid_ids)
+                    "recommendation_count": len(valid_ids),
+                    "elapsed_seconds": round(time.perf_counter() - node_started_at, 3),
                 })
             else:
                 # Unexpected type

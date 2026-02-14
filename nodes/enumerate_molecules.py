@@ -3,6 +3,7 @@ Enumerate molecules from starting molecules.
 """
 
 from typing import Dict, Any
+import time
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -22,6 +23,8 @@ def enumerate_molecules_node(state: WorkflowState) -> Dict[str, Any]:
     print(f"   - Max iterations: {state.max_iterations}")
     print(f"   - Status: {state.status}")
     print(f"   - Should continue: {state.should_continue()}")
+
+    node_started_at = time.perf_counter()
 
     state.log("enumerate_molecules_started", {
         "starting_molecules": state.starting_molecules
@@ -51,6 +54,7 @@ def enumerate_molecules_node(state: WorkflowState) -> Dict[str, Any]:
         site_enumerator = EnumeratorTool(healer_mode=healer_mode)
     
     for starting_smiles in state.starting_molecules:
+        batch_started_at = time.perf_counter()
         try:
             # Call the enumerator tool
             print(f"Enumerating: {min(max_molecules // len(state.starting_molecules), 100)} using mode {healer_mode}")
@@ -86,7 +90,8 @@ def enumerate_molecules_node(state: WorkflowState) -> Dict[str, Any]:
             
             state.log("enumerate_molecules_batch", {
                 "starting_molecule": starting_smiles,
-                "generated_count": len(result) if isinstance(result, dict) else 0
+                "generated_count": len(result) if isinstance(result, dict) else 0,
+                "elapsed_seconds": round(time.perf_counter() - batch_started_at, 3),
             })
             
         except ToolError as e:
@@ -143,7 +148,8 @@ def enumerate_molecules_node(state: WorkflowState) -> Dict[str, Any]:
     
     state.log("enumerate_molecules_completed", {
         "total_molecules": len(all_molecules),
-        "molecule_ids": list(all_molecules.keys())[:10]
+        "molecule_ids": list(all_molecules.keys())[:10],
+        "elapsed_seconds": round(time.perf_counter() - node_started_at, 3),
     })
     
     return state

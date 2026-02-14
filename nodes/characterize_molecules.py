@@ -4,6 +4,7 @@ Characterize molecules using the selected tool(s).
 
 from typing import Dict, Any, List
 import asyncio
+import time
 import sys
 import os
 import json
@@ -56,6 +57,7 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
     Characterize molecules using the selected tool(s).
     This replaces the llm_experiment node for actual property calculation.
     """
+    node_started_at = time.perf_counter()
     state.log("characterize_molecules_started", {
         "tool": state.characterization_config.get('tool', 'auto'),
         "molecules_count": len(state.current_bo_recommendations) if state.current_bo_recommendations else 0,
@@ -110,6 +112,7 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
     # Use RDKit tool
     if should_run_rdkit:
         try:
+            rdkit_started_at = time.perf_counter()
             rdkit_tool = MoleculeCharacterizationTool()
             rdkit_result = rdkit_tool._run(
                 search_space=state.search_space,
@@ -126,7 +129,8 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                     
             state.log("characterize_rdkit_completed", {
                 "molecules_processed": len(results),
-                "properties": list(next(iter(results.values())).keys()) if results else []
+                "properties": list(next(iter(results.values())).keys()) if results else [],
+                "elapsed_seconds": round(time.perf_counter() - rdkit_started_at, 3),
             })
         except Exception as e:
             emit_event(state, kind="rdkit_tool_exception", node="characterize_molecules", tool="MoleculeCharacterizer", severity="error", data={"error": str(e)})
@@ -134,6 +138,7 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
     # Use Stoplight tool
     if should_run_stoplight:
         try:
+            stoplight_started_at = time.perf_counter()
             stoplight_tool = StoplightTool()
             stoplight_result = stoplight_tool._run(
                 precision=2,
@@ -151,7 +156,8 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                     
             state.log("characterize_stoplight_completed", {
                 "molecules_processed": len(results),
-                "api_response": stoplight_result
+                "api_response": stoplight_result,
+                "elapsed_seconds": round(time.perf_counter() - stoplight_started_at, 3),
             })
         except Exception as e:
             emit_event(state, kind="stoplight_tool_exception", node="characterize_molecules", tool="Stoplight", severity="error", data={"error": str(e)})
@@ -204,6 +210,7 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
 
             if base_url and api_token:
                 try:
+                    boltz_started_at = time.perf_counter()
                     print("⚙️  Invoking Boltz affinity tool for", len(ligands_map), "ligands and", len(polymers_payload), "proteins")
                     boltz_tool = BoltzTool(
                         base_url=base_url,
@@ -343,7 +350,8 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                         "ligands": len(ligands_map),
                         "proteins": len(proteins),
                         "fallback_used": affinity_fallback_used,
-                        "response_keys": list(per_ligand.keys())
+                        "response_keys": list(per_ligand.keys()),
+                        "elapsed_seconds": round(time.perf_counter() - boltz_started_at, 3),
                     })
 
                 except ToolException as exc:
@@ -477,7 +485,8 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
         "molecules_characterized": len(results),
         "properties_mapped": len(state.experimental_results),
         "boltz_required": requires_boltz or boltz_only,
-        "boltz_fallback": affinity_fallback_used
+        "boltz_fallback": affinity_fallback_used,
+        "elapsed_seconds": round(time.perf_counter() - node_started_at, 3),
     })
 
     print(f"🔍 EXITING NODE: {characterize_molecules_node.__name__}")

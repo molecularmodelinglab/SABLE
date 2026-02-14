@@ -1,4 +1,5 @@
 import os
+import time
 from re import match
 from typing import Type, List, Dict, Any, Optional, Union
 from pydantic import BaseModel, Field
@@ -45,6 +46,7 @@ class BayesianOptimizationTool(BaseTool):
         search_space: Optional[Dict[str, Any]] = None,
     ) -> Union[List[str], str]:
         try:
+            started_at = time.perf_counter()
             canonical_search_space = {
                 id_: get_canonical_smiles(smi) for id_, smi in search_space.items()
             }
@@ -92,6 +94,11 @@ class BayesianOptimizationTool(BaseTool):
             recommendations_df = campaign.recommend(batch_size=int(batch_size))
             
             results = recommendations_df[search_space_id_column].tolist()
+            elapsed = time.perf_counter() - started_at
+            print(
+                f"BayesianOptimizationTool recommended {len(results)} molecules "
+                f"in {elapsed:.2f}s."
+            )
 
             return results
 
