@@ -8,7 +8,6 @@ import time
 import sys
 import os
 import json
-import hashlib
 from pathlib import Path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -42,14 +41,6 @@ def _protein_target_to_polymer(protein: ProteinTarget) -> Dict[str, Any]:
     if protein.modifications:
         payload['modifications'] = protein.modifications
     return payload
-
-
-def _heuristic_affinity(smiles: str) -> float:
-    """Deterministic fallback affinity prediction when Boltz is unavailable."""
-
-    digest = hashlib.sha1(smiles.encode('utf-8')).hexdigest()
-    value = int(digest[:8], 16) % 1000
-    return round(5.0 + value / 100.0, 3)
 
 
 def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
@@ -163,7 +154,6 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
             emit_event(state, kind="stoplight_tool_exception", node="characterize_molecules", tool="Stoplight", severity="error", data={"error": str(e)})
     
     # Run Boltz affinity predictions if required
-    affinity_fallback_used = False
     boltz_recorded = False
     if requires_boltz or boltz_only:
         proteins = getattr(state, 'protein_targets', [])
@@ -258,149 +248,63 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                                         break
                             if affinity_value is None:
                                 continue
-
-                            affinity_reliability = affinity.get('affinity_probability_binary')
-                            if affinity_reliability is None:
-                                affinity_reliability = affinity.get('affinity_probability_binary1')
                         else:
                             affinity_value = affinity
-                            affinity_reliability = None
-
-
-                        original_affinity_value = float(affinity_value)
-                        penalized = False
-
-                        if affinity_reliability is not None:
-                            reliability = float(affinity_reliability)
-                            penalty_baseline = 10.0
-                            affinity_value = original_affinity_value * reliability + penalty_baseline * (1 - reliability)
-                            
-                            if reliability < 0.5:
-                                penalized = True
-                                print(f"⚠️  Low reliability for ligand '{ligand_id}': {reliability:.3f}, "
-                                      f"affinity {original_affinity_value:.3f} -> {affinity_value:.3f}")
-                            else:
-                                print(f"✓  Weighted affinity for ligand '{ligand_id}': reliability {reliability:.3f}, "
-                                      f"affinity {original_affinity_value:.3f} -> {affinity_value:.3f}")
-
-                        
-                        # confidence_value = None
-                        # confidence = info.get('confidence')
-                        # if confidence is not None:
-                        #     if isinstance(confidence, dict):
-                        #         confidence_value = confidence.get('confidence_score') or confidence.get('ptm')
-                        #     else:
-                        #         confidence_value = confidence
-
-                        # results.setdefault(ligand_id, {})
-                        # results[ligand_id]['binding_affinity'] = float(affinity_value)
-                        
-                        # # Store full affinity dict in metadata
-                        # if isinstance(affinity, dict):
-                        #     results[ligand_id]['binding_affinity_details'] = affinity
-                        
-                        # if confidence_value is not None:
-                        #     # Handle confidence as dict
-                        #     results[ligand_id]['binding_affinity_confidence'] = float(confidence_value)
-                        #     if isinstance(confidence, dict):
-
-                        #         results[ligand_id]['binding_affinity_confidence_details'] = confidence
-
-                        # if penalized:
-                        #     results[ligand_id]['binding_affinity_penalized'] = True
-                        #     results[ligand_id]['binding_affinity_original'] = info.get('affinity')
-                        #     boltz_metadata[ligand_id] = {
-                        #         **info,
-                        #         'penalized': True,
-                        #         'penalty_reason': 'low_affinity_reliability',
-                        #         'affinity_probability_binary': affinity_reliability,
-                        #         'original_affinity': info.get('affinity')
-                        #     }
-                        # else:
-                        #     boltz_metadata[ligand_id] = info
-
-                        if penalized:
-                            results[ligand_id]['binding_affinity_penalized'] = True
-                        
-                        results[ligand_id]['binding_affinity_original'] = original_affinity_value
-                        results[ligand_id]['binding_affinity_reliability'] = affinity_reliability
-                        
+                        results.setdefault(ligand_id, {})
+                        results[ligand_id]['binding_affinity'] = float(affinity_value)
                         boltz_metadata[ligand_id] = {
                             **info,
-                            'reliability_weighted': True,
-                            'original_affinity_value': original_affinity_value,
-                            'affinity_probability_binary': affinity_reliability,
-                            'penalized': penalized
+                            'reliability_weighted': False,
                         }
 
 
 
                     missing_affinity = set(ligands_map.keys()) - set(per_ligand.keys())
                     if missing_affinity:
-                        for missing_id in missing_affinity:
-                            smiles = ligands_map[missing_id]
-                            results.setdefault(missing_id, {})
-                            score = _heuristic_affinity(smiles)
-                            results[missing_id]['binding_affinity'] = score
-                            boltz_metadata[missing_id] = {'source': 'heuristic_missing'}
-                        affinity_fallback_used = True
+                        raise NodeError(
+                            "Boltz did not return affinity for all requested ligands",
+                            node="characterize_molecules",
+                            code="BOLTZ_MISSING_AFFINITY",
+                            details={"missing_ligand_ids": sorted(missing_affinity)},
+                        )
 
                     boltz_recorded = True
+                    tools_executed.append(CharacterizationTool.BOLTZ)
                     state.log("characterize_boltz_completed", {
                         "ligands": len(ligands_map),
                         "proteins": len(proteins),
-                        "fallback_used": affinity_fallback_used,
                         "response_keys": list(per_ligand.keys()),
                         "elapsed_seconds": round(time.perf_counter() - boltz_started_at, 3),
                     })
 
                 except ToolException as exc:
-                    emit_event(
-                        state,
-                        kind="boltz_tool_error",
+                    emit_event(state, kind="boltz_tool_error", node="characterize_molecules", tool="Boltz", severity="error", data={"error": str(exc)})
+                    raise NodeError(
+                        f"Boltz execution failed: {str(exc)}",
                         node="characterize_molecules",
-                        tool="Boltz",
-                        severity="error",
-                        data={"error": str(exc)}
+                        code="BOLTZ_TOOL_ERROR",
                     )
-                    affinity_fallback_used = True
                 except Exception as exc:  # Catch network/JSON issues
-                    emit_event(
-                        state,
-                        kind="boltz_exception",
+                    emit_event(state, kind="boltz_exception", node="characterize_molecules", severity="error", data={"error": str(exc)})
+                    raise NodeError(
+                        f"Boltz execution failed: {str(exc)}",
                         node="characterize_molecules",
-                        severity="error",
-                        data={"error": str(exc)}
+                        code="BOLTZ_EXCEPTION",
                     )
-                    affinity_fallback_used = True
             else:
-                emit_event(
-                    state,
-                    kind="boltz_unconfigured",
+                emit_event(state, kind="boltz_unconfigured", node="characterize_molecules", severity="error", data={"message": "Boltz credentials missing while binding affinity is required."})
+                raise NodeError(
+                    "Binding affinity requested but Boltz is not configured",
                     node="characterize_molecules",
-                    severity="warning",
-                    data={"message": "Boltz credentials missing, using heuristic affinity."}
+                    code="BOLTZ_UNCONFIGURED",
                 )
-                affinity_fallback_used = True
 
-            if affinity_fallback_used:
-                for mol_id, smiles in ligands_map.items():
-                    if 'binding_affinity' in results.get(mol_id, {}):
-                        continue
-                    score = _heuristic_affinity(smiles)
-                    results.setdefault(mol_id, {})
-                    results[mol_id]['binding_affinity'] = score
-                    boltz_metadata[mol_id] = {'source': 'heuristic_fallback'}
-                if not boltz_recorded:
-                    tools_executed.append(CharacterizationTool.BOLTZ)
-                    boltz_recorded = True
-                state.log("characterize_boltz_fallback", {
-                    "ligands": len(ligands_map),
-                    "proteins": len(proteins),
-                    "reason": "heuristic_used"
-                })
-            elif not boltz_recorded:
-                tools_executed.append(CharacterizationTool.BOLTZ)
+            if not boltz_recorded and (requires_boltz or boltz_only):
+                raise NodeError(
+                    "Binding affinity requested but Boltz did not complete successfully",
+                    node="characterize_molecules",
+                    code="BOLTZ_NOT_RECORDED",
+                )
 
     # Prepare metadata for experiment results
     executed_tool_names: List[str] = []
@@ -460,10 +364,6 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                 boltz_info = boltz_metadata.get(mol_id)
                 if boltz_info:
                     metadata["boltz"] = boltz_info
-                    if isinstance(boltz_info, dict) and str(boltz_info.get('source', '')).startswith('heuristic'):
-                        metadata["boltz_fallback"] = True
-                elif affinity_fallback_used:
-                    metadata["boltz_fallback"] = True
 
                 exp_result = ExperimentResult(
                     molecule_id=mol_id,
@@ -485,7 +385,6 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
         "molecules_characterized": len(results),
         "properties_mapped": len(state.experimental_results),
         "boltz_required": requires_boltz or boltz_only,
-        "boltz_fallback": affinity_fallback_used,
         "elapsed_seconds": round(time.perf_counter() - node_started_at, 3),
     })
 
