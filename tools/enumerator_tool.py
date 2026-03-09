@@ -50,7 +50,7 @@ class EnumeratorTool(BaseTool):
                 bb_source=self.STOCK,     # Building blocks source
                 reaction_tags='all',        # List of reaction tags to consider, keep 'all' for all reactions
                 sim_threshold=0.3,          # Similarity threshold for filtering building blocks
-                verbose=2,                  # Verbosity level for the enumeration process
+                verbose=2,                  # Verbosity level for the enumeration process 1,000,000,000,000 -> 100,000,000
                 max_bbs_per_frag=10,
                 bb_repository=get_repository(self.STOCK)
             )
@@ -88,7 +88,7 @@ class EnumeratorTool(BaseTool):
         self,
         molecule: str,
         n_compositions: Optional[int] = 100,
-        max_evals_per_comp: Optional[int] = 1_000_000,
+        max_evals_per_comp: Optional[int] = 500_000,
         randomize_compositions: Optional[bool] = True,
         random_seed: Optional[int] = 42,
         custom_split_sites: Optional[List[Tuple]] = None,
@@ -120,7 +120,7 @@ class EnumeratorTool(BaseTool):
 
             self._enumerator.enumerate(
                 optimizer=None,
-                # max_total_products=10_000,
+                max_total_products=8_000,
                 # max_products_per_comp=2_000,
                 max_evals_per_comp=max_evals_per_comp
                 )
