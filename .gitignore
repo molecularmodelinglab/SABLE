@@ -18,3 +18,5 @@ data/
 
 config.yml
 debug.py
+
+secrets/

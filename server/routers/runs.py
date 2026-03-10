@@ -35,6 +35,75 @@ from server.services.run_scheduler import run_scheduler
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
+
+def _iter_plot_files(run_id: str) -> list[Path]:
+    """Return discovered workflow plot HTML files for a run."""
+    base = run_dir(run_id)
+    candidate_dirs = [
+        base / "results" / "plots",
+        base / "artifacts" / "plots",
+        base / "results",
+        base / "artifacts",
+    ]
+
+    discovered: dict[str, Path] = {}
+    for directory in candidate_dirs:
+        if not directory.exists() or not directory.is_dir():
+            continue
+        for path in directory.rglob("*.html"):
+            if not path.is_file():
+                continue
+            try:
+                rel = path.resolve().relative_to(base.resolve())
+            except ValueError:
+                continue
+            rel_key = rel.as_posix()
+            discovered[rel_key] = path
+
+    return [discovered[key] for key in sorted(discovered.keys())]
+
+
+def _resolve_plot_path(run_id: str, relative_path: str) -> Path:
+    """Resolve and validate a run plot path to prevent traversal."""
+    base = run_dir(run_id).resolve()
+    target = (base / relative_path).resolve()
+
+    try:
+        rel = target.relative_to(base)
+    except ValueError as exc:
+        raise HTTPException(400, "Invalid plot path") from exc
+
+    rel_str = rel.as_posix()
+    allowed_roots = ("results/plots/", "artifacts/plots/", "results/", "artifacts/")
+    if not rel_str.endswith(".html") or not rel_str.startswith(allowed_roots):
+        raise HTTPException(400, "Invalid plot path")
+
+    if not target.exists() or not target.is_file():
+        raise HTTPException(404, "Plot not found")
+
+    return target
+
+
+def _find_workflow_checkpoint(run_id: str) -> Path | None:
+    """Find the best workflow checkpoint JSON to use for plot generation."""
+    checkpoints_dir = run_dir(run_id) / "checkpoints"
+    if not checkpoints_dir.exists() or not checkpoints_dir.is_dir():
+        return None
+
+    final_candidates = sorted(checkpoints_dir.glob("workflow_*_final.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if final_candidates:
+        return final_candidates[0]
+
+    workflow_candidates = sorted(checkpoints_dir.glob("workflow_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if workflow_candidates:
+        return workflow_candidates[0]
+
+    json_candidates = sorted(checkpoints_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if json_candidates:
+        return json_candidates[0]
+
+    return None
+
 def check_run_authorization(run_id: str, user: User, db: DBSession) -> RunInfo:
     """
     Check if user has access to a run.
@@ -403,6 +472,88 @@ def get_summary(
     if not p.exists():
         raise HTTPException(404, "Summary not found")
     return FileResponse(str(p), media_type="text/plain")
+
+
+@router.get("/{run_id}/artifacts/plots")
+def list_plots(
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+    db: DBSession = Depends(get_db)
+):
+    """List HTML plots generated for a run."""
+    check_run_authorization(run_id, current_user, db)
+    base = run_dir(run_id).resolve()
+    files = _iter_plot_files(run_id)
+
+    plots = []
+    for path in files:
+        rel = path.resolve().relative_to(base).as_posix()
+        plots.append(
+            {
+                "name": path.name,
+                "path": rel,
+                "size_bytes": path.stat().st_size,
+            }
+        )
+
+    return {"plots": plots}
+
+
+@router.get("/{run_id}/artifacts/plots/{plot_path:path}")
+def get_plot(
+    run_id: str,
+    plot_path: str,
+    current_user: User = Depends(get_current_user),
+    db: DBSession = Depends(get_db)
+):
+    """Serve a specific HTML workflow plot for a run."""
+    check_run_authorization(run_id, current_user, db)
+    target = _resolve_plot_path(run_id, plot_path)
+    return FileResponse(str(target), media_type="text/html")
+
+
+@router.post("/{run_id}/artifacts/plots/generate")
+def generate_plots(
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+    db: DBSession = Depends(get_db)
+):
+    """Generate extended workflow plots for a run from its workflow checkpoint."""
+    check_run_authorization(run_id, current_user, db)
+
+    checkpoint_path = _find_workflow_checkpoint(run_id)
+    if checkpoint_path is None:
+        raise HTTPException(404, "No workflow checkpoint JSON found for this run")
+
+    output_dir = run_dir(run_id) / "artifacts" / "plots"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        from utils.plot_workflow import load_workflow_json, plot_from_raw
+    except Exception as exc:
+        raise HTTPException(500, f"Plotting utility unavailable: {exc}") from exc
+
+    try:
+        raw = load_workflow_json(checkpoint_path)
+        result = plot_from_raw(
+            raw=raw,
+            outdir=output_dir,
+            dist_kind="box",
+            tsne_perplexity=30,
+            tsne_random_state=0,
+            generate_images=False,
+        )
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to generate plots: {exc}") from exc
+
+    plots = _iter_plot_files(run_id)
+    return {
+        "generated": True,
+        "workflow_id": result.get("workflow_id"),
+        "checkpoint": checkpoint_path.name,
+        "output_dir": str(output_dir),
+        "plot_count": len(plots),
+    }
 
 
 @router.get("/{run_id}/logs")

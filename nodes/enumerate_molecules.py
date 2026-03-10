@@ -3,6 +3,7 @@ Enumerate molecules from starting molecules.
 """
 
 from typing import Dict, Any
+import time
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -11,7 +12,6 @@ from schemas.state import WorkflowState
 from schemas.errors import NodeError, ToolError
 from utils.telemetry import emit_event
 from tools.enumerator_tool import EnumeratorTool
-
 
 def enumerate_molecules_node(state: WorkflowState) -> Dict[str, Any]:
     """
@@ -23,6 +23,8 @@ def enumerate_molecules_node(state: WorkflowState) -> Dict[str, Any]:
     print(f"   - Max iterations: {state.max_iterations}")
     print(f"   - Status: {state.status}")
     print(f"   - Should continue: {state.should_continue()}")
+
+    node_started_at = time.perf_counter()
 
     state.log("enumerate_molecules_started", {
         "starting_molecules": state.starting_molecules
@@ -37,22 +39,41 @@ def enumerate_molecules_node(state: WorkflowState) -> Dict[str, Any]:
             details={"hint": "Provide starting_molecules or adjust molecule_source"},
         )
     
-    enumerator = EnumeratorTool()
-    
     # Determine enumeration parameters
     max_molecules = state.parsed_arguments.get('enumeration_size', 100)
-    
+    healer_mode = state.parsed_arguments.get('healer_mode', 'MoleculeHEALER')
+
     all_molecules = {}
     molecule_counter = 0
+
+    if healer_mode == "MoleculeHEALER":
+        mol_enumerator = EnumeratorTool(healer_mode=healer_mode)
+    elif healer_mode == "FragmentHEALER":
+        frag_enumerator = EnumeratorTool(healer_mode=healer_mode)
+    elif healer_mode == "SiteHEALER":
+        site_enumerator = EnumeratorTool(healer_mode=healer_mode)
     
     for starting_smiles in state.starting_molecules:
+        batch_started_at = time.perf_counter()
         try:
             # Call the enumerator tool
-            print(f"Enumerating: {min(max_molecules // len(state.starting_molecules), 100)}")
-            result = enumerator._run(
-                molecule=starting_smiles,
-                n_compositions=min(max_molecules // len(state.starting_molecules), 100),
-            )
+            print(f"Enumerating: {min(max_molecules // len(state.starting_molecules), 100)} using mode {healer_mode}")
+            if healer_mode == "MoleculeHEALER":
+                result = mol_enumerator._run(
+                    molecule=starting_smiles,
+                    n_compositions=min(max_molecules // len(state.starting_molecules), 100),
+                )
+            elif healer_mode == "FragmentHEALER":
+                result = frag_enumerator._run(
+                    molecule=starting_smiles,
+                    n_compositions=min(max_molecules // len(state.starting_molecules), 100),
+                )
+            elif healer_mode == "SiteHEALER":
+                result = site_enumerator._run(
+                    molecule=starting_smiles,
+                    n_compositions=min(max_molecules // len(state.starting_molecules), 100),
+                )
+
 
             # Validate tool output
             if isinstance(result, str):
@@ -69,7 +90,8 @@ def enumerate_molecules_node(state: WorkflowState) -> Dict[str, Any]:
             
             state.log("enumerate_molecules_batch", {
                 "starting_molecule": starting_smiles,
-                "generated_count": len(result) if isinstance(result, dict) else 0
+                "generated_count": len(result) if isinstance(result, dict) else 0,
+                "elapsed_seconds": round(time.perf_counter() - batch_started_at, 3),
             })
             
         except ToolError as e:
@@ -126,7 +148,8 @@ def enumerate_molecules_node(state: WorkflowState) -> Dict[str, Any]:
     
     state.log("enumerate_molecules_completed", {
         "total_molecules": len(all_molecules),
-        "molecule_ids": list(all_molecules.keys())[:10]
+        "molecule_ids": list(all_molecules.keys())[:10],
+        "elapsed_seconds": round(time.perf_counter() - node_started_at, 3),
     })
     
     return state

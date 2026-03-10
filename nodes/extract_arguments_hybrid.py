@@ -22,6 +22,13 @@ except Exception:
     Chem = None  # type: ignore
     _RDKit_AVAILABLE = False
 
+try:
+    from utils.name_to_smiles import n2s
+    _NAME_RESOLVER_AVAILABLE = True
+except Exception:
+    _NAME_RESOLVER_AVAILABLE = False
+    print("Name-to-SMILES resolver not available; molecule name resolution will be limited.")
+
 def _is_likely_smiles(s: str) -> bool:
     """Conservative SMILES validator."""
     if not isinstance(s, str) or not s or len(s) > 200 or ' ' in s:
@@ -52,7 +59,6 @@ def _is_likely_smiles(s: str) -> bool:
 
 class HybridArgumentExtractor:
     """Combines LLM-based extraction with rule-based validation and fallbacks."""
-    # Property bounds based on known ranges - shared across methods
     PROPERTY_BOUNDS = {
         'qed': (0.0, 1.0),
         'logp': (-10.0, 10.0),
@@ -81,39 +87,10 @@ class HybridArgumentExtractor:
         if not self.llm_client:
             return None
             
-        extraction_prompt = f"""
-You are a chemistry AI assistant. Extract structured information from the user's request about molecular optimization.
-
-User Request: "{prompt}"
-
-Extract the following information and respond with a JSON object:
-- starting_molecules: List of SMILES strings or molecule names mentioned
-- target_properties: List of objects with property_name, optimization_mode (MAX/MIN/MATCH), weight, bounds (tuple)
-- proteins: List of objects describing protein chains with chain_id (A, B, ...), and either sequence or uniprot_id (optional fields: msa, cyclic, modifications)
-- molecule_source: How to obtain molecules (generated/provided/enumerated/external_library)
-- max_iterations: Number of optimization rounds (default 10, max 100)
-- batch_size: Molecules per iteration (default 5, max 50)
-- enumeration_size: Size of enumerated library (default 100, max 1000)
-- llm_confidence: Your confidence in this extraction (0.0-1.0)
-
-Available properties: qed, logp, tpsa, molecular_weight, h_bond_donors, h_bond_acceptors, 
-rotatable_bonds, ring_count, heavy_atom_count, solubility, fsp3, cns_activity, toxicity, 
-binding_affinity, permeability
-
-Note for binding_affinity: This is expressed in Log10 Kd (nM), where lower is better, so we ideally want to minimize.
-
-LLM Confidence score guidelines:
-- 0.9-1.0: All required fields clearly specified, no ambiguity
-- 0.7-0.9: Most fields clear, minor assumptions needed
-- 0.5-0.7: Some fields missing or ambiguous, moderate assumptions
-- 0.3-0.5: High ambiguity, many assumptions required
-- 0.0-0.3: Very unclear request, mostly guessing
-
-Respond with valid JSON only.
-"""
+        extraction_prompt = f"{prompt}"
         
         try:
-            response = self.llm_client.generate(extraction_prompt)
+            response = self.llm_client.generate(prompt=extraction_prompt)
             # Clean response to extract JSON
             json_match = re.search(r'\{.*\}', response, re.DOTALL)
             if json_match:
@@ -126,8 +103,7 @@ Respond with valid JSON only.
                 
                 # Calculate our own assessment of the extraction quality
                 quality_confidence = self._assess_llm_extraction_quality(extracted_data, prompt)
-                
-                # Store both for transparency
+
                 extracted_data['llm_self_confidence'] = llm_self_confidence if llm_self_confidence is not None else quality_confidence
                 extracted_data['extraction_quality'] = quality_confidence
                 extracted_data['extraction_method'] = 'llm'
@@ -185,7 +161,7 @@ Respond with valid JSON only.
         prompt_lower = prompt.lower()
         parsed = {}
         
-        # Extract starting molecule (look for SMILES patterns or molecule names)
+        # look for SMILES patterns or molecule names
         smiles_pattern = r"(?:\[.*?\]|Br|Cl|[A-Z][a-z]?|[cnops])[A-Za-z0-9@+\-\[\]()=#%\.]*"
         smiles_matches = re.findall(smiles_pattern, prompt)
         candidates = [s for s in smiles_matches if _is_likely_smiles(s)]
@@ -201,22 +177,18 @@ Respond with valid JSON only.
         if potential_smiles:
             parsed['starting_molecules'] = potential_smiles[:3]
         
-        # Common molecule names
-        molecule_names = {
-            'aspirin': 'CC(=O)OC1=CC=CC=C1C(=O)O',
-            'caffeine': 'CN1C=NC2=C1C(=O)N(C(=O)N2C)C',
-            'ibuprofen': 'CC(C)CC1=CC=C(C=C1)C(C)C(=O)O',
-            'paracetamol': 'CC(=O)NC1=CC=C(C=C1)O',
-            'acetaminophen': 'CC(=O)NC1=CC=C(C=C1)O'
-        }
+        molecule_names = self._extract_molecule_names_from_prompt(prompt)
         
-        for name, smiles in molecule_names.items():
-            if name in prompt_lower:
+        for name in molecule_names:
+            # resolve each potential molecule name
+            resolved_smiles = self._resolve_molecule_name(name)
+            if resolved_smiles:
                 parsed.setdefault('starting_molecules', [])
-                if smiles not in parsed['starting_molecules']:
-                    parsed['starting_molecules'].append(smiles)
+                if resolved_smiles not in parsed['starting_molecules']:
+                    parsed['starting_molecules'].append(resolved_smiles)
+                    print(f"✓ Found and resolved molecule name '{name}' in prompt")
 
-        # Extract protein targets (sequences or UniProt IDs)
+        # extract protein targets (sequences or UniProt IDs)
         proteins: List[Dict[str, Any]] = []
         seen_keys: set[str] = set()
 
@@ -338,7 +310,17 @@ Respond with valid JSON only.
             parsed['molecule_source'] = MoleculeSource.PROVIDED.value
         else:
             parsed['molecule_source'] = MoleculeSource.GENERATED.value
-        
+
+        healer_mode = None
+        if 'fragment' in prompt_lower or '.' in prompt and re.search(r"\w+\.\w+", prompt):
+            healer_mode = 'FragmentHEALER'
+        elif any(k in prompt_lower for k in ['r-group', 'r group', 'rgroups', 'r-groups', 'attach r', 'grow', 'vary', 'fix the', 'fix']) and any(k in prompt_lower for k in ['side chain', 'side-chain', 'scaffold', 'attach', 'r group', 'r-group', 'imidzole', 'imidazole', 'grow my small molecule', 'r group analogs']):
+            healer_mode = 'SiteHEALER'
+        else:
+            healer_mode = 'MoleculeHEALER'
+
+        parsed['healer_mode'] = healer_mode
+
         # Extract enumeration size if mentioned
         enum_match = re.search(r'(\d+)\s*(?:molecules?|compounds?|analogs?|derivatives?)', prompt_lower)
         if enum_match:
@@ -363,19 +345,91 @@ Respond with valid JSON only.
         if enum_match:  # Explicitly mentioned enumeration size
             rule_confidence += 0.05
         
-        # Store metadata about extraction
         parsed['extraction_method'] = 'rule_based'
         parsed['rule_confidence'] = min(0.7, rule_confidence)  # Cap at 0.7 for rule-based
         parsed['confidence_score'] = parsed['rule_confidence']  # Overall confidence equals rule confidence
         
         return parsed
     
+    def _extract_molecule_names_from_prompt(self, prompt: str) -> List[str]:
+        """
+        Extract potential molecule names from the prompt using context-aware detection.
+        Avoids matching common verbs and instructions.
+        Returns a list of candidate molecule names found.
+        """
+
+        exclude_words = {
+            'make', 'optimize', 'find', 'improve', 'generate', 'create', 'design',
+            'enumerate', 'maximize', 'minimize', 'increase', 'decrease', 'reduce',
+            'maintain', 'ensure', 'target', 'focus', 'explore', 'discover', 'search',
+            'starting', 'better', 'higher', 'lower', 'good', 'best', 'worst',
+            'molecule', 'compound', 'drug', 'chemical', 'analog', 'derivative',
+            'structure', 'smiles', 'property', 'properties', 'adme', 'bioavailability'
+        }
+        
+        candidates = []
+        lower_prompt = prompt.lower()
+        
+        common_drugs = [
+            'aspirin', 'caffeine', 'ibuprofen', 'paracetamol', 'acetaminophen',
+            'ciprofloxacin', 'metformin', 'warfarin', 'sildenafil', 'atorvastatin',
+            'omeprazole', 'metoprolol', 'fluoxetine', 'sertraline', 'diazepam',
+            'captopril', 'losartan', 'tamoxifen', 'methotrexate', 'taxol',
+            'propranolol', 'ranitidine', 'levothyroxine', 'ketoconazole', 'acyclovir',
+            'diclofenac', 'morphine', 'furosemide', 'astemizole', 'nicotine',
+            'indomethacin', 'ethanol', 'diphenhydramine', 'paclitaxel', 'vancomycin',
+            'cisplatin', 'doxorubicin', 'risperidone', 'amiodarone', 'chloroquine',
+            'tetracycline', 'cyclosporine', 'penicillin', 'cephalexin', 'cefuroxime',
+            'dasatinib', 'gefitinib', 'sorafenib', 'benzene', 'imatinib',
+            'venetoclax', 'aripiprazole', 'oseltamivir', 'erlotinib', 'vemurafenib',
+            'ritonavir', 'resveratrol', 'curcumin', 'epicatechin', 'quercetin',
+            'fentanyl', 'atenolol', 'celecoxib', 'erythromycin'
+        ]
+        
+        # check for known drugs in the prompt (most reliable)
+        for drug in common_drugs:
+            if drug in lower_prompt:
+                candidates.append(drug)
+        
+        # Look for capitalized words, but with context and exclusions
+        # Only consider words that appear after certain keywords
+        context_patterns = [
+            r'(?:starting from|start with|optimize|of)\s+([A-Z][a-z]{3,}[a-z]*)',
+            r'([A-Z][a-z]{3,}[a-z]*)\s+(?:analog|derivative|structure)',
+            r'improve\s+(?:the\s+)?([A-Z][a-z]{3,}[a-z]*)',
+        ]
+        
+        for pattern in context_patterns:
+            matches = re.findall(pattern, prompt)
+            for match in matches:
+                if match.lower() not in exclude_words:
+                    candidates.append(match)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_candidates = []
+        for name in candidates:
+            name_lower = name.lower()
+            if name_lower not in seen and name_lower not in exclude_words:
+                seen.add(name_lower)
+                unique_candidates.append(name)
+        
+        return unique_candidates
+        
+        return unique_candidates
+
     def validate_and_merge(self, llm_result: Optional[Dict[str, Any]], 
                           rule_result: Dict[str, Any], 
                           original_prompt: str) -> Dict[str, Any]:
         """
         Validate LLM results and merge with rule-based fallbacks.
-        Clearly tracks which extraction method was used and why.
+        Uses LLM-provided molecule names (provided_molecule_names) to verify SMILES via n2s().
+        This prevents LLM hallucinations by validating against authoritative chemical databases.
+        
+        Flow:
+        1. If LLM provides molecule names → verify via n2s() and use n2s() SMILES
+        2. If LLM provides SMILES directly (no names) → validate structure, use as-is
+        3. If validation fails → fall back to rule-based extraction
         """
         
         # Decision: Use rule-based if LLM failed or has very low confidence
@@ -385,7 +439,6 @@ Respond with valid JSON only.
             rule_result['fallback_reason'] = reason
             return rule_result
         
-        # Start with LLM result as base
         print(f"✓ Using LLM extraction (confidence: {llm_result.get('confidence_score', 0):.2f})")
         merged = llm_result.copy()
         merged['used_method'] = 'llm'
@@ -393,23 +446,82 @@ Respond with valid JSON only.
         # Track any supplements from rule-based
         supplements = []
         
-        # Validate and supplement SMILES
-        validated_smiles = []
-        for smiles in merged.get('starting_molecules', []):
-            if _is_likely_smiles(smiles):
-                validated_smiles.append(smiles)
-            else:
-                # Try to resolve molecule names
-                resolved = self._resolve_molecule_name(smiles)
-                if resolved:
-                    validated_smiles.append(resolved)
+
+        llm_provided_names = merged.get('provided_molecule_names', [])
         
-        # Add any SMILES found by rules that LLM missed
+        if llm_provided_names:
+            print(f"✓ LLM identified molecule names: {llm_provided_names}")
+            print(f"🔍 Verifying SMILES via n2s() database...")
+            
+            # get authoritative SMILES from PubChem
+            authoritative_smiles = []
+            failed_names = []
+            
+            for name in llm_provided_names:
+                resolved = self._resolve_molecule_name(name)
+                if resolved:
+                    authoritative_smiles.append(resolved)
+                    print(f"   ✓ {name} → {resolved[:50]}{'...' if len(resolved) > 50 else ''}")
+                else:
+                    failed_names.append(name)
+                    print(f"   ✗ Could not resolve '{name}' via n2s()")
+            
+            # Use n2s() results as ground truth
+            validated_smiles = authoritative_smiles
+            
+            # Check if LLM provided different SMILES (potential hallucination)
+            llm_smiles = merged.get('starting_molecules', [])
+            if llm_smiles and authoritative_smiles:
+
+                llm_smiles_set = set(llm_smiles)
+                auth_smiles_set = set(authoritative_smiles)
+                
+                if llm_smiles_set != auth_smiles_set:
+                    print(f"⚠️  LLM SMILES differs from n2s() database")
+                    print(f"   Using n2s() results as authoritative source")
+                    supplements.append("Verified SMILES via n2s() - replaced LLM SMILES with database values")
+                else:
+                    print(f"✓ LLM SMILES matches n2s() database - no hallucination detected")
+            
+            # If some names failed to resolve, try to use LLM SMILES for those
+            if failed_names and llm_smiles:
+                print(f"⚠️  Couldn't resolve {len(failed_names)} names via n2s(), using LLM SMILES as fallback")
+                for smiles in llm_smiles:
+                    if smiles not in validated_smiles and _is_likely_smiles(smiles):
+                        validated_smiles.append(smiles)
+                        supplements.append(f"Used LLM SMILES for unresolvable molecule name")
+        
+        else:
+            # No molecule names provided - user likely gave SMILES directly
+            print(f"ℹ️  No molecule names provided - assuming direct SMILES input")
+            validated_smiles = []
+            llm_smiles = merged.get('starting_molecules', [])
+            
+            for smiles in llm_smiles:
+                if _is_likely_smiles(smiles):
+                    validated_smiles.append(smiles)
+                    print(f"   ✓ Validated SMILES: {smiles[:50]}{'...' if len(smiles) > 50 else ''}")
+                else:
+                    # Not a valid SMILES - might be a molecule name that LLM missed
+                    print(f"⚠️  '{smiles}' doesn't look like SMILES, trying n2s()...")
+                    resolved = self._resolve_molecule_name(smiles)
+                    if resolved:
+                        validated_smiles.append(resolved)
+                        supplements.append(f"Resolved molecule name '{smiles}' to SMILES")
+                    else:
+                        print(f"   ✗ Could not resolve '{smiles}' - skipping")
+        
+        # Add any SMILES found by rules that weren't captured above
         rule_smiles_added = 0
         for smiles in rule_result.get('starting_molecules', []):
             if smiles not in validated_smiles:
                 validated_smiles.append(smiles)
                 rule_smiles_added += 1
+        
+        if rule_smiles_added > 0:
+            supplements.append(f"{rule_smiles_added} additional SMILES from rule-based extraction")
+            validated_smiles.append(smiles)
+            rule_smiles_added += 1
         
         if rule_smiles_added > 0:
             supplements.append(f"{rule_smiles_added} SMILES from rules")
@@ -484,7 +596,7 @@ Respond with valid JSON only.
                         # Ensure bounds is a tuple (not list) for consistency
                         prop['bounds'] = (float(lower), float(upper))
                 
-                # Add transformation if missing
+                # add transformation if missing
                 if not prop.get('transformation'):
                     if prop['optimization_mode'] == OptimizationMode.MATCH:
                         prop['transformation'] = "TRIANGULAR"
@@ -527,15 +639,39 @@ Respond with valid JSON only.
         return merged
     
     def _resolve_molecule_name(self, name: str) -> Optional[str]:
-        """Resolve common molecule names to SMILES."""
+        """
+        Resolve molecule names to SMILES using name_to_smiles service.
+        Falls back to hardcoded common molecules if service is unavailable.
+        """
+        # First try the name resolution service (PubChem-backed)
+        if _NAME_RESOLVER_AVAILABLE and n2s:
+            try:
+                print(f"🔍 Resolving molecule name: {name}")
+                smiles = n2s(name)
+                if smiles:
+                    print(f"✓ Resolved '{name}' to SMILES: {smiles}")
+                    return smiles
+                else:
+                    print(f"⚠️  Could not resolve '{name}' via name resolution service")
+            except Exception as e:
+                print(f"⚠️  Error resolving '{name}': {e}")
+        
         molecule_names = {
             'aspirin': 'CC(=O)OC1=CC=CC=C1C(=O)O',
             'caffeine': 'CN1C=NC2=C1C(=O)N(C(=O)N2C)C',
             'ibuprofen': 'CC(C)CC1=CC=C(C=C1)C(C)C(=O)O',
             'paracetamol': 'CC(=O)NC1=CC=C(C=C1)O',
-            'acetaminophen': 'CC(=O)NC1=CC=C(C=C1)O'
+            'acetaminophen': 'CC(=O)NC1=CC=C(C=C1)O',
+            'ciprofloxacin': 'C1CC1N2C=C(C(=O)C3=CC(=C(C=C32)N4CCNCC4)F)C(=O)O'
         }
-        return molecule_names.get(name.lower())
+        
+        resolved = molecule_names.get(name.lower())
+        if resolved:
+            print(f"✓ Resolved '{name}' from hardcoded dictionary: {resolved}")
+        else:
+            print(f"⚠️  Could not resolve molecule name: {name}")
+        
+        return resolved
 
     def _normalize_protein_list(self, proteins: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
         """Normalize protein entries ensuring valid sequences/IDs and unique chain IDs."""
@@ -608,8 +744,7 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
     Extract arguments using hybrid LLM + rule-based approach.
     """
     state.log("extract_arguments_started")
-    
-    # Initialize extractor
+
     extractor = HybridArgumentExtractor(llm_client=getattr(state, 'llm_client', None))
     
     # Try LLM extraction first
@@ -618,12 +753,10 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
     # Always run rule-based as fallback/validation
     rule_result = extractor.extract_with_rules(state.user_prompt)
     
-    # Validate and merge results
     final_result = extractor.validate_and_merge(llm_result, rule_result, state.user_prompt)
 
     print(f"\n🛠️  Final Extracted Arguments: {final_result}")
     
-    # Update state with extracted arguments
     state.parsed_arguments = final_result
     state.starting_molecules = final_result.get('starting_molecules', [])
 
@@ -682,15 +815,12 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
 
     final_result['target_properties'] = target_dicts
 
-    # Set molecule source
     if final_result.get('molecule_source'):
         state.molecule_source = MoleculeSource(final_result['molecule_source'])
     
-    # Set iteration limit
     if final_result.get('max_iterations'):
         state.max_iterations = final_result['max_iterations']
     
-    # Build detailed confidence report
     method = final_result.get('extraction_method', 'unknown')
     confidence = final_result.get('confidence_score', 0)
     

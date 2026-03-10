@@ -1,4 +1,5 @@
 from typing import Optional, Type, Dict, List, Any
+import time
 from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
 from rdkit import Chem
@@ -22,6 +23,7 @@ class MoleculeCharacterizationTool(BaseTool):
              ids_to_process: List[str],
         ) -> str:
         """Run molecule characterization for a list of molecules."""
+        started_at = time.perf_counter()
         
         errors: List[str] = []
         results: Dict[str, Dict[str, float]] = {}
@@ -56,6 +58,12 @@ class MoleculeCharacterizationTool(BaseTool):
 
             except Exception as e:
                 errors.append(f"{mol_id}: {e}")
+
+        elapsed = time.perf_counter() - started_at
+        print(
+            f"MoleculeCharacterizationTool processed {len(ids_to_process)} molecules "
+            f"in {elapsed:.2f}s (success={len(results)}, errors={len(errors)})."
+        )
 
         return results
 

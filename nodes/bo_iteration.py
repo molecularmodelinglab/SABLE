@@ -3,6 +3,7 @@ Bayesian Optimization iteration node.
 """
 
 from typing import Dict, Any, List
+import time
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -11,7 +12,6 @@ from schemas.state import WorkflowState
 from schemas.errors import NodeError, ToolError
 from utils.telemetry import emit_event
 from tools.bayesopt_tool import BayesianOptimizationTool, BAYBE_AVAILABLE
-
 
 def bo_iteration_node(state: WorkflowState) -> Dict[str, Any]:
     """
@@ -23,6 +23,12 @@ def bo_iteration_node(state: WorkflowState) -> Dict[str, Any]:
     print(f"   - Status: {state.status}")
     print(f"   - Should continue: {state.should_continue()}")
 
+    node_started_at = time.perf_counter()
+    state.profiling.setdefault("iteration_timers", {})
+    state.profiling["iteration_timers"].setdefault(str(state.current_iteration), {
+        "started_at": time.time()
+    })
+
     state.log("bo_iteration_started", {
         "iteration": state.current_iteration,
         "search_space_size": len(state.search_space)
@@ -32,32 +38,14 @@ def bo_iteration_node(state: WorkflowState) -> Dict[str, Any]:
         emit_event(state, kind="no_search_space", node="bo_iteration", severity="error")
         raise NodeError("No search space available for BO iteration", node="bo_iteration", code="EMPTY_SEARCH_SPACE")
 
-    # Fallback path if BayBE is unavailable
+    # Require BayBE to be available
     if not BAYBE_AVAILABLE:
-        import random
-        batch_size = state.bo_config.batch_size if state.bo_config else 5
-        available_ids = list(state.search_space.keys())
-
-        # Filter out already tested molecules
-        tested_smiles = {r.smiles for r in state.experimental_results}
-        available_ids = [
-            mol_id for mol_id in available_ids
-            if state.search_space[mol_id] not in tested_smiles
-        ]
-
-        if not available_ids:
-            raise NodeError("No available molecules remain for selection", node="bo_iteration", code="NO_CANDIDATES")
-
-        selected_ids = random.sample(
-            available_ids,
-            min(batch_size, len(available_ids))
+        emit_event(state, kind="baybe_unavailable", node="bo_iteration", severity="error")
+        raise NodeError(
+            "BayBE library is not available. Bayesian Optimization requires BayBE to be installed.",
+            node="bo_iteration",
+            code="BAYBE_UNAVAILABLE"
         )
-
-        state.current_bo_recommendations = selected_ids
-        state.log("bo_iteration_fallback", {
-            "method": "random_selection",
-            "selected_count": len(selected_ids)
-        })
 
     else:
         bo_tool = BayesianOptimizationTool()
@@ -79,7 +67,7 @@ def bo_iteration_node(state: WorkflowState) -> Dict[str, Any]:
             result = bo_tool._run(
                 targets=state.targets,
                 batch_size=state.bo_config.batch_size if state.bo_config else 5,
-                encoding=state.bo_config.encoding if state.bo_config else "MORDRED",
+                encoding=state.bo_config.encoding if state.bo_config else os.getenv("MOLECULAR_FP", "MORDRED"),
                 measurement_data=measurement_data if measurement_data else None,
                 search_space=state.search_space,
             )
@@ -93,8 +81,19 @@ def bo_iteration_node(state: WorkflowState) -> Dict[str, Any]:
                 tested_smiles = {r.smiles for r in state.experimental_results}
                 valid_ids = [mid for mid in result if mid in state.search_space and state.search_space[mid] not in tested_smiles]
                 if not valid_ids:
-                    emit_event(state, kind="no_bo_recommendations", node="bo_iteration", severity="error")
-                    raise NodeError("BO returned no valid recommendations", node="bo_iteration", code="NO_RECOMMENDATIONS")
+                    # Gracefully end the campaign instead of raising an error
+                    emit_event(state, kind="no_bo_recommendations", node="bo_iteration", severity="warning")
+                    state.status = "completed"
+                    state.exit_reason = "NO_RECOMMENDATIONS"
+                    state.current_bo_recommendations = []
+                    state.log("bo_iteration_no_recommendations", {
+                        "message": "BO returned no valid recommendations. Ending campaign gracefully.",
+                        "iteration": state.current_iteration,
+                        "total_tested": len(state.experimental_results)
+                    })
+                    print(f"⚠️  No valid BO recommendations available. Ending campaign gracefully.")
+                    print(f"   Total molecules tested: {len(state.experimental_results)}")
+                    return state
 
                 state.current_bo_recommendations = valid_ids
 
@@ -107,7 +106,8 @@ def bo_iteration_node(state: WorkflowState) -> Dict[str, Any]:
 
                 state.log("bo_iteration_completed", {
                     "recommended_ids": valid_ids,
-                    "recommendation_count": len(valid_ids)
+                    "recommendation_count": len(valid_ids),
+                    "elapsed_seconds": round(time.perf_counter() - node_started_at, 3),
                 })
             else:
                 # Unexpected type
@@ -119,18 +119,17 @@ def bo_iteration_node(state: WorkflowState) -> Dict[str, Any]:
                 )
         except ToolError:
             raise
+        except NodeError as e:
+            # If it's a NodeError from within our try block, re-raise it
+            # (This shouldn't happen anymore since we handle NO_RECOMMENDATIONS gracefully above)
+            raise
         except Exception as e:
-            # Last-resort fallback: random selection
             emit_event(state, kind="bo_exception", node="bo_iteration", severity="error", data={"error": str(e)})
-            import random
-            batch_size = state.bo_config.batch_size if state.bo_config else 5
-            available_ids = list(state.search_space.keys())
-            tested_smiles = {r.smiles for r in state.experimental_results}
-            available_ids = [mid for mid in available_ids if state.search_space[mid] not in tested_smiles]
-            if not available_ids:
-                raise NodeError("No available molecules remain after exception fallback", node="bo_iteration", code="NO_CANDIDATES")
-            selected_ids = random.sample(available_ids, min(batch_size, len(available_ids)))
-            state.current_bo_recommendations = selected_ids
+            raise NodeError(
+                f"Bayesian Optimization failed: {str(e)}",
+                node="bo_iteration",
+                code="BO_EXCEPTION"
+            )
 
     print(f"🔍 EXITING NODE: {bo_iteration_node.__name__}")
     print(f"   - New iteration: {state.current_iteration}")

@@ -5,6 +5,7 @@ Includes state persistence and checkpointing.
 
 import json
 import pickle
+import time
 from datetime import datetime
 from typing import Optional, Any
 from pathlib import Path
@@ -57,11 +58,18 @@ class WorkflowRunner:
         
         # Temporarily remove llm_client before pickling (it's not serializable)
         llm_client_backup = None
+        event_callback_backup = None
         if isinstance(state, dict):
             llm_client_backup = state_dict.pop('llm_client', None)
+            event_callback_backup = state_dict.pop('_event_callback', None)
         else:
             llm_client_backup = getattr(state, 'llm_client', None)
             state.llm_client = None
+            try:
+                event_callback_backup = getattr(state, '_event_callback', None)
+                setattr(state, '_event_callback', None)
+            except Exception:
+                event_callback_backup = None
         
         try:
             with open(checkpoint_path, 'wb') as f:
@@ -71,9 +79,15 @@ class WorkflowRunner:
             if isinstance(state, dict):
                 if llm_client_backup is not None:
                     state_dict['llm_client'] = llm_client_backup
+                if event_callback_backup is not None:
+                    state_dict['_event_callback'] = event_callback_backup
             else:
                 state.llm_client = llm_client_backup
-        
+                try:
+                    if event_callback_backup is not None:
+                        setattr(state, '_event_callback', event_callback_backup)
+                except Exception:
+                    pass
         json_path = self.checkpoint_dir / f"{checkpoint_name}.json"
         with open(json_path, 'w') as f:
             # Create a JSON-safe copy without llm_client and event_callback
@@ -102,7 +116,6 @@ class WorkflowRunner:
         with open(checkpoint_path, 'rb') as f:
             state = pickle.load(f)
         
-        # Reinitialize LLM client after loading (it wasn't serialized)
         print("Reinitializing LLM client...")
         state.llm_client = get_llm_client()
         if state.llm_client:
@@ -141,7 +154,6 @@ class WorkflowRunner:
             state = WorkflowState(user_prompt=user_prompt)
             print(f"Starting new workflow: {state.workflow_id}")
             
-            # Initialize LLM client for argument extraction
             print("Initializing LLM client...")
             state.llm_client = get_llm_client()
             if state.llm_client:
@@ -162,8 +174,9 @@ class WorkflowRunner:
             cleanup_workflow_id = state.workflow_id
         
         try:
+            workflow_started_at = time.perf_counter()
             config = {
-                "recursion_limit": 50,
+                "recursion_limit": 50000,
                 "debug": True
             }
             result = self.graph.invoke(state, config=config)
@@ -173,7 +186,15 @@ class WorkflowRunner:
             elif isinstance(result, dict) and "status" in result:
                 final_state = WorkflowState(**result)
 
-            # Save final checkpoint
+            workflow_elapsed = round(time.perf_counter() - workflow_started_at, 3)
+            final_state.profiling.setdefault("workflow", {})
+            final_state.profiling["workflow"]["elapsed_seconds"] = workflow_elapsed
+            final_state.log("workflow_timing", {
+                "elapsed_seconds": workflow_elapsed,
+                "iterations_completed": final_state.current_iteration,
+            })
+            print(f"⏱️  Workflow completed in {workflow_elapsed:.2f}s")
+
             if save_checkpoints:
                 self.save_checkpoint(final_state, f"{final_state.workflow_id}_final")
             
@@ -190,7 +211,6 @@ class WorkflowRunner:
             print(f"Error Message: {e}")
             print(f"Error Code: {getattr(e, 'code', 'N/A')}")
             
-            # Print workflow context for debugging
             print(f"\n📋 Workflow Context at Failure:")
             print(f"   Workflow ID: {state.workflow_id}")
             print(f"   Status: {state.status}")
@@ -226,7 +246,6 @@ class WorkflowRunner:
             state.status = "failed"
             state.exit_reason = getattr(e, "code", None) or str(e)
             
-            # Enhanced error logging with full context
             error_context = {
                 "error_type": type(e).__name__,
                 "error_message": str(e),
@@ -253,7 +272,6 @@ class WorkflowRunner:
             state.status = "failed"
             state.exit_reason = str(e)
             
-            # Save error checkpoint
             if save_checkpoints:
                 self.save_checkpoint(state, f"{state.workflow_id}_error")
             
@@ -336,7 +354,6 @@ def main():
     
     args = parser.parse_args()
     
-    # Handle example mode
     if args.example:
         prompt = "Optimize aspirin for better QED. Enumerate 50 analogs and run 5 iterations of optimization."
         print(f"Running example: {prompt}")

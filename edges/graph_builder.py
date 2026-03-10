@@ -16,7 +16,7 @@ from nodes.enumerate_molecules import enumerate_molecules_node
 from nodes.bo_iteration import bo_iteration_node
 from nodes.decide_characterization import decide_characterization_node
 from nodes.characterize_molecules import characterize_molecules_node
-from nodes.llm_experiment import llm_experiment_node
+# from nodes.llm_experiment import llm_experiment_node
 from nodes.check_exit_conditions import check_exit_conditions_node
 from nodes.summarize_results import summarize_results_node
 
@@ -79,21 +79,19 @@ def build_molecular_graph() -> StateGraph:
 
     graph = StateGraph(WorkflowState)
     
-    # graph.add_node("extract_arguments", extract_arguments_node)
     graph.add_node("extract_arguments", extract_arguments_hybrid_node)
     graph.add_node("setup", setup_node)
     graph.add_node("enumerate_molecules", enumerate_molecules_node)
     graph.add_node("bo_iteration", bo_iteration_node)
     graph.add_node("decide_characterization", decide_characterization_node)
     graph.add_node("characterize_molecules", characterize_molecules_node)
-    graph.add_node("llm_experiment", llm_experiment_node)
+    # graph.add_node("llm_experiment", llm_experiment_node)
     graph.add_node("check_exit_conditions", check_exit_conditions_node)
     graph.add_node("summarize_results", summarize_results_node)
     
 
     graph.add_edge("extract_arguments", "setup")
     
-    # After setup, enumerate molecules ONCE or skip if external library
     graph.add_conditional_edges(
         "setup",
         route_after_setup,
@@ -113,12 +111,12 @@ def build_molecular_graph() -> StateGraph:
         route_characterization_choice,
         {
             "characterize_molecules": "characterize_molecules",
-            "llm_experiment": "llm_experiment"  # Alternative path for future
+            # "llm_experiment": "llm_experiment"  # Alternative path for future
         }
     )
     
     graph.add_edge("characterize_molecules", "check_exit_conditions")
-    graph.add_edge("llm_experiment", "check_exit_conditions")
+    # graph.add_edge("llm_experiment", "check_exit_conditions")
     
     graph.add_conditional_edges(
         "check_exit_conditions",

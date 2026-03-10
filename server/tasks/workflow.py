@@ -1,15 +1,10 @@
-"""Background execution of molecular optimization runs."""
-
-from __future__ import annotations
-
 import os
-import platform
-import subprocess
 import threading
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, Optional
+from pathlib import Path
 
+from celery import shared_task
 from sqlalchemy.orm.exc import DetachedInstanceError
 
 from server.audit import AuditEventType, AuditSeverity, audit_logger
@@ -22,44 +17,13 @@ from server.services.run_service import run_service
 from server.storage import results_json_path, summary_txt_path, run_dir
 from run_workflow import WorkflowRunner
 
-
-def start_run(run_id: str) -> None:
-    """Launch workflow execution as a background task."""
-    from server.tasks.workflow import run_workflow_task
+@shared_task(bind=True, name="server.tasks.workflow.run_workflow")
+def run_workflow_task(self, run_id: str) -> None:
+    """Execute a workflow run as a Celery task."""
     
-    # Submit to Celery
-    run_workflow_task.delay(run_id)
-
-
-def get_environment_info() -> Dict[str, str]:
-    """Collect environment information for reproducibility."""
-
-    def get_git_commit() -> Optional[str]:
-        try:
-            result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                cwd=Path(__file__).parent.parent.parent,
-            )
-            if result.returncode == 0:
-                return result.stdout.strip()
-        except Exception:
-            return None
-        return None
-
-    return {
-        "python_version": platform.python_version(),
-        "platform": platform.platform(),
-        "processor": platform.processor(),
-        "hostname": platform.node(),
-        "git_commit": get_git_commit() or "unknown",
-    }
-
-
-def _run_workflow_background(run_id: str) -> None:
-    """Execute a workflow run and manage lifecycle side-effects."""
-
+    # We can use the task ID as a correlation ID if needed
+    task_id = self.request.id
+    
     with get_db_context() as db:
         run_model = run_service.get_run(db, run_id)
         if not run_model:
@@ -67,8 +31,6 @@ def _run_workflow_background(run_id: str) -> None:
 
         metadata = run_model.extra_metadata or {}
         experiment_id = metadata.get("experiment_id")
-        max_iterations = metadata.get("max_iterations")
-        batch_size = metadata.get("batch_size")
         paths: Dict[str, str] = metadata.get("paths", {}) if isinstance(metadata, dict) else {}
 
         user_id = str(run_model.user_id)
@@ -86,7 +48,8 @@ def _run_workflow_background(run_id: str) -> None:
 
     experiment = experiment_logger.get_experiment(experiment_id) if experiment_id else None
     if experiment:
-        experiment.environment = get_environment_info()
+        # TODO: Add worker environment info
+        # experiment.environment = get_environment_info() 
         experiment_logger.update_experiment(experiment)
 
     environment = os.getenv("ENVIRONMENT", "development").lower()
@@ -98,12 +61,12 @@ def _run_workflow_background(run_id: str) -> None:
 
     audit_logger.log(
         event_type=AuditEventType.EXPERIMENT_STARTED,
-        message=f"Started experiment {experiment_id} for run {run_id}",
+        message=f"Started experiment {experiment_id} for run {run_id} (Task {task_id})",
         user_id=user_id,
         username=username,
         experiment_id=experiment_id,
         run_id=run_id,
-        details={"prompt": prompt},
+        details={"prompt": prompt, "task_id": task_id},
     )
 
     if environment == "testing":
@@ -142,6 +105,23 @@ def _run_workflow_background(run_id: str) -> None:
 
     runner = WorkflowRunner(checkpoint_dir=str(run_dir(run_id) / "checkpoints"))
 
+    # Check for existing checkpoints to resume
+    checkpoint_path = None
+    try:
+        checkpoints = list(runner.checkpoint_dir.glob("*.pkl"))
+        if checkpoints:
+            latest_checkpoint = max(checkpoints, key=lambda p: p.stat().st_mtime)
+            checkpoint_path = str(latest_checkpoint)
+            
+            audit_logger.log(
+                event_type=AuditEventType.SYSTEM_EVENT,
+                message=f"Resuming run {run_id} from checkpoint {latest_checkpoint.name}",
+                severity=AuditSeverity.INFO,
+                details={"checkpoint": str(latest_checkpoint)}
+            )
+    except Exception as e:
+        print(f"Error finding checkpoints: {e}")
+
     def emit(event: Dict[str, Any]) -> None:
         run_event_hub.append_log(run_id, event)
 
@@ -176,7 +156,7 @@ def _run_workflow_background(run_id: str) -> None:
     try:
         state = runner.run(
             user_prompt=prompt,
-            checkpoint_path=None,
+            checkpoint_path=checkpoint_path,
             save_checkpoints=True,
             event_callback=emit,
             run_paths=paths or None,
@@ -281,5 +261,5 @@ def _notify_capacity_available(run_id: str) -> None:
 
         run_scheduler.on_run_finished(run_id)
     except Exception:
-        # Scheduler notifications are best-effort
+        # scheduler notifications are best-effort
         return

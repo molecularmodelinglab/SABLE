@@ -4,14 +4,19 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   API_BASE,
   deleteRun,
+  generateRunPlots,
   getCheckpoints,
   getRun,
   getRunLogs,
+  getRunPlotUrl,
   getRunResults,
   getRunSummary,
   getAccessToken,
+  listRunPlots,
   type RunEvent,
+  type GenerateRunPlotsResponse,
   type RunInfo,
+  type RunPlotArtifact,
   type RunResults,
 } from '../api'
 import { useEventStream } from '../hooks/useEventStream'
@@ -75,6 +80,7 @@ export function RunDetailPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<TabKey>('overview')
+  const [selectedPlotPath, setSelectedPlotPath] = useState<string | null>(null)
   const apiBase = useMemo(() => API_BASE.replace(/\/$/, ''), [])
 
   const { data: run, isLoading, isError } = useQuery<RunInfo>({
@@ -112,6 +118,13 @@ export function RunDetailPage() {
     refetchInterval: 60000,
   })
 
+  const plotsQuery = useQuery<RunPlotArtifact[]>({
+    queryKey: ['run', id, 'plots'],
+    queryFn: () => listRunPlots(id as string),
+    enabled: Boolean(id),
+    refetchInterval: 60000,
+  })
+
   const mutation = useMutation({
     mutationFn: () => deleteRun(id as string),
     onSuccess: () => {
@@ -120,11 +133,30 @@ export function RunDetailPage() {
     },
   })
 
+  const generatePlotsMutation = useMutation<GenerateRunPlotsResponse, Error, string>({
+    mutationFn: (runId: string) => generateRunPlots(runId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['run', id, 'plots'] })
+    },
+  })
+
   const liveEvents = useEventStream(id)
 
   useEffect(() => {
     setActiveTab('overview')
+    setSelectedPlotPath(null)
   }, [id])
+
+  useEffect(() => {
+    if (!plotsQuery.data || !plotsQuery.data.length) {
+      setSelectedPlotPath(null)
+      return
+    }
+
+    if (!selectedPlotPath || !plotsQuery.data.some((plot) => plot.path === selectedPlotPath)) {
+      setSelectedPlotPath(plotsQuery.data[0].path)
+    }
+  }, [plotsQuery.data, selectedPlotPath])
 
   const mergedEvents = useMemo(() => {
     const combined = [...(logsQuery.data || []), ...liveEvents]
@@ -151,6 +183,10 @@ export function RunDetailPage() {
   const numericKeys = useMemo(() => numericEntries.map(([key]) => key).filter((k) => !k.startsWith('metadata')), [numericEntries])
   const columns = useMemo(() => buildColumns(numericKeys), [numericKeys])
   const chartSeries = useMemo(() => numericEntries.filter(([key]) => !key.startsWith('metadata')).slice(0, 6), [numericEntries])
+  const selectedPlot = useMemo(
+    () => plotsQuery.data?.find((plot) => plot.path === selectedPlotPath) ?? null,
+    [plotsQuery.data, selectedPlotPath]
+  )
 
   if (isLoading) {
     return <div className="run-detail__placeholder">Loading run...</div>
@@ -365,6 +401,75 @@ export function RunDetailPage() {
               ))
             ) : (
               <div className="distribution-chart__empty">No numeric metrics detected yet.</div>
+            )}
+          </div>
+
+          <div className="run-detail__visualization-section">
+            <h3>Workflow plots</h3>
+            <div className="run-detail__plot-toolbar">
+              <button
+                className="primary"
+                disabled={!id || generatePlotsMutation.isPending}
+                onClick={() => {
+                  if (!id) return
+                  generatePlotsMutation.mutate(id)
+                }}
+              >
+                {generatePlotsMutation.isPending ? 'Generating…' : 'Generate extended plots'}
+              </button>
+            </div>
+            {generatePlotsMutation.isError ? (
+              <div className="distribution-chart__empty">Failed to generate plots: {generatePlotsMutation.error.message}</div>
+            ) : null}
+            {plotsQuery.isLoading ? (
+              <div>Discovering generated plots…</div>
+            ) : plotsQuery.data && plotsQuery.data.length ? (
+              <>
+                <div className="run-detail__plot-toolbar">
+                  <select
+                    value={selectedPlotPath ?? ''}
+                    onChange={(event) => setSelectedPlotPath(event.target.value || null)}
+                  >
+                    {plotsQuery.data.map((plot) => (
+                      <option key={plot.path} value={plot.path}>
+                        {plot.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="ghost"
+                    disabled={!id || !selectedPlot}
+                    onClick={() => {
+                      if (!id || !selectedPlot) return
+                      window.open(getRunPlotUrl(id, selectedPlot.path), '_blank', 'noopener,noreferrer')
+                    }}
+                  >
+                    Open in new tab
+                  </button>
+                  <button
+                    className="ghost"
+                    disabled={!id || !selectedPlot}
+                    onClick={async () => {
+                      if (!id || !selectedPlot) return
+                      await downloadFile(getRunPlotUrl(id, selectedPlot.path), selectedPlot.name)
+                    }}
+                  >
+                    Download plot
+                  </button>
+                </div>
+                {selectedPlot && id ? (
+                  <iframe
+                    key={selectedPlot.path}
+                    title={selectedPlot.name}
+                    className="run-detail__plot-frame"
+                    src={getRunPlotUrl(id, selectedPlot.path)}
+                  />
+                ) : null}
+              </>
+            ) : (
+              <div className="distribution-chart__empty">
+                No workflow plot HTML files found yet. Save utility output under run <code>results/plots</code> or <code>artifacts/plots</code>.
+              </div>
             )}
           </div>
         </div>
