@@ -538,6 +538,118 @@ def plot_prop_vs_iteration(obs_df: pd.DataFrame, prop: str, kind: str = "box",
     return fig
 
 
+def plot_bestN_so_far_box(
+    obs_df: pd.DataFrame,
+    prop: str,
+    *,
+    directions: dict[str, str] | None = None,
+    batch_size: int | None = None,
+    min_n: int = 0,
+    space_df: pd.DataFrame | None = None,
+    show_points: bool = True,
+) -> go.Figure:
+    """
+    For each iteration t, build a boxplot of the best-N molecules *so far* (using all data with iter<=t).
+    - N defaults to batch_size (caller should pass raw['parsed_arguments']['batch_size'])
+    - effective_N = max(batch_size, min_n)
+    - direction-aware: MAX => top-N largest; MIN => top-N smallest
+    """
+
+    directions = directions or {}
+    mode = (directions.get(_norm_key(prop), "max") or "max").lower()
+
+    base_cols = ["molecule_id", "iteration", "smiles", prop, "image_svg"]
+    df0 = obs_df.loc[obs_df[prop].notna(), base_cols].copy()
+    df0["iteration"] = df0["iteration"].astype(int)
+
+    if df0.empty:
+        # empty figure, consistent styling
+        fig = go.Figure()
+        fig.update_layout(
+            title=f"{direction_label(prop, directions)} | best-N-so-far (empty)",
+            xaxis_title="Iteration",
+            yaxis_title=prop,
+            xaxis=dict(type="category"),
+        )
+        return fig
+
+    # compute N
+    bs = int(batch_size) if batch_size is not None else 0
+    N = max(bs, int(min_n))
+
+    iters = sorted(df0["iteration"].unique())
+    rows = []
+
+    for t in iters:
+        sub = df0[df0["iteration"] <= t]
+        if sub.empty:
+            continue
+
+        # best row per molecule -- avoids duplicates if molecule is re-tested
+        if mode == "min":
+            idx = sub.groupby("molecule_id")[prop].idxmin()
+            best_rows = sub.loc[idx].copy()
+            best_rows = best_rows.nsmallest(N, prop) if N > 0 else best_rows
+        else:
+            idx = sub.groupby("molecule_id")[prop].idxmax()
+            best_rows = sub.loc[idx].copy()
+            best_rows = best_rows.nlargest(N, prop) if N > 0 else best_rows
+
+        best_rows["iter_box"] = t  # x-axis category -- current iteration
+        rows.append(best_rows)
+
+    boxdf = pd.concat(rows, ignore_index=True)
+
+    # payload + hover (keep your click script working)
+    boxdf["_payload"] = boxdf.apply(lambda r: {
+        "id": r["molecule_id"],
+        "iter": int(r["iter_box"]),  # show the iteration whose box you clicked
+        "smiles": r["smiles"],
+        "img": r["image_svg"],
+        "props": {prop: float(r[prop]) if pd.notna(r[prop]) else None},
+    }, axis=1)
+
+    def _add_hover(p, best_eval_iter: int) -> dict:
+        h = make_hover_string(p["id"], p["iter"], p["smiles"], p["props"], directions)
+        # show which iteration produced the current best value (often <= iter_box)
+        h = h + f"<br>best_eval_iter={best_eval_iter}"
+        return {**p, "hover": h}
+
+    boxdf["_payload"] = [
+        _add_hover(p, int(best_it))
+        for p, best_it in zip(boxdf["_payload"].tolist(), boxdf["iteration"].tolist())
+    ]
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Box(
+        x=boxdf["iter_box"].astype(str),
+        y=boxdf[prop],
+        name=f"best-{N}-so-far" if N > 0 else "best-so-far",
+        boxpoints="all" if show_points else False,
+        jitter=0.25,
+        pointpos=0,
+        customdata=boxdf[["_payload"]].to_numpy(),
+        hovertemplate="%{customdata[0].hover}<extra></extra>",
+    ))
+
+    # global min/max reference (same convention as your other plots)
+    if space_df is not None and prop in space_df.columns:
+        gmin = float(pd.to_numeric(space_df[prop], errors="coerce").min(skipna=True))
+        gmax = float(pd.to_numeric(space_df[prop], errors="coerce").max(skipna=True))
+        fig.add_hline(y=gmin, line_dash="dash", annotation_text="global min", annotation_position="bottom left")
+        fig.add_hline(y=gmax, line_dash="dash", annotation_text="global max", annotation_position="top left")
+
+    fig.update_layout(
+        title=f"{direction_label(prop, directions)} | best-{N}-so-far box vs iteration" if N > 0
+              else f"{direction_label(prop, directions)} | best-so-far box vs iteration",
+        xaxis_title="Iteration",
+        yaxis_title=prop,
+        xaxis=dict(type="category"),
+    )
+    return fig
+
+
 def plot_tsne_space(space_df: pd.DataFrame,
                     obs_df: pd.DataFrame,
                     opt_props: list[str],
@@ -1209,6 +1321,7 @@ def plot_from_raw(
     dist_kind: str = "box",
     tsne_perplexity: int = 30,
     tsne_random_state: int = 0,
+    bestN_min_n: int = 15,
     generate_images: bool = False,
 ) -> dict[str, Any]:
     """
@@ -1223,6 +1336,7 @@ def plot_from_raw(
     - dist_kind: the kind of distance plot to make, either "box" or "violin"
     - tsne_perplexity: perplexity parameter for t-SNE chemical space plot
     - tsne_random_state: random state for t-SNE embedding
+    - bestN_min_n: minimum N to show in the best-N-so-far box plot (default 15)
     - generate_images: whether to generate SVG images for molecules (can slow down plotting and increase output size)
 
     Returns:
@@ -1234,6 +1348,7 @@ def plot_from_raw(
     - "obs_df": the processed observations DataFrame
     - "space_df": the processed search space DataFrame
     - "allow_global_extrema": whether global extrema are allowed based on the tools used
+    - "batch_size": the batch size used in the workflow
     """
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -1243,6 +1358,8 @@ def plot_from_raw(
 
     directions = get_opt_directions(raw)
     opt_props = list(directions.keys())
+
+    batch_size = int(raw["parsed_arguments"]["batch_size"])
 
     obs_df = build_observations_df(raw)
     space_df = build_search_space_df(raw)
@@ -1311,6 +1428,17 @@ def plot_from_raw(
         prog = compute_objective_progress(obs_df, extrema_space_df, p, directions[_norm_key(p)])
         _write(plot_objective_progress(prog, p, directions[_norm_key(p)], space_df=extrema_space_df), f"progress_{p}")
 
+        fig = plot_bestN_so_far_box(
+            obs_df,
+            prop=p,
+            directions=directions,
+            batch_size=batch_size,
+            min_n=bestN_min_n,
+            space_df=extrema_space_df,
+            show_points=True,
+        )
+        _write(fig, f"bestN_sofar_box_{p}", post_script=HTML_POST_SCRIPT)
+
     # --- Pair plots (if >=2 objectives) ---
     if len(opt_props) >= 2:
         for i in range(len(opt_props)):
@@ -1356,6 +1484,7 @@ def plot_from_raw(
         "obs_df": obs_df,
         "space_df": space_df,
         "allow_global_extrema": allow_global_extrema,
+        "batch_size": batch_size,
     }
 
 
@@ -1367,6 +1496,7 @@ def main() -> None:
     ap.add_argument("--dist_kind", default="box", choices=["box", "violin"])
     ap.add_argument("--tsne_perplexity", type=int, default=30)
     ap.add_argument("--tsne_random_state", type=int, default=0)
+    ap.add_argument("--bestN_min_n", type=int, default=15)
     ap.add_argument("--generate_images", action="store_true",
                     help="If set, generate RDKit SVG depictions.")
     args = ap.parse_args()
@@ -1378,6 +1508,7 @@ def main() -> None:
         dist_kind=args.dist_kind,
         tsne_perplexity=args.tsne_perplexity,
         tsne_random_state=args.tsne_random_state,
+        bestN_min_n=args.bestN_min_n,
         generate_images=args.generate_images,
     )
     
