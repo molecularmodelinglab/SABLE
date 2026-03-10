@@ -73,6 +73,20 @@ export type RunEvent = {
 
 export type RunResults = unknown
 
+export type RunPlotArtifact = {
+  name: string
+  path: string
+  size_bytes: number
+}
+
+export type GenerateRunPlotsResponse = {
+  generated: boolean
+  workflow_id?: string
+  checkpoint: string
+  output_dir: string
+  plot_count: number
+}
+
 async function request<T>(path: string, init?: RequestInit, parse: 'json' | 'text' = 'json'): Promise<T> {
   const headers = new Headers(init?.headers || {})
   
@@ -145,6 +159,37 @@ export async function getRunSummary(id: string): Promise<string | null> {
   } catch (error) {
     return null
   }
+}
+
+export async function listRunPlots(id: string): Promise<RunPlotArtifact[]> {
+  try {
+    const data = await request<{ plots: RunPlotArtifact[] }>(`/runs/${id}/artifacts/plots`)
+    return data.plots
+  } catch (error) {
+    return []
+  }
+}
+
+export function getRunPlotUrl(id: string, plotPath: string): string {
+  const base = API_BASE.replace(/\/$/, '')
+  const encodedPath = plotPath
+    .split('/')
+    .filter(Boolean)
+    .map((part) => encodeURIComponent(part))
+    .join('/')
+
+  const url = new URL(`${base}/runs/${id}/artifacts/plots/${encodedPath}`)
+  const token = getAccessToken()
+  if (token) {
+    url.searchParams.set('access_token', token)
+  }
+  return url.toString()
+}
+
+export async function generateRunPlots(id: string): Promise<GenerateRunPlotsResponse> {
+  return request<GenerateRunPlotsResponse>(`/runs/${id}/artifacts/plots/generate`, {
+    method: 'POST',
+  })
 }
 
 export async function getRunLogs(id: string, limit = 500): Promise<RunEvent[]> {
