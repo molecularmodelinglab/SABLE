@@ -129,3 +129,4 @@ httpx==0.28.1
 openai==2.8.1
 mol-healer==0.1.1
 aiohttp==3.13.3
+plotly
