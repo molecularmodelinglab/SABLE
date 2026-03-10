@@ -616,6 +616,26 @@ button.danger:disabled {
   color: #1f2937;
 }
 
+.run-detail__plot-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.run-detail__plot-toolbar select {
+  min-width: 320px;
+  max-width: 100%;
+}
+
+.run-detail__plot-frame {
+  width: 100%;
+  min-height: 680px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 12px;
+  background: #fff;
+}
+
 .run-detail__charts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
