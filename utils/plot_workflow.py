@@ -18,7 +18,14 @@ from rdkit.Chem.Draw import rdMolDraw2D
 _FPGEN = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
 PROPERTY_UNITS = {
   # Fill in as needed
-  "binding_affinity": "-logIC50",
+  "binding_affinity": "logIC50",
+}
+
+# Plotly modebar export settings for generated HTML plots.
+PLOTLY_HTML_CONFIG = {
+    "toImageButtonOptions": {
+        "format": "svg",
+    }
 }
 
 
@@ -655,6 +662,13 @@ def plot_bestN_so_far_box(
         xaxis_title="Iteration",
         yaxis_title=label_with_unit(prop),
         xaxis=dict(type="category"),
+        legend=dict(
+            x=0.99,
+            y=0.99,
+            xanchor="right",
+            yanchor="top",
+            bgcolor="rgba(255,255,255,0.7)",
+        ),
     )
     return fig
 
@@ -1436,13 +1450,32 @@ def add_starting_hlines(
     Adds one red dotted hline per starting molecule (when value is available).
     """
     smi_to_v = starting_value_map(prop, starting_smiles, space_df=space_df, obs_df=obs_df, directions=directions)
+    if not smi_to_v:
+        return
+
+    # Shapes from add_hline do not appear in legends, so add a dummy line trace once.
+    has_starting_score_legend = any(getattr(tr, "name", None) == "starting score" for tr in fig.data)
+    if not has_starting_score_legend:
+        legend_trace = go.Scatter(
+            x=[None],
+            y=[None],
+            mode="lines",
+            name="starting score",
+            line=dict(color="rgba(255,0,0,0.5)", dash="dot", width=2),
+            hoverinfo="skip",
+            showlegend=True,
+            legendgroup="starting_score",
+        )
+        if row is not None and col is not None:
+            fig.add_trace(legend_trace, row=row, col=col)
+        else:
+            fig.add_trace(legend_trace)
+
     for i, (smi, v) in enumerate(smi_to_v.items(), start=1):
         fig.add_hline(
             y=v,
             line_color="rgba(255,0,0,0.5)",
             line_dash="dot",
-            annotation_text=f"start {i}",
-            annotation_position="top left",
             row=row,
             col=col,
         )
@@ -1648,7 +1681,12 @@ def plot_from_raw(
     extrema_space_df = space_df if allow_global_extrema else None
 
     def _write(fig: go.Figure, name: str, post_script: str | None = None) -> None:
-        fig.write_html(outdir / f"{prefix}{name}.html", include_plotlyjs="cdn", post_script=post_script)
+        fig.write_html(
+            outdir / f"{prefix}{name}.html",
+            include_plotlyjs="cdn",
+            post_script=post_script,
+            config=PLOTLY_HTML_CONFIG,
+        )
 
     # --- Always make TSNE (chemical space) ---
     fig = plot_tsne_space(
