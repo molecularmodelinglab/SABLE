@@ -91,6 +91,46 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
     tools_executed: List[CharacterizationTool] = []
     boltz_metadata: Dict[str, Dict[str, Any]] = {}
 
+    characterization_ids: List[str] = list(state.current_bo_recommendations or [])
+    characterization_smiles_map: Dict[str, str] = {
+        mol_id: state.search_space.get(mol_id)
+        for mol_id in characterization_ids
+        if state.search_space.get(mol_id)
+    }
+    baseline_molecule_ids: List[str] = []
+    baselines_profile = state.profiling.setdefault("baselines", {})
+
+    # Record one-time structured baseline entries for starting molecules.
+    # These IDs are synthetic and stored in metadata as baselines.
+    if not baselines_profile.get("starting_molecules_structured_done", False) and state.starting_molecules:
+        measured_smiles = {result.smiles for result in state.experimental_results}
+        known_smiles = set(characterization_smiles_map.values())
+
+        for index, smiles in enumerate(state.starting_molecules):
+            if not smiles or smiles in known_smiles or smiles in measured_smiles:
+                continue
+
+            baseline_id = f"start_baseline_{index:03d}"
+            suffix = 1
+            while baseline_id in characterization_smiles_map:
+                baseline_id = f"start_baseline_{index:03d}_{suffix}"
+                suffix += 1
+
+            characterization_smiles_map[baseline_id] = smiles
+            characterization_ids.append(baseline_id)
+            baseline_molecule_ids.append(baseline_id)
+            known_smiles.add(smiles)
+
+        baselines_profile["starting_molecules_structured_done"] = True
+        state.log("characterize_structured_baseline_selection", {
+            "starting_molecules": len(state.starting_molecules),
+            "baseline_added": len(baseline_molecule_ids),
+            "already_present_or_measured": len(state.starting_molecules) - len(baseline_molecule_ids),
+        })
+
+    characterization_search_space: Dict[str, str] = dict(state.search_space)
+    characterization_search_space.update(characterization_smiles_map)
+
     normalized_target_names = [normalize_property_name(t.name) for t in state.targets]
     requires_boltz = state.characterization_config.get('requires_boltz', False) or (
         'binding_affinity' in normalized_target_names
@@ -106,8 +146,8 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
             rdkit_started_at = time.perf_counter()
             rdkit_tool = MoleculeCharacterizationTool()
             rdkit_result = rdkit_tool._run(
-                search_space=state.search_space,
-                ids_to_process=state.current_bo_recommendations
+                search_space=characterization_search_space,
+                ids_to_process=characterization_ids
             )
             tools_executed.append(CharacterizationTool.RDKIT)
             
@@ -133,8 +173,8 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
             stoplight_tool = StoplightTool()
             stoplight_result = stoplight_tool._run(
                 precision=2,
-                search_space=state.search_space,
-                ids_to_process=state.current_bo_recommendations
+                search_space=characterization_search_space,
+                ids_to_process=characterization_ids
             )
             tools_executed.append(CharacterizationTool.STOPLIGHT)
 
@@ -157,10 +197,51 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
     boltz_recorded = False
     if requires_boltz or boltz_only:
         proteins = getattr(state, 'protein_targets', [])
+        boltz_ids_to_process: List[str] = list(characterization_ids)
+
+        starting_affinity_baseline_done = bool(
+            baselines_profile.get("binding_affinity_starting_molecules_done", False)
+        )
+
+        affinity_baseline_added = 0
+        if not starting_affinity_baseline_done and state.starting_molecules:
+            measured_affinity_smiles = {
+                result.smiles
+                for result in state.experimental_results
+                if any(
+                    normalize_property_name(prop_name) in {"binding_affinity", "affinity"}
+                    for prop_name in result.properties
+                )
+            }
+            known_smiles = set(characterization_smiles_map.values())
+
+            for index, smiles in enumerate(state.starting_molecules):
+                if not smiles or smiles in known_smiles or smiles in measured_affinity_smiles:
+                    continue
+
+                baseline_id = f"start_baseline_{index:03d}"
+                suffix = 1
+                while baseline_id in characterization_smiles_map:
+                    baseline_id = f"start_baseline_{index:03d}_{suffix}"
+                    suffix += 1
+
+                characterization_smiles_map[baseline_id] = smiles
+                boltz_ids_to_process.append(baseline_id)
+                baseline_molecule_ids.append(baseline_id)
+                known_smiles.add(smiles)
+                affinity_baseline_added += 1
+
+            baselines_profile["binding_affinity_starting_molecules_done"] = True
+            state.log("characterize_boltz_baseline_selection", {
+                "starting_molecules": len(state.starting_molecules),
+                "baseline_added": affinity_baseline_added,
+                "already_had_affinity": len(state.starting_molecules) - affinity_baseline_added,
+            })
+
         ligands_map = {
-            mol_id: state.search_space.get(mol_id)
-            for mol_id in (state.current_bo_recommendations or [])
-            if state.search_space.get(mol_id)
+            mol_id: characterization_smiles_map.get(mol_id)
+            for mol_id in boltz_ids_to_process
+            if characterization_smiles_map.get(mol_id)
         }
 
         if not proteins:
@@ -315,9 +396,17 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
 
     # Convert results to ExperimentResult objects
     mapped_any = False
-    for mol_id in state.current_bo_recommendations:
-        if mol_id in state.search_space and mol_id in results:
-            smiles = state.search_space[mol_id]
+    baseline_molecule_id_set = set(baseline_molecule_ids)
+    result_molecule_ids: List[str] = []
+    seen_result_ids = set()
+    for mol_id in [*characterization_ids, *baseline_molecule_ids]:
+        if mol_id in seen_result_ids:
+            continue
+        seen_result_ids.add(mol_id)
+        result_molecule_ids.append(mol_id)
+    for mol_id in result_molecule_ids:
+        smiles = characterization_smiles_map.get(mol_id) or state.search_space.get(mol_id)
+        if smiles and mol_id in results:
             
             # Map properties to target names
             mapped_properties = {}
@@ -358,7 +447,8 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                 metadata: Dict[str, Any] = {
                     "characterization_tool": tool_choice.value if isinstance(tool_choice, CharacterizationTool) else str(tool_choice),
                     "tools_used": executed_tool_names,
-                    "all_properties": dict(results[mol_id])
+                    "all_properties": dict(results[mol_id]),
+                    "is_starting_molecule_baseline": mol_id in baseline_molecule_id_set,
                 }
 
                 boltz_info = boltz_metadata.get(mol_id)
