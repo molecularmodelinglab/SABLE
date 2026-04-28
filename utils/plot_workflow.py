@@ -989,8 +989,19 @@ def plot_radial_iterations(obs_df: pd.DataFrame,
     iterations = it.index.tolist()
 
     # global min/max for normalization
-    gmin = {p: float(pd.to_numeric(space_df[p], errors="coerce").min(skipna=True)) for p in props}
-    gmax = {p: float(pd.to_numeric(space_df[p], errors="coerce").max(skipna=True)) for p in props}
+    # prefer space_df when the property is there; fall back to obs_df otherwise
+    def _global_min(p: str) -> float:
+        if p in space_df.columns:
+            return float(pd.to_numeric(space_df[p], errors="coerce").min(skipna=True))
+        return float(pd.to_numeric(obs_df[p], errors="coerce").min(skipna=True))
+
+    def _global_max(p: str) -> float:
+        if p in space_df.columns:
+            return float(pd.to_numeric(space_df[p], errors="coerce").max(skipna=True))
+        return float(pd.to_numeric(obs_df[p], errors="coerce").max(skipna=True))
+
+    gmin = {p: _global_min(p) for p in props}
+    gmax = {p: _global_max(p) for p in props}
 
     # handle starting molecules
     start_vals = None
@@ -1073,11 +1084,17 @@ def plot_radial_iterations(obs_df: pd.DataFrame,
 
     # label rings with iteration numbers
     if start_vals is not None:
-        tickvals = [0.5] + [i + 1.5 for i in range(len(iterations))]
-        ticktext = ["start"] + [f"{it} iteration" for it in iterations]
+        tickvals = [0.0] + [i + 1.5 for i in range(len(iterations))]
+        tickvals += [tickvals[-1] + 1.0]
+        inner = [str(it) for it in iterations]
+        outer = ["It."]
+        ticktext = ["start"] + inner + outer
     else:
         tickvals = [i + 0.5 for i in range(len(iterations))]
-        ticktext = [f"it. {it}" for it in iterations]
+        tickvals += [tickvals[-1] + 1.0]
+        inner = [str(it) for it in iterations]
+        outer = ["It."]
+        ticktext = inner + outer
 
     fig.update_layout(
         width=800,
@@ -1095,6 +1112,8 @@ def plot_radial_iterations(obs_df: pd.DataFrame,
                 tickmode="array",
                 tickvals=tickvals,
                 ticktext=ticktext,
+                angle=0,
+                tickangle=0,
                 showline=False,
                 ticks="",
             ),
@@ -1787,7 +1806,7 @@ def plot_from_raw(
         fig = plot_radial_iterations(
             obs_df=obs_df,
             space_df=space_df,
-            props=[p for p in opt_props if p in obs_df.columns and p in space_df.columns],
+            props=[p for p in opt_props if p in obs_df.columns],
             directions=directions,
             starting_smiles=starting_smiles
         )
