@@ -2,6 +2,9 @@ from enum import Enum
 from typing import Any, Dict, List
 from pydantic import BaseModel, Field
 
+from schemas.properties import get_property_catalog
+from schemas.properties import normalize_property_name as _basic_normalize_property_name
+
 
 
 class CharacterizationTool(str, Enum):
@@ -20,49 +23,14 @@ class PropertySource(str, Enum):
     LLM = "llm"
     EXPERIMENTAL = "experimental"
 
-# Sets of standardized property names available from each tool.
-RDKIT_PROPERTIES = {
-    "molecular_formula", "exact_mass", "molecular_weight", "heavy_atom_count",
-    "ring_count", "aromatic_ring_count", "h_bond_donors", "h_bond_acceptors",
-    "rotatable_bonds", "logp", "tpsa", "qed"
-}
+PROPERTY_CATALOG = get_property_catalog()
 
-STOPLIGHT_PROPERTIES = {
-    "alogp", "ampc_aggregation", "cns_activity", "cruzain_aggregation",
-    "fsp3", "firefly_luciferase", "hba", "hbd", "molecular_weight",
-    "nano_luciferase", "num_heavy_atoms", "num_quaternary_carbons",
-    "number_of_rings", "number_of_rotatable_bonds", "polar_surface_area",
-    "redox_interference", "solubility_water", "thiol_interference"
-}
-
-BOLTZ_PROPERTIES = {"binding_affinity", "affinity"}
-
-PROPERTY_ALIASES = {
-    "affinity": "binding_affinity",
-}
-
-# Dictionary to map common aliases to standardized property names.
-# Format: "standardized_name": (RDKit internal name, Stoplight internal name)
-PROPERTY_MAPPINGS = {
-    "molecular_weight": ("Molecular_Weight", "Molecular Weight"),
-    "mw": ("Molecular_Weight", "Molecular Weight"),
-    "logp": ("LogP", "ALogP"),
-    "alogp": ("LogP", "ALogP"),
-    "tpsa": ("TPSA", "Polar Surface Area"),
-    "polar_surface_area": ("TPSA", "Polar Surface Area"),
-    "psa": ("TPSA", "Polar Surface Area"),
-    "qed": ("QED", None),
-    "h_bond_donors": ("H_Bond_Donors", "HBD"),
-    "hbd": ("H_Bond_Donors", "HBD"),
-    "h_bond_acceptors": ("H_Bond_Acceptors", "HBA"),
-    "hba": ("H_Bond_Acceptors", "HBA"),
-    "rotatable_bonds": ("Rotatable_Bonds", "Number of Rotatable Bonds"),
-    "solubility": (None, "Solubility in Water (mg/L)"),
-    "ring_count": ("Ring_Count", "Number of Rings"),
-    "heavy_atoms": ("Heavy_Atom_Count", "Num Heavy Atoms"),
-    "binding_affinity": (None, None),
-    "affinity": (None, None),
-}
+# Compatibility constants derived from config/properties.yml.
+RDKIT_PROPERTIES = PROPERTY_CATALOG.tool_properties("rdkit")
+STOPLIGHT_PROPERTIES = PROPERTY_CATALOG.tool_properties("stoplight")
+BOLTZ_PROPERTIES = PROPERTY_CATALOG.tool_properties("boltz") | {"affinity"}
+PROPERTY_ALIASES = PROPERTY_CATALOG.alias_map()
+PROPERTY_MAPPINGS = PROPERTY_CATALOG.tool_property_mappings("rdkit", "stoplight")
 
 
 
@@ -152,5 +120,5 @@ def normalize_property_name(prop: str) -> str:
     Returns:
         The normalized property name string.
     """
-    normalized = prop.lower().replace(" ", "_").replace("-", "_")
-    return PROPERTY_ALIASES.get(normalized, normalized)
+    normalized = _basic_normalize_property_name(prop)
+    return PROPERTY_CATALOG.normalize(PROPERTY_ALIASES.get(normalized, normalized))
