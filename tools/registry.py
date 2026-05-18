@@ -58,10 +58,12 @@ class ToolRegistry:
         provides: Optional[Iterable[str]] = None,
         accepts: Optional[Iterable[str]] = None,
         requires: Optional[Iterable[str]] = None,
+        context: Any | None = None,
         enabled_only: bool = True,
     ) -> list[ToolSpec]:
         """Return matching specs ordered by priority."""
 
+        _ = context  # Reserved for context-aware selectors in later phases.
         requested_provides = _normalize_terms(provides)
         requested_accepts = _normalize_terms(accepts, normalize=False)
         required_context = _normalize_terms(requires, normalize=False)
@@ -88,6 +90,7 @@ class ToolRegistry:
         provides: Optional[Iterable[str]] = None,
         accepts: Optional[Iterable[str]] = None,
         requires: Optional[Iterable[str]] = None,
+        context: Any | None = None,
         enabled_only: bool = True,
     ) -> ToolSpec:
         matches = self.select(
@@ -95,6 +98,7 @@ class ToolRegistry:
             provides=provides,
             accepts=accepts,
             requires=requires,
+            context=context,
             enabled_only=enabled_only,
         )
         if not matches:
