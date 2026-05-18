@@ -4,16 +4,9 @@ from pydantic import BaseModel, Field
 
 from schemas.properties import get_property_catalog
 from schemas.properties import normalize_property_name as _basic_normalize_property_name
+from schemas.tool_registry import ToolKind
+from tools.registry import ToolRegistry, get_tool_registry
 
-
-
-class CharacterizationTool(str, Enum):
-    """Enumeration for the available molecular characterization tools."""
-    RDKIT = "rdkit"
-    STOPLIGHT = "stoplight"
-    BOLTZ = "boltz"
-    COMBINED = "combined"    # Use both RDKit and Stoplight
-    AUTO = "auto"          # Automatically decide the best tool
 
 
 class PropertySource(str, Enum):
@@ -38,7 +31,7 @@ class CharacterizationRequest(BaseModel):
     """A request to characterize one or more molecules."""
     molecule_ids: List[str]
     properties: List[str]
-    tool_preference: CharacterizationTool = CharacterizationTool.AUTO
+    tool_preference: str = "auto"
     include_all_available: bool = Field(
         default=False,
         description="If True, calculate all properties available from the selected tool.",
@@ -57,55 +50,65 @@ class CharacterizationResult(BaseModel):
 class CharacterizationBatch(BaseModel):
     """A batch of characterization results from a single tool run."""
     results: List[CharacterizationResult]
-    tool_used: CharacterizationTool
+    tool_used: str
     total_molecules: int
     successful: int
     failed: int
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
-def determine_best_tool(properties: List[str]) -> CharacterizationTool:
-    """
-    Determines the optimal tool based on a list of requested properties.
+def select_characterization_tool_ids(
+    properties: List[str],
+    registry: ToolRegistry | None = None,
+    context: Any | None = None,
+) -> List[str]:
+    """Select characterizer tool IDs using registry capabilities."""
 
-    The logic prefers the faster, local RDKit tool if it can satisfy all
-    property requests. If not, it checks Stoplight. If neither tool can
-    satisfy all requests alone, it returns 'COMBINED'.
-
-    Args:
-        properties: A list of normalized property names.
-
-    Returns:
-        The recommended CharacterizationTool to use.
-    """
+    registry = registry or get_tool_registry()
     normalized_props = {normalize_property_name(p) for p in properties}
 
     requires_boltz = any(prop in BOLTZ_PROPERTIES for prop in normalized_props)
     remaining_props = {prop for prop in normalized_props if prop not in BOLTZ_PROPERTIES}
+    selected: List[str] = []
 
-    # Check if all requested properties can be fulfilled by RDKit.
-    can_use_rdkit = all(
-        p in RDKIT_PROPERTIES or (p in PROPERTY_MAPPINGS and PROPERTY_MAPPINGS[p][0])
-        for p in remaining_props
-    )
+    if remaining_props:
+        single_tool = registry.select(
+            kind=ToolKind.CHARACTERIZER,
+            provides=remaining_props,
+            context=context,
+        )
+        non_boltz_single = [spec for spec in single_tool if spec.id != "boltz"]
+        if non_boltz_single:
+            selected.append(non_boltz_single[0].id)
+        else:
+            for tool_id in ("rdkit", "stoplight"):
+                spec = registry.get(tool_id)
+                coverage = {PROPERTY_CATALOG.normalize(prop) for prop in spec.provides}
+                if remaining_props & coverage:
+                    selected.append(tool_id)
 
-    # Check if all requested properties can be fulfilled by Stoplight.
-    can_use_stoplight = all(
-        p in STOPLIGHT_PROPERTIES or (p in PROPERTY_MAPPINGS and PROPERTY_MAPPINGS[p][1])
-        for p in remaining_props
-    )
+    if requires_boltz:
+        selected.append("boltz")
 
-    # Decision logic based on tool capabilities.
-    if not remaining_props and requires_boltz:
-        return CharacterizationTool.BOLTZ
-    if can_use_rdkit:
-        # Prefer RDKit if it can handle all properties, as it's local and faster.
-        return CharacterizationTool.RDKIT
-    elif can_use_stoplight:
-        return CharacterizationTool.STOPLIGHT
-    else:
-        # If neither tool can handle all properties individually, both are needed.
-        return CharacterizationTool.COMBINED
+    deduped: List[str] = []
+    for tool_id in selected:
+        if tool_id not in deduped:
+            deduped.append(tool_id)
+    return deduped
+
+
+def determine_best_tool(properties: List[str]) -> str:
+    """Compatibility wrapper returning the legacy single-tool label."""
+
+    tool_ids = select_characterization_tool_ids(properties)
+    non_boltz = [tool_id for tool_id in tool_ids if tool_id != "boltz"]
+    if not non_boltz and "boltz" in tool_ids:
+        return "boltz"
+    if len(non_boltz) == 1 and len(tool_ids) == 1:
+        return non_boltz[0]
+    if len(non_boltz) == 1 and "boltz" in tool_ids:
+        return "combined"
+    return "combined"
 
 
 def normalize_property_name(prop: str) -> str:
