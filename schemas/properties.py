@@ -7,6 +7,8 @@ parser hints, and tool capability matching out of individual nodes.
 
 from __future__ import annotations
 
+from functools import lru_cache
+from pathlib import Path
 from typing import Iterable, Optional, Tuple
 
 from pydantic import BaseModel, Field, field_validator
@@ -36,6 +38,10 @@ class PropertySpec(BaseModel):
     default_transformation: Optional[str] = Field(
         default="LINEAR",
         description="Default transformation used by optimizers when applicable.",
+    )
+    tool_names: dict[str, Optional[str]] = Field(
+        default_factory=dict,
+        description="Tool-specific output names for this property.",
     )
     units: Optional[str] = Field(default=None, description="Optional property units.")
     metadata: dict[str, object] = Field(default_factory=dict)
@@ -96,6 +102,85 @@ class PropertyCatalog(BaseModel):
     def keywords_for(self, value: str) -> list[str]:
         spec = self.get(value)
         return list(spec.parser_keywords) if spec else []
+
+    def parser_keyword_map(self) -> dict[str, list[str]]:
+        """Return prompt parser keywords keyed by canonical property id."""
+
+        return {
+            prop_id: list(spec.parser_keywords)
+            for prop_id, spec in self.properties.items()
+            if spec.parser_keywords
+        }
+
+    def alias_map(self) -> dict[str, str]:
+        """Return normalized alias -> canonical property id mappings."""
+
+        aliases: dict[str, str] = {}
+        for spec in self.properties.values():
+            for alias in spec.aliases:
+                normalized_alias = normalize_property_name(alias)
+                if normalized_alias != spec.id:
+                    aliases[normalized_alias] = spec.id
+        return aliases
+
+    def tool_properties(self, tool_id: str) -> set[str]:
+        """Return normalized properties and output names available from a tool."""
+
+        tool_key = tool_id.lower()
+        available: set[str] = set()
+        for spec in self.properties.values():
+            if tool_key not in spec.tool_names:
+                continue
+            output_name = spec.tool_names.get(tool_key)
+            if output_name:
+                available.add(spec.id)
+                available.add(normalize_property_name(output_name))
+        return available
+
+    def tool_property_mappings(
+        self,
+        primary_tool: str = "rdkit",
+        secondary_tool: str = "stoplight",
+    ) -> dict[str, tuple[Optional[str], Optional[str]]]:
+        """Return compatibility mappings of property id/alias to tool output names."""
+
+        mappings: dict[str, tuple[Optional[str], Optional[str]]] = {}
+        for spec in self.properties.values():
+            value = (
+                spec.tool_names.get(primary_tool.lower()),
+                spec.tool_names.get(secondary_tool.lower()),
+            )
+            mappings[spec.id] = value
+            for alias in spec.aliases:
+                mappings.setdefault(normalize_property_name(alias), value)
+        return mappings
+
+
+def load_property_catalog(path: str | Path | None = None) -> PropertyCatalog:
+    """Load a property catalog from YAML."""
+
+    import yaml
+
+    catalog_path = Path(path) if path else Path(__file__).resolve().parents[1] / "config" / "properties.yml"
+    with catalog_path.open() as handle:
+        raw = yaml.safe_load(handle) or {}
+
+    raw_properties = raw.get("properties", {})
+    specs: list[PropertySpec] = []
+    for prop_id, payload in raw_properties.items():
+        data = dict(payload or {})
+        data.setdefault("id", prop_id)
+        data.setdefault("label", prop_id)
+        specs.append(PropertySpec(**data))
+
+    return PropertyCatalog.from_specs(specs)
+
+
+@lru_cache(maxsize=1)
+def get_property_catalog() -> PropertyCatalog:
+    """Return the default project property catalog."""
+
+    return load_property_catalog()
 
 
 def normalize_property_name(value: str) -> str:
