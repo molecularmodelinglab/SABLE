@@ -54,6 +54,21 @@ class ToolSpec(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    @property
+    def provides(self) -> list[str]:
+        """Compatibility accessor for capability-provided outputs."""
+        return self.capability.provides
+
+    @property
+    def requires(self) -> list[str]:
+        """Compatibility accessor for capability requirements."""
+        return self.capability.requires
+
+    @property
+    def accepts(self) -> list[str]:
+        """Compatibility accessor for capability-accepted modes."""
+        return self.capability.accepts
+
     @field_validator("id")
     @classmethod
     def _normalize_id(cls, value: str) -> str:
