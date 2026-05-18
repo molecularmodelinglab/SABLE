@@ -1,0 +1,142 @@
+tools:
+  - id: hybrid_argument_extractor
+    kind: argument_extractor
+    class_path: nodes.extract_arguments_hybrid:HybridArgumentExtractor
+    enabled: true
+    priority: 10
+    capability:
+      provides:
+        - parsed_arguments
+        - starting_molecules
+        - target_properties
+        - protein_targets
+      local: true
+    metadata:
+      node: nodes.extract_arguments_hybrid:extract_arguments_node
+
+  - id: rule_argument_extractor
+    kind: argument_extractor
+    class_path: nodes.extract_arguments:extract_arguments_node
+    enabled: true
+    priority: 50
+    capability:
+      provides:
+        - parsed_arguments
+        - starting_molecules
+        - target_properties
+      local: true
+
+  - id: healer
+    kind: enumerator
+    class_path: tools.enumerator_tool:EnumeratorTool
+    enabled: true
+    priority: 10
+    capability:
+      provides:
+        - analog_enumeration
+        - search_space
+      accepts:
+        - MoleculeHEALER
+        - FragmentHEALER
+        - SiteHEALER
+      batch: false
+      local: true
+      cost: medium
+
+  - id: baybe
+    kind: optimizer
+    class_path: tools.bayesopt_tool:BayesianOptimizationTool
+    enabled: true
+    priority: 10
+    capability:
+      provides:
+        - batch_recommendations
+      accepts:
+        - expected_improvement
+        - pareto
+        - desirability
+      batch: true
+      local: true
+      cost: medium
+
+  - id: rdkit
+    kind: characterizer
+    class_path: tools.molecule_characterization_tool:MoleculeCharacterizationTool
+    enabled: true
+    priority: 10
+    capability:
+      provides:
+        - molecular_formula
+        - exact_mass
+        - molecular_weight
+        - heavy_atom_count
+        - ring_count
+        - aromatic_ring_count
+        - h_bond_donors
+        - h_bond_acceptors
+        - rotatable_bonds
+        - logp
+        - tpsa
+        - qed
+      batch: true
+      local: true
+      cost: low
+
+  - id: stoplight
+    kind: characterizer
+    class_path: tools.stoplight_tool:StoplightTool
+    enabled: true
+    priority: 30
+    capability:
+      provides:
+        - alogp
+        - ampc_aggregation
+        - cns_activity
+        - cruzain_aggregation
+        - fsp3
+        - firefly_luciferase
+        - hba
+        - hbd
+        - molecular_weight
+        - heavy_atom_count
+        - ring_count
+        - rotatable_bonds
+        - logp
+        - tpsa
+        - nano_luciferase
+        - num_heavy_atoms
+        - num_quaternary_carbons
+        - number_of_rings
+        - number_of_rotatable_bonds
+        - polar_surface_area
+        - redox_interference
+        - solubility_water
+        - thiol_interference
+        - solubility
+      batch: true
+      local: false
+      cost: medium
+
+  - id: boltz
+    kind: characterizer
+    class_path: tools.boltz_tool:BoltzTool
+    enabled: true
+    priority: 50
+    capability:
+      provides:
+        - binding_affinity
+      requires:
+        - protein_targets
+      batch: true
+      local: false
+      cost: high
+
+  - id: default_summarizer
+    kind: summarizer
+    class_path: nodes.summarize_results:summarize_results_node
+    enabled: true
+    priority: 10
+    capability:
+      provides:
+        - summary
+      local: true
