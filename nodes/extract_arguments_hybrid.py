@@ -15,6 +15,7 @@ from schemas.state import (
     MoleculeSource,
     ProteinTarget,
 )
+from schemas.properties import get_property_catalog
 try:
     from rdkit import Chem  # type: ignore
     _RDKit_AVAILABLE = True
@@ -59,22 +60,11 @@ def _is_likely_smiles(s: str) -> bool:
 
 class HybridArgumentExtractor:
     """Combines LLM-based extraction with rule-based validation and fallbacks."""
+    PROPERTY_CATALOG = get_property_catalog()
     PROPERTY_BOUNDS = {
-        'qed': (0.0, 1.0),
-        'logp': (-10.0, 10.0),
-        'tpsa': (0.0, 300.0),
-        'molecular_weight': (0.0, 1000.0),
-        'h_bond_donors': (0.0, 20.0),
-        'h_bond_acceptors': (0.0, 20.0),
-        'rotatable_bonds': (0.0, 30.0),
-        'ring_count': (0.0, 10.0),
-        'heavy_atom_count': (0.0, 100.0),
-        'solubility': (-10.0, 0.0),  # logS scale
-        'fsp3': (0.0, 1.0),
-        'cns_activity': (0.0, 1.0),
-        'toxicity': (0.0, 1.0),
-        'binding_affinity': (-20, 20.0),
-        'permeability': (0.0, 1000.0)  # nm/s
+        prop_id: spec.default_bounds
+        for prop_id, spec in PROPERTY_CATALOG.properties.items()
+        if spec.default_bounds is not None
     }
 
     AMINO_ACIDS = set("ACDEFGHIKLMNPQRSTVWYBXZJUO")
@@ -239,23 +229,7 @@ class HybridArgumentExtractor:
             parsed['proteins'] = normalized_proteins
         
         # Extract target properties
-        property_keywords = {
-            'qed': ['qed', 'drug-likeness', 'drug likeness', 'druglike'],
-            'logp': ['logp', 'lipophilicity', 'hydrophobicity', 'partition'],
-            'tpsa': ['tpsa', 'polar surface area', 'psa'],
-            'molecular_weight': ['molecular weight', 'mw', 'weight', 'mass'],
-            'h_bond_donors': ['h bond donor', 'hbd', 'hydrogen bond donor', 'donor'],
-            'h_bond_acceptors': ['h bond acceptor', 'hba', 'hydrogen bond acceptor', 'acceptor'],
-            'rotatable_bonds': ['rotatable', 'flexibility', 'rotatable bond'],
-            'ring_count': ['ring', 'cyclic', 'rings'],
-            'heavy_atom_count': ['heavy atom', 'non-hydrogen', 'heavy atoms'],
-            'solubility': ['solubility', 'soluble', 'water solubility', 'aqueous'],
-            'fsp3': ['fsp3', 'fraction sp3', 'saturation'],
-            'cns_activity': ['cns', 'brain', 'bbb', 'blood brain barrier', 'central nervous'],
-            'toxicity': ['toxicity', 'toxic', 'safe', 'safety'],
-            'binding_affinity': ['binding', 'affinity', 'ic50', 'ki', 'kd'],
-            'permeability': ['permeability', 'permeable', 'caco-2', 'caco2']
-        }
+        property_keywords = self.PROPERTY_CATALOG.parser_keyword_map()
         
         targets = []
         for prop, keywords in property_keywords.items():
@@ -266,16 +240,17 @@ class HybridArgumentExtractor:
                 elif prop == 'molecular_weight' and any(word in prompt_lower for word in ['reduce', 'minimize', 'lower', 'small']):
                     mode = OptimizationMode.MINIMIZE
 
+                spec = self.PROPERTY_CATALOG.get(prop)
                 if mode == OptimizationMode.MATCH:
                     transformation = "TRIANGULAR"
                 elif mode in [OptimizationMode.MAXIMIZE, OptimizationMode.MINIMIZE]:
-                    transformation = "LINEAR"
+                    transformation = spec.default_transformation if spec else "LINEAR"
                 
                 
                 targets.append({
                     'property_name': prop,
                     'optimization_mode': mode.value,
-                    'bounds': self.PROPERTY_BOUNDS.get(prop),
+                    'bounds': self.PROPERTY_CATALOG.bounds_for(prop),
                     'transformation': transformation
                 })
         
@@ -565,19 +540,18 @@ class HybridArgumentExtractor:
             weights_fixed = 0
             
             for prop in merged['target_properties']:
-                prop_name = prop.get('property_name', '').lower()
+                prop_name = self.PROPERTY_CATALOG.normalize(prop.get('property_name', ''))
                 
                 # Add bounds if completely missing
-                if not prop.get('bounds') and prop_name in self.PROPERTY_BOUNDS:
-                    prop['bounds'] = self.PROPERTY_BOUNDS[prop_name]
+                default_bounds = self.PROPERTY_CATALOG.bounds_for(prop_name)
+                if not prop.get('bounds') and default_bounds:
+                    prop['bounds'] = default_bounds
                     bounds_added += 1
                 elif prop.get('bounds'):
                     # Fix partial bounds (e.g., [None, 60] or [2, None])
                     bounds = prop['bounds']
                     if isinstance(bounds, (list, tuple)) and len(bounds) == 2:
                         lower, upper = bounds
-                        default_bounds = self.PROPERTY_BOUNDS.get(prop_name)
-                        
                         # Replace None with default bounds
                         if lower is None and default_bounds:
                             lower = default_bounds[0]
@@ -788,7 +762,7 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
             target_dicts.append({
                 'property_name': 'binding_affinity',
                 'optimization_mode': OptimizationMode.MAXIMIZE.value,
-                'bounds': extractor.PROPERTY_BOUNDS.get('binding_affinity'),
+                'bounds': extractor.PROPERTY_CATALOG.bounds_for('binding_affinity'),
                 'transformation': 'LINEAR',
                 'weight': 0.0,
                 'source': 'auto_boltz'

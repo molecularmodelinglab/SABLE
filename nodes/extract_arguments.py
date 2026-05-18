@@ -6,6 +6,7 @@ This node analyzes the user's request and extracts key parameters.
 import re
 from typing import Dict, Any, List
 from schemas.state import WorkflowState, TargetProperty, OptimizationMode, MoleculeSource
+from schemas.properties import get_property_catalog
 try:
     from rdkit import Chem  # type: ignore
     _RDKit_AVAILABLE = True
@@ -89,49 +90,8 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
             if smiles not in parsed['starting_molecules']:
                 parsed['starting_molecules'].append(smiles)
     
-    # Extract target properties - aligned with available characterization tools
-    # These properties can be calculated by RDKit (MoleculeCharacterizationTool) or Stoplight
-    property_keywords = {
-        # RDKit properties
-        'qed': ['qed', 'drug-likeness', 'drug likeness', 'druglike'],
-        'logp': ['logp', 'lipophilicity', 'hydrophobicity', 'partition'],
-        'tpsa': ['tpsa', 'polar surface area', 'psa'],
-        'molecular_weight': ['molecular weight', 'mw', 'weight', 'mass'],
-        'h_bond_donors': ['h bond donor', 'hbd', 'hydrogen bond donor', 'donor'],
-        'h_bond_acceptors': ['h bond acceptor', 'hba', 'hydrogen bond acceptor', 'acceptor'],
-        'rotatable_bonds': ['rotatable', 'flexibility', 'rotatable bond'],
-        'ring_count': ['ring', 'cyclic', 'rings'],
-        'heavy_atom_count': ['heavy atom', 'non-hydrogen', 'heavy atoms'],
-        
-        # Stoplight properties
-        'solubility': ['solubility', 'soluble', 'water solubility', 'aqueous'],
-        'fsp3': ['fsp3', 'fraction sp3', 'saturation'],
-        'cns_activity': ['cns', 'brain', 'bbb', 'blood brain barrier', 'central nervous'],
-        
-        # Properties that need special handling or external data
-        'toxicity': ['toxicity', 'toxic', 'safe', 'safety'],
-        'binding_affinity': ['binding', 'affinity', 'ic50', 'ki', 'kd'],
-        'permeability': ['permeability', 'permeable', 'caco-2', 'caco2']
-    }
-    
-    # Property bounds based on known ranges
-    property_bounds = {
-        'qed': (0.0, 1.0),
-        'logp': (-10.0, 10.0),
-        'tpsa': (0.0, 200.0),
-        'molecular_weight': (0.0, 1000.0),
-        'h_bond_donors': (0.0, 20.0),
-        'h_bond_acceptors': (0.0, 20.0),
-        'rotatable_bonds': (0.0, 30.0),
-        'ring_count': (0.0, 10.0),
-        'heavy_atom_count': (0.0, 100.0),
-        'solubility': (-10.0, 0.0),  # logS scale
-        'fsp3': (0.0, 1.0),
-        'cns_activity': (0.0, 1.0),
-        'toxicity': (0.0, 1.0),
-        'binding_affinity': (0.0, 20.0),  # pIC50 scale
-        'permeability': (0.0, 1000.0)  # nm/s
-    }
+    property_catalog = get_property_catalog()
+    property_keywords = property_catalog.parser_keyword_map()
     
     targets = []
     for prop, keywords in property_keywords.items():
@@ -146,8 +106,8 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
                 'name': prop.upper() if prop in ['qed', 'tpsa'] else prop.capitalize(),
                 'mode': mode,
                 'weight': 1.0 / max(1, len(targets) + 1),  # Equal weights
-                'bounds': property_bounds.get(prop),
-                'transformation': 'LINEAR'  # Can be set to 'LINEAR', 'LOG', etc. if needed
+                'bounds': property_catalog.bounds_for(prop),
+                'transformation': (property_catalog.get(prop).default_transformation if property_catalog.get(prop) else 'LINEAR')
             })
     
     parsed['targets'] = targets
