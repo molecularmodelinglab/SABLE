@@ -72,6 +72,40 @@ class BORecommendationResult(BaseModel):
     iteration: int
 
 
+class ArgumentExtractionRequest(BaseModel):
+    """Request for extracting structured workflow arguments from user input."""
+    prompt: str
+    context: Dict[str, Any] = Field(default_factory=dict)
+    preferred_properties: Optional[List[str]] = None
+
+
+class ArgumentExtractionResult(BaseModel):
+    """Structured arguments extracted from a prompt."""
+    parsed_arguments: Dict[str, Any] = Field(default_factory=dict)
+    starting_molecules: List[str] = Field(default_factory=list)
+    target_properties: List[Dict[str, Any]] = Field(default_factory=list)
+    proteins: List[Dict[str, Any]] = Field(default_factory=list)
+    confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    method: str = "unknown"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SummaryRequest(BaseModel):
+    """Request for summarizing a completed workflow state."""
+    workflow_id: str
+    user_prompt: str
+    results: Dict[str, Any] = Field(default_factory=dict)
+    logs: List[Dict[str, Any]] = Field(default_factory=list)
+    context: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SummaryResult(BaseModel):
+    """Result from a summarization stage."""
+    summary: str
+    highlights: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 class LLMExperimentRequest(BaseModel):
     """Request for LLM-based experiment simulation."""
     molecules: List[str]  # SMILES
