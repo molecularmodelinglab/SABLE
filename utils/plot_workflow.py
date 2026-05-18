@@ -963,27 +963,38 @@ def plot_radial_iterations(obs_df: pd.DataFrame,
                            space_df: pd.DataFrame,
                            props: list[str],
                            directions: dict[str, str],
-                           starting_smiles: list[str] | None = None) -> go.Figure:
+                           starting_smiles: list[str] | None = None,
+                           top_n: int = 10) -> go.Figure:
     """
     Rings = iterations, wedges = properties.
-    Color = normalized value per (iteration, property).
+    Color = normalized mean of the best-top_n molecules *so far* (cumulative up to
+    and including that iteration) per property, direction-aware.
 
-    Normalization uses global min/max from space_df for each prop.
+    Normalization uses global min/max from space_df for each prop (falls back to obs_df).
     """
     df = obs_df.copy()
     df["iteration"] = df["iteration"].astype(int)
 
-    g = df.groupby("iteration")
-
-    # per-property aggregation based on direction:
-    # max for "max", min for "min"
-    it = pd.DataFrame(index=sorted(df["iteration"].unique()))
-    for p in props:
-        mode = (directions.get(_norm_key(p), "max")).lower()
-        if mode == "min":
-            it[p] = g[p].min()
-        else:
-            it[p] = g[p].max()
+    # best-N-so-far mean: for each iteration, take the best top_n unique molecules
+    # seen up to and including that iteration, then average their values.
+    iterations = sorted(df["iteration"].unique())
+    it = pd.DataFrame(index=iterations, columns=props, dtype=float)
+    for t in iterations:
+        sub = df[df["iteration"] <= t]
+        for p in props:
+            valid = sub[sub[p].notna()]
+            if valid.empty:
+                it.loc[t, p] = float("nan")
+                continue
+            mode = (directions.get(_norm_key(p), "max") or "max").lower()
+            # best value per unique molecule (handles re-tested molecules)
+            if mode == "min":
+                best_per_mol = valid.groupby("molecule_id")[p].min()
+                top = best_per_mol.nsmallest(top_n) if top_n > 0 else best_per_mol
+            else:
+                best_per_mol = valid.groupby("molecule_id")[p].max()
+                top = best_per_mol.nlargest(top_n) if top_n > 0 else best_per_mol
+            it.loc[t, p] = float(top.median())
 
     it = it.sort_index()
     iterations = it.index.tolist()
@@ -1062,7 +1073,7 @@ def plot_radial_iterations(obs_df: pd.DataFrame,
             r.append(1.0)
             base.append(float(ring_idx + ring_offset))
             color.append(nv)
-            hovertext.append(f"iter={it_num} iteration<br>prop={p}<br>value={v}")
+            hovertext.append(f"iter={it_num} (mean best-{top_n} so far)<br>prop={p}<br>value={v}")
 
     fig = go.Figure(go.Barpolar(
         theta=theta,
@@ -1071,7 +1082,7 @@ def plot_radial_iterations(obs_df: pd.DataFrame,
         width=width,
         marker=dict(
             color=color,
-            colorscale="Viridis",
+            colorscale="Sunset_r",
             cmin=0.0,
             cmax=1.0,
             showscale=True,
@@ -1808,7 +1819,8 @@ def plot_from_raw(
             space_df=space_df,
             props=[p for p in opt_props if p in obs_df.columns],
             directions=directions,
-            starting_smiles=starting_smiles
+            starting_smiles=starting_smiles,
+            top_n=bestN_min_n,
         )
         _write(fig, "radial_iterations", post_script=HTML_POST_SCRIPT)
 
