@@ -28,7 +28,7 @@ tools:
 
   - id: healer
     kind: enumerator
-    class_path: tools.enumerator_tool:EnumeratorTool
+    class_path: tools.healer_enumerator_tool:HealerEnumeratorTool
     enabled: true
     priority: 10
     capability:
@@ -36,12 +36,21 @@ tools:
         - analog_enumeration
         - search_space
       accepts:
+        - reaction_based
+        - enumerated
+        - provided
+        - analog_enumeration
         - MoleculeHEALER
         - FragmentHEALER
         - SiteHEALER
       batch: false
       local: true
       cost: medium
+    config:
+      healer_mode: MoleculeHEALER
+    metadata:
+      tool_specific_options:
+        - healer_mode
 
   - id: baybe
     kind: optimizer
