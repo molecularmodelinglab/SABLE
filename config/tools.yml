@@ -54,12 +54,13 @@ tools:
 
   - id: baybe
     kind: optimizer
-    class_path: tools.bayesopt_tool:BayesianOptimizationTool
+    class_path: tools.baybe_optimizer_tool:BayBEOptimizerTool
     enabled: true
     priority: 10
     capability:
       provides:
         - batch_recommendations
+        - model_metrics
       accepts:
         - expected_improvement
         - pareto
