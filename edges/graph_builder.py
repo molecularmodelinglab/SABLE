@@ -10,7 +10,6 @@ from langgraph.graph import StateGraph, END
 from schemas.state import WorkflowState, MoleculeSource
 
 from nodes.extract_arguments_hybrid import extract_arguments_node as extract_arguments_hybrid_node
-from nodes.extract_arguments import extract_arguments_node
 from nodes.setup import setup_node
 from nodes.enumerate_molecules import enumerate_molecules_node
 from nodes.bo_iteration import bo_iteration_node
