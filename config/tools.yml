@@ -10,13 +10,17 @@ tools:
         - starting_molecules
         - target_properties
         - protein_targets
+      accepts:
+        - hybrid
+        - llm
+        - rule_based
       local: true
     metadata:
       node: nodes.extract_arguments_hybrid:extract_arguments_node
 
   - id: rule_argument_extractor
     kind: argument_extractor
-    class_path: nodes.extract_arguments:extract_arguments_node
+    class_path: nodes.extract_arguments_hybrid:RuleArgumentExtractor
     enabled: true
     priority: 50
     capability:
@@ -24,6 +28,8 @@ tools:
         - parsed_arguments
         - starting_molecules
         - target_properties
+      accepts:
+        - rule_based
       local: true
 
   - id: healer
