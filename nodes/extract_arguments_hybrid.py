@@ -15,7 +15,11 @@ from schemas.state import (
     MoleculeSource,
     ProteinTarget,
 )
+from schemas.errors import NodeError
 from schemas.properties import get_property_catalog
+from schemas.tool_registry import ToolKind, ToolRunRecord, ToolSpec
+from schemas.tool_schemas import ArgumentExtractionRequest, ArgumentExtractionResult
+from tools.registry import ToolRegistry, get_tool_registry
 try:
     from rdkit import Chem  # type: ignore
     _RDKit_AVAILABLE = True
@@ -58,6 +62,166 @@ def _is_likely_smiles(s: str) -> bool:
     else:
         return bool(re.search(r"^(?:\[.*?\]|Br|Cl|[A-Z][a-z]?|[cnops])+[A-Za-z0-9@+\-\[\]()=#%\.]*$", s))
 
+
+def _assess_llm_extraction_quality(extracted: Dict[str, Any], original_prompt: str) -> float:
+    """Assess extraction completeness and basic structural quality."""
+    confidence = 1.0
+
+    if not extracted.get('target_properties'):
+        confidence *= 0.5
+    if not extracted.get('starting_molecules') and 'molecule' not in original_prompt.lower():
+        confidence *= 0.8
+
+    confidence *= 1.0 if extracted.get('max_iterations') else 0.9
+    confidence *= 1.0 if extracted.get('batch_size') else 0.95
+
+    if extracted.get('target_properties'):
+        for target_property in extracted['target_properties']:
+            if not all(key in target_property for key in ['property_name', 'optimization_mode']):
+                confidence *= 0.7
+                break
+
+    return max(0.0, min(1.0, confidence))
+
+
+def _argument_result_from_dict(parsed: Dict[str, Any], default_method: str) -> ArgumentExtractionResult:
+    method = (
+        parsed.get('extraction_method')
+        or parsed.get('used_method')
+        or default_method
+    )
+    return ArgumentExtractionResult(
+        parsed_arguments=parsed,
+        starting_molecules=list(parsed.get('starting_molecules') or []),
+        target_properties=list(parsed.get('target_properties') or []),
+        proteins=list(parsed.get('proteins') or []),
+        confidence_score=float(parsed.get('confidence_score') or 0.0),
+        method=str(method),
+        metadata={
+            key: value
+            for key, value in parsed.items()
+            if key not in {'starting_molecules', 'target_properties', 'proteins'}
+        },
+    )
+
+
+class MoleculeNameResolver:
+    """Resolves molecule names into SMILES strings."""
+
+    def resolve(self, name: str) -> Optional[str]:
+        if _NAME_RESOLVER_AVAILABLE and n2s:
+            try:
+                print(f"🔍 Resolving molecule name: {name}")
+                smiles = n2s(name)
+                if smiles:
+                    print(f"✓ Resolved '{name}' to SMILES: {smiles}")
+                    return smiles
+                print(f"⚠️  Could not resolve '{name}' via name resolution service")
+            except Exception as e:
+                print(f"⚠️  Error resolving '{name}': {e}")
+
+        molecule_names = {
+            'aspirin': 'CC(=O)OC1=CC=CC=C1C(=O)O',
+            'caffeine': 'CN1C=NC2=C1C(=O)N(C(=O)N2C)C',
+            'ibuprofen': 'CC(C)CC1=CC=C(C=C1)C(C)C(=O)O',
+            'paracetamol': 'CC(=O)NC1=CC=C(C=C1)O',
+            'acetaminophen': 'CC(=O)NC1=CC=C(C=C1)O',
+            'ciprofloxacin': 'C1CC1N2C=C(C(=O)C3=CC(=C(C=C32)N4CCNCC4)F)C(=O)O'
+        }
+
+        resolved = molecule_names.get(name.lower())
+        if resolved:
+            print(f"✓ Resolved '{name}' from hardcoded dictionary: {resolved}")
+        else:
+            print(f"⚠️  Could not resolve molecule name: {name}")
+
+        return resolved
+
+
+class LLMArgumentExtractor:
+    """Extracts workflow arguments from an LLM client response."""
+
+    def __init__(self, llm_client=None, quality_assessor=None, **_: Any):
+        self.llm_client = llm_client
+        self.quality_assessor = quality_assessor
+
+    def extract(self, request: ArgumentExtractionRequest) -> ArgumentExtractionResult:
+        parsed = self.extract_dict(request.prompt) or {}
+        return _argument_result_from_dict(parsed, default_method="llm")
+
+    def extract_dict(self, prompt: str) -> Optional[Dict[str, Any]]:
+        if not self.llm_client:
+            return None
+
+        try:
+            response = self.llm_client.generate(prompt=prompt)
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                extracted_data = json.loads(json_match.group())
+
+                llm_self_confidence = extracted_data.get('llm_confidence', None)
+                if llm_self_confidence is not None:
+                    llm_self_confidence = float(llm_self_confidence)
+
+                quality_confidence = (
+                    self.quality_assessor(extracted_data, prompt)
+                    if self.quality_assessor
+                    else _assess_llm_extraction_quality(extracted_data, prompt)
+                )
+
+                extracted_data['llm_self_confidence'] = llm_self_confidence if llm_self_confidence is not None else quality_confidence
+                extracted_data['extraction_quality'] = quality_confidence
+                extracted_data['extraction_method'] = 'llm'
+
+                if llm_self_confidence is not None:
+                    extracted_data['confidence_score'] = min(llm_self_confidence, quality_confidence)
+                else:
+                    extracted_data['confidence_score'] = quality_confidence
+
+                return extracted_data
+        except Exception as e:
+            print(f"LLM extraction failed: {e}")
+            return None
+
+        return None
+
+
+class RuleArgumentExtractor:
+    """Runs the deterministic rule-based argument extractor."""
+
+    def __init__(self, legacy_extractor=None, molecule_resolver: Optional[MoleculeNameResolver] = None, **_: Any):
+        self.legacy_extractor = legacy_extractor
+        self.molecule_resolver = molecule_resolver or MoleculeNameResolver()
+
+    def extract(self, request: ArgumentExtractionRequest) -> ArgumentExtractionResult:
+        parsed = self.extract_dict(request.prompt)
+        return _argument_result_from_dict(parsed, default_method="rule_based")
+
+    def extract_dict(self, prompt: str) -> Dict[str, Any]:
+        extractor = self.legacy_extractor or HybridArgumentExtractor(
+            llm_client=None,
+            molecule_resolver=self.molecule_resolver,
+            configure_components=False,
+        )
+        return extractor.extract_with_rules(prompt)
+
+
+class ExtractionMerger:
+    """Merges LLM extraction with deterministic rule fallbacks."""
+
+    def __init__(self, legacy_extractor=None, **_: Any):
+        self.legacy_extractor = legacy_extractor
+
+    def merge(
+        self,
+        llm_result: Optional[Dict[str, Any]],
+        rule_result: Dict[str, Any],
+        original_prompt: str,
+    ) -> Dict[str, Any]:
+        extractor = self.legacy_extractor or HybridArgumentExtractor(llm_client=None, configure_components=False)
+        return extractor.validate_and_merge(llm_result, rule_result, original_prompt)
+
+
 class HybridArgumentExtractor:
     """Combines LLM-based extraction with rule-based validation and fallbacks."""
     PROPERTY_CATALOG = get_property_catalog()
@@ -68,46 +232,53 @@ class HybridArgumentExtractor:
     }
 
     AMINO_ACIDS = set("ACDEFGHIKLMNPQRSTVWYBXZJUO")
-    
-    def __init__(self, llm_client=None):
+
+    def __init__(
+        self,
+        llm_client=None,
+        molecule_resolver: Optional[MoleculeNameResolver] = None,
+        llm_extractor: Optional[LLMArgumentExtractor] = None,
+        rule_extractor: Optional[RuleArgumentExtractor] = None,
+        merger: Optional[ExtractionMerger] = None,
+        configure_components: bool = True,
+        **_: Any,
+    ):
         self.llm_client = llm_client
-        
+        self.molecule_resolver = molecule_resolver or MoleculeNameResolver()
+        if configure_components:
+            self.llm_extractor = llm_extractor or LLMArgumentExtractor(
+                llm_client=llm_client,
+                quality_assessor=self._assess_llm_extraction_quality,
+            )
+            self.rule_extractor = rule_extractor or RuleArgumentExtractor(
+                legacy_extractor=self,
+                molecule_resolver=self.molecule_resolver,
+            )
+            self.merger = merger or ExtractionMerger(legacy_extractor=self)
+        else:
+            self.llm_extractor = llm_extractor
+            self.rule_extractor = rule_extractor
+            self.merger = merger
+
+    def extract(self, request: ArgumentExtractionRequest) -> ArgumentExtractionResult:
+        final_result = self.extract_dict(request.prompt)
+        return _argument_result_from_dict(final_result, default_method="hybrid")
+
+    def extract_dict(self, prompt: str) -> Dict[str, Any]:
+        llm_result = self.extract_with_llm(prompt)
+        rule_result = self.extract_with_rules(prompt)
+        if self.merger:
+            return self.merger.merge(llm_result, rule_result, prompt)
+        return self.validate_and_merge(llm_result, rule_result, prompt)
+
     def extract_with_llm(self, prompt: str) -> Optional[Dict[str, Any]]:
         """Extract arguments using LLM with structured output."""
-        if not self.llm_client:
-            return None
-            
-        extraction_prompt = f"{prompt}"
-        
-        try:
-            response = self.llm_client.generate(prompt=extraction_prompt)
-            # Clean response to extract JSON
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
-            if json_match:
-                extracted_data = json.loads(json_match.group())
-                
-                # Get LLM's self-reported confidence or calculate it
-                llm_self_confidence = extracted_data.get('llm_confidence', None)
-                if llm_self_confidence is not None:
-                    llm_self_confidence = float(llm_self_confidence)
-                
-                # Calculate our own assessment of the extraction quality
-                quality_confidence = self._assess_llm_extraction_quality(extracted_data, prompt)
-
-                extracted_data['llm_self_confidence'] = llm_self_confidence if llm_self_confidence is not None else quality_confidence
-                extracted_data['extraction_quality'] = quality_confidence
-                extracted_data['extraction_method'] = 'llm'
-                
-                # Final LLM confidence is the minimum of both (conservative)
-                if llm_self_confidence is not None:
-                    extracted_data['confidence_score'] = min(llm_self_confidence, quality_confidence)
-                else:
-                    extracted_data['confidence_score'] = quality_confidence
-                
-                return extracted_data
-        except Exception as e:
-            print(f"LLM extraction failed: {e}")
-            return None
+        if self.llm_extractor:
+            return self.llm_extractor.extract_dict(prompt)
+        return LLMArgumentExtractor(
+            llm_client=self.llm_client,
+            quality_assessor=self._assess_llm_extraction_quality,
+        ).extract_dict(prompt)
     
     def _assess_llm_extraction_quality(self, extracted: Dict[str, Any], original_prompt: str) -> float:
         """
@@ -617,6 +788,9 @@ class HybridArgumentExtractor:
         Resolve molecule names to SMILES using name_to_smiles service.
         Falls back to hardcoded common molecules if service is unavailable.
         """
+        if self.molecule_resolver:
+            return self.molecule_resolver.resolve(name)
+
         # First try the name resolution service (PubChem-backed)
         if _NAME_RESOLVER_AVAILABLE and n2s:
             try:
@@ -713,21 +887,131 @@ class HybridArgumentExtractor:
 
         return normalized
 
+
+def _select_argument_extractor_spec(state: WorkflowState, registry: ToolRegistry) -> ToolSpec:
+    stage_config = state.stage_config.get("extract_arguments", {}) if isinstance(state.stage_config, dict) else {}
+    explicit_tool_id = (
+        stage_config.get("tool_id")
+        or state.parsed_arguments.get("argument_extractor_tool")
+        or state.parsed_arguments.get("argument_extractor")
+    )
+    if explicit_tool_id:
+        spec = registry.get(str(explicit_tool_id))
+        if spec.kind != ToolKind.ARGUMENT_EXTRACTOR:
+            raise NodeError(
+                f"Configured tool {spec.id!r} is not an argument extractor",
+                node="extract_arguments",
+                code="ARGUMENT_EXTRACTOR_BAD_KIND",
+                details={"tool_id": spec.id, "kind": spec.kind.value},
+            )
+        return spec
+
+    matches = registry.select(
+        kind=ToolKind.ARGUMENT_EXTRACTOR,
+        provides=["parsed_arguments"],
+        context=state,
+    )
+    if matches:
+        return matches[0]
+
+    raise NodeError(
+        "No argument extractor tool is registered",
+        node="extract_arguments",
+        code="ARGUMENT_EXTRACTOR_UNAVAILABLE",
+    )
+
+
+def _create_argument_extractor_tool(
+    registry: ToolRegistry,
+    spec: ToolSpec,
+    state: WorkflowState,
+) -> Any:
+    if spec.id == "hybrid_argument_extractor":
+        return registry.create(spec.id, llm_client=getattr(state, "llm_client", None))
+    return registry.create(spec.id)
+
+
+def _run_argument_extractor_tool(
+    spec: ToolSpec,
+    tool: Any,
+    request: ArgumentExtractionRequest,
+) -> ArgumentExtractionResult:
+    if hasattr(tool, "extract"):
+        return _normalize_argument_extraction_result(tool.extract(request), spec.id)
+
+    if callable(tool):
+        raise TypeError(
+            f"Argument extractor {spec.id} is a node callable, not a reusable extractor implementation"
+        )
+
+    raise TypeError(f"Argument extractor {spec.id} does not expose extract(request)")
+
+
+def _normalize_argument_extraction_result(raw_result: Any, tool_id: str) -> ArgumentExtractionResult:
+    if isinstance(raw_result, ArgumentExtractionResult):
+        raw_result.metadata.setdefault("tool_id", tool_id)
+        return raw_result
+
+    if isinstance(raw_result, dict):
+        result = _argument_result_from_dict(raw_result, default_method=tool_id)
+        result.metadata.setdefault("tool_id", tool_id)
+        return result
+
+    raise TypeError(f"Unexpected argument extraction result type: {type(raw_result)}")
+
+
 def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
     """
-    Extract arguments using hybrid LLM + rule-based approach.
+    Extract arguments using a registered argument extractor.
     """
     state.log("extract_arguments_started")
 
-    extractor = HybridArgumentExtractor(llm_client=getattr(state, 'llm_client', None))
-    
-    # Try LLM extraction first
-    llm_result = extractor.extract_with_llm(state.user_prompt)
-    
-    # Always run rule-based as fallback/validation
-    rule_result = extractor.extract_with_rules(state.user_prompt)
-    
-    final_result = extractor.validate_and_merge(llm_result, rule_result, state.user_prompt)
+    registry = get_tool_registry()
+    extractor_spec = _select_argument_extractor_spec(state, registry)
+    state.record_tool_selection(
+        registry.selection_for(
+            stage=ToolKind.ARGUMENT_EXTRACTOR,
+            spec=extractor_spec,
+            reason="Selected by argument extraction capability and configured preference.",
+        )
+    )
+
+    request = ArgumentExtractionRequest(
+        prompt=state.user_prompt,
+        context={
+            "workflow_id": state.workflow_id,
+            "stage_config": state.stage_config.get("extract_arguments", {}) if isinstance(state.stage_config, dict) else {},
+        },
+    )
+
+    try:
+        extractor = _create_argument_extractor_tool(registry, extractor_spec, state)
+        extraction_result = _run_argument_extractor_tool(extractor_spec, extractor, request)
+        final_result = dict(extraction_result.parsed_arguments)
+        if not final_result:
+            final_result = {
+                "starting_molecules": extraction_result.starting_molecules,
+                "target_properties": extraction_result.target_properties,
+                "proteins": extraction_result.proteins,
+                "confidence_score": extraction_result.confidence_score,
+                "extraction_method": extraction_result.method,
+            }
+        state.record_tool_run(ToolRunRecord(
+            tool_id=extractor_spec.id,
+            stage=ToolKind.ARGUMENT_EXTRACTOR,
+            status="completed",
+            inputs=request.model_dump(mode="json"),
+            outputs=extraction_result.model_dump(mode="json"),
+        ))
+    except Exception as exc:
+        state.record_tool_run(ToolRunRecord(
+            tool_id=extractor_spec.id,
+            stage=ToolKind.ARGUMENT_EXTRACTOR,
+            status="failed",
+            inputs=request.model_dump(mode="json"),
+            errors=[str(exc)],
+        ))
+        raise
 
     print(f"\n🛠️  Final Extracted Arguments: {final_result}")
     
@@ -762,7 +1046,7 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
             target_dicts.append({
                 'property_name': 'binding_affinity',
                 'optimization_mode': OptimizationMode.MAXIMIZE.value,
-                'bounds': extractor.PROPERTY_CATALOG.bounds_for('binding_affinity'),
+                'bounds': get_property_catalog().bounds_for('binding_affinity'),
                 'transformation': 'LINEAR',
                 'weight': 0.0,
                 'source': 'auto_boltz'
