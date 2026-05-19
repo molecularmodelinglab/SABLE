@@ -1,7 +1,7 @@
 tools:
   - id: hybrid_argument_extractor
     kind: argument_extractor
-    class_path: nodes.extract_arguments_hybrid:HybridArgumentExtractor
+    class_path: nodes.argument_extraction:HybridArgumentExtractor
     enabled: true
     priority: 10
     capability:
@@ -20,7 +20,7 @@ tools:
 
   - id: rule_argument_extractor
     kind: argument_extractor
-    class_path: nodes.extract_arguments_hybrid:RuleArgumentExtractor
+    class_path: nodes.argument_extraction:RuleArgumentExtractor
     enabled: true
     priority: 50
     capability:
