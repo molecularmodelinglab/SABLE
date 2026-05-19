@@ -125,7 +125,7 @@ class HybridArgumentExtractor:
         return self._legacy_extract(prompt)
     
     def _legacy_extract(self, prompt: str) -> Dict[str, Any]:
-        """Existing regex-based extraction logic from extract_arguments.py."""
+        """Existing regex-based extraction logic kept as the rule fallback."""
         prompt_lower = prompt.lower()
         parsed = {}
         
