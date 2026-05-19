@@ -67,14 +67,18 @@ class BORecommendationRequest(BaseModel):
     measurements: Optional[List[Dict[str, Any]]] = None  # Previous measurements
     batch_size: int = Field(default=5, ge=1)
     encoding: str = os.getenv("MOLECULAR_FP", "MORDRED")
+    optimizer_strategy: Optional[str] = None
+    search_space_id_column: str = "Molecule_ID"
+    tool_options: Dict[str, Any] = Field(default_factory=dict)
 
 
 class BORecommendationResult(BaseModel):
     """Result from Bayesian Optimization."""
     recommended_ids: List[str]
-    acquisition_scores: Dict[str, float]
+    acquisition_scores: Dict[str, float] = Field(default_factory=dict)
     model_metrics: Dict[str, Any] = Field(default_factory=dict)
-    iteration: int
+    iteration: int = 0
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ArgumentExtractionRequest(BaseModel):
