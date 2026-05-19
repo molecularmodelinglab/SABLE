@@ -48,14 +48,19 @@ class EnumerationResult(BaseModel):
 
 class CharacterizationRequest(BaseModel):
     """Request for molecule characterization."""
-    smiles: Union[str, List[str]]
+    smiles: Union[str, List[str], Dict[str, str]]
     properties: List[str]  # e.g., ["QED", "TPSA", "LogP"]
     include_descriptors: bool = False
+    molecule_ids: List[str] = Field(default_factory=list)
+    search_space: Dict[str, str] = Field(default_factory=dict)
+    proteins: List[Dict[str, Any]] = Field(default_factory=list)
+    precision: int = 2
+    tool_options: Dict[str, Any] = Field(default_factory=dict)
 
 
 class CharacterizationResult(BaseModel):
     """Result from molecule characterization."""
-    results: Dict[str, Dict[str, float]]  # SMILES -> {property: value}
+    results: Dict[str, Dict[str, Any]]  # molecule ID or SMILES -> {property: value}
     failed_molecules: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
