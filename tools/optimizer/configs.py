@@ -18,8 +18,8 @@ class TargetInput(BaseModel):
             raise ValueError("Mode must be either 'MAX', 'MIN', or 'MATCH'.")
         return v
 
-class BayesianOptimizationInput(BaseModel):
-    """Input schema for the Bayesian Optimization Tool."""
+class BayBEOptimizerInput(BaseModel):
+    """Legacy LangChain input schema for the BayBE optimizer tool."""
     targets: str = Field(..., description="A JSON string representing a list of optimization targets. Each target should be a dictionary with 'name' and 'mode' keys. Example: '[{\"name\": \"QED\", \"mode\": \"MAX\"}]'")
     batch_size: int = Field(default=5, description="Number of molecules to recommend in the next batch.")
     encoding: str = Field(default=os.getenv("MOLECULAR_FP", "MORDRED"), description="Molecular encoding strategy for SubstanceParameter (e.g., 'MORDRED', 'RDKIT', 'MorganFP').")
