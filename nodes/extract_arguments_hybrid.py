@@ -512,19 +512,26 @@ class HybridArgumentExtractor:
                         print(f"   ✗ Could not resolve '{smiles}' - skipping")
         
         # Add any SMILES found by rules that weren't captured above
+        def _get_canonical(s):
+            if _RDKit_AVAILABLE:
+                try:
+                    mol = Chem.MolFromSmiles(s)
+                    if mol: return Chem.MolToSmiles(mol)
+                except: pass
+            return s
+
+        canonical_validated = {_get_canonical(s) for s in validated_smiles}
         rule_smiles_added = 0
+        
         for smiles in rule_result.get('starting_molecules', []):
-            if smiles not in validated_smiles:
+            can_s = _get_canonical(smiles)
+            if can_s not in canonical_validated:
                 validated_smiles.append(smiles)
+                canonical_validated.add(can_s)
                 rule_smiles_added += 1
         
         if rule_smiles_added > 0:
             supplements.append(f"{rule_smiles_added} additional SMILES from rule-based extraction")
-            validated_smiles.append(smiles)
-            rule_smiles_added += 1
-        
-        if rule_smiles_added > 0:
-            supplements.append(f"{rule_smiles_added} SMILES from rules")
         
         merged['starting_molecules'] = validated_smiles
 
