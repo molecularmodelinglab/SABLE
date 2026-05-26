@@ -55,7 +55,7 @@ def _is_likely_smiles(s: str) -> bool:
         except Exception:
             return False
     else:
-        return bool(re.search(r"^(?:\[.*?\]|Br|Cl|[A-Z][a-z]?|[cnops])+[A-Za-z0-9@+\-\[\]()=#%\.]*$", s))
+        return bool(re.search(r"^(?:\[.*?\]|Br|Cl|[A-Z][a-z]?|[cnops])+[A-Za-z0-9@+\-\[\]()=#%\.\/\\]*$", s))
 
 class HybridArgumentExtractor:
     """Combines LLM-based extraction with rule-based validation and fallbacks."""
@@ -162,7 +162,7 @@ class HybridArgumentExtractor:
         parsed = {}
         
         # look for SMILES patterns or molecule names
-        smiles_pattern = r"(?:\[.*?\]|Br|Cl|[A-Z][a-z]?|[cnops])[A-Za-z0-9@+\-\[\]()=#%\.]*"
+        smiles_pattern = r"(?:\[.*?\]|Br|Cl|[A-Z][a-z]?|[cnops])[A-Za-z0-9@+\-\[\]()=#%\.\/\\]*"
         smiles_matches = re.findall(smiles_pattern, prompt)
         candidates = [s for s in smiles_matches if _is_likely_smiles(s)]
         
@@ -758,7 +758,8 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
     llm_result = extractor.extract_with_llm(state.user_prompt)
     
     # Always run rule-based as fallback/validation
-    rule_result = extractor.extract_with_rules(state.user_prompt)
+    # rule_result = extractor.extract_with_rules(state.user_prompt)
+    rule_result = {} # Temporarily disabled
     
     final_result = extractor.validate_and_merge(llm_result, rule_result, state.user_prompt)
 

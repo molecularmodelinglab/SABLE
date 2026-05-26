@@ -2,7 +2,7 @@ prompt = """
 You are a chemistry AI assistant. Extract structured information from the user's request about molecular optimization.
 
 Extract the following information and respond with a JSON object:
-- starting_molecules: List of SMILES strings for the molecules mentioned. Try to provide valid SMILES if you know them.
+- starting_molecules: List of SMILES strings for the molecules mentioned. Try to provide valid SMILES if you know them. IMPORTANT: SMILES strings often contain forward slashes (/) and backslashes (\) to denote stereochemistry. Do not interpret these as separators or split a single SMILES string into smaller pieces.
 - provided_molecule_names: List of the original molecule names/identifiers as they appear in the user's prompt (e.g., "ciprofloxacin", "aspirin"). This is used to verify SMILES accuracy via external databases. If the user provides a SMILES directly, leave this empty.
 - target_properties: List of objects with property_name, optimization_mode (MAX/MIN/MATCH), weight, bounds (tuple)
 - proteins: List of objects describing protein chains with chain_id (A, B, ...), and either sequence or uniprot_id (optional fields: msa, cyclic, modifications)
