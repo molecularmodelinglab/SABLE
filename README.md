@@ -137,16 +137,16 @@ python run_workflow.py --example
 The codebase is organized into clear modules so you can swap or add nodes/tools without changing the whole system.
 
 - `edges/graph_builder.py`: builds the LangGraph state graph and wires node transitions
-- `nodes/`: individual workflow nodes (e.g., `extract_arguments.py`, `enumerate_molecules.py`, `bo_iteration.py`, `characterize_molecules.py`, `check_exit_conditions.py`, `summarize_results.py`)
-- `tools/`: pluggable tools used by nodes (e.g., `enumerator_tool.py`, `molecule_characterization_tool.py`, `bayesopt_tool.py`, `stoplight_tool.py`)
+- `nodes/`: individual workflow nodes (e.g., `extract_arguments_hybrid.py`, `enumerate_molecules.py`, `bo_iteration.py`, `characterize_molecules.py`, `check_exit_conditions.py`, `summarize_results.py`)
+- `tools/`: pluggable tools used by nodes (e.g., `healer_enumerator_tool.py`, `molecule_characterization_tool.py`, `baybe_optimizer_tool.py`, `stoplight_tool.py`)
 - `schemas/`: Pydantic models for state, characterization schemas, error types
 - `run_workflow.py`: runner with checkpointing and exporting
 
 Common extension points:
 
-- Add a new property or tool: extend `schemas/characterization.py` mappings and implement a tool under `tools/`; wire it in `nodes/characterize_molecules.py`.
+- Add a new property or tool: extend `schemas/characterization.py` mappings, implement a tool under `tools/`, and register it in `config/tools.yml`.
 - Change selection strategy: update `nodes/bo_iteration.py` or the optimizer tool.
-- New inputs or parsing rules: modify `nodes/extract_arguments.py`.
+- New inputs or parsing rules: modify `nodes/argument_extraction/` and keep `nodes/extract_arguments_hybrid.py` as the graph-facing wrapper.
 
 Tip: emit structured telemetry for new nodes/tools so failures are actionable.
 
