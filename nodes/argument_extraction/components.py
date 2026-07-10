@@ -22,6 +22,15 @@ except Exception:
     print("Name-to-SMILES resolver not available; molecule name resolution will be limited.")
 
 
+def _get_canonical(s):
+    if _RDKit_AVAILABLE:
+        try:
+            mol = Chem.MolFromSmiles(s)
+            if mol: return Chem.MolToSmiles(mol)
+        except: pass
+    return s
+
+
 def is_likely_smiles(value: str) -> bool:
     """Conservative SMILES validator."""
     if not isinstance(value, str) or not value or len(value) > 200 or " " in value:
@@ -46,7 +55,7 @@ def is_likely_smiles(value: str) -> bool:
         except Exception:
             return False
 
-    return bool(re.search(r"^(?:\[.*?\]|Br|Cl|[A-Z][a-z]?|[cnops])+[A-Za-z0-9@+\-\[\]()=#%\.]*$", value))
+    return bool(re.search(r"^(?:\[.*?\]|Br|Cl|[A-Z][a-z]?|[cnops])+[A-Za-z0-9@+\-\[\]()=#%\.\/\\]*$", value))
 
 
 def assess_llm_extraction_quality(extracted: Dict[str, Any], original_prompt: str) -> float:

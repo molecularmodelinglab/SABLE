@@ -26,6 +26,7 @@ from nodes.argument_extraction.components import (
     RuleArgumentExtractor,
     _argument_result_from_dict,
     _is_likely_smiles,
+    _get_canonical,
 )
 
 
@@ -73,7 +74,7 @@ class HybridArgumentExtractor:
 
     def extract_dict(self, prompt: str) -> Dict[str, Any]:
         llm_result = self.extract_with_llm(prompt)
-        rule_result = self.extract_with_rules(prompt)
+        rule_result = {} #self.extract_with_rules(prompt)
         if self.merger:
             return self.merger.merge(llm_result, rule_result, prompt)
         return self.validate_and_merge(llm_result, rule_result, prompt)
@@ -130,7 +131,7 @@ class HybridArgumentExtractor:
         parsed = {}
         
         # look for SMILES patterns or molecule names
-        smiles_pattern = r"(?:\[.*?\]|Br|Cl|[A-Z][a-z]?|[cnops])[A-Za-z0-9@+\-\[\]()=#%\.]*"
+        smiles_pattern = r"(?:\[.*?\]|Br|Cl|[A-Z][a-z]?|[cnops])[A-Za-z0-9@+\-\[\]()=#%\.\/\\]*"
         smiles_matches = re.findall(smiles_pattern, prompt)
         candidates = [s for s in smiles_matches if _is_likely_smiles(s)]
         
@@ -463,12 +464,18 @@ class HybridArgumentExtractor:
                         supplements.append(f"Resolved molecule name '{smiles}' to SMILES")
                     else:
                         print(f"   ✗ Could not resolve '{smiles}' - skipping")
+
+
+        #convert to canononical SMILES
+        canonical_validated = {_get_canonical(s) for s in validated_smiles}
         
         # Add any SMILES found by rules that weren't captured above
         rule_smiles_added = 0
         for smiles in rule_result.get('starting_molecules', []):
-            if smiles not in validated_smiles:
+            can_s = _get_canonical(smiles)
+            if can_s not in canonical_validated:
                 validated_smiles.append(smiles)
+                canonical_validated.add(can_s)
                 rule_smiles_added += 1
         
         if rule_smiles_added > 0:
