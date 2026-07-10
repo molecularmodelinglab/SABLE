@@ -10,6 +10,8 @@ from threading import RLock
 from typing import Any, Dict, List, Optional, Tuple, Callable, Union, ClassVar
 from pydantic import BaseModel, Field, PrivateAttr, model_validator, ConfigDict
 
+from schemas.tool_registry import ToolRunRecord, ToolSelection
+
 
 class OptimizationMode(str, Enum):
     """Defines the optimization mode for a target property."""
@@ -168,6 +170,22 @@ class WorkflowState(BaseModel):
     characterization_config: Dict[str, Any] = Field(
         default_factory=dict, description="Configuration for characterization tools."
     )
+    stage_config: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Generic per-stage configuration for registry-managed workflow stages.",
+    )
+    selected_tools: Dict[str, List[ToolSelection]] = Field(
+        default_factory=dict,
+        description="Tool selections made for each workflow stage.",
+    )
+    tool_runs: List[ToolRunRecord] = Field(
+        default_factory=list,
+        description="Structured records of registry-managed tool executions.",
+    )
+    extensions: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Namespaced extension data for future tools and plugins.",
+    )
     run_paths: Dict[str, str] = Field(
         default_factory=dict,
         description="Filesystem paths provisioned for this run (inputs, outputs, artifacts, etc.).",
@@ -268,6 +286,17 @@ class WorkflowState(BaseModel):
         self.best_molecules.append((result.smiles, composite_score))
         self.best_molecules.sort(key=lambda x: x[1], reverse=True)
         self.best_molecules = self.best_molecules[:10]
+
+    def record_tool_selection(self, selection: ToolSelection) -> None:
+        """Record a tool selected for a workflow stage."""
+        stage = selection.stage.value if hasattr(selection.stage, "value") else str(selection.stage)
+        self.selected_tools.setdefault(stage, []).append(selection)
+        self.log("tool_selected", selection.model_dump(mode="json"))
+
+    def record_tool_run(self, record: ToolRunRecord) -> None:
+        """Record a tool execution result for auditability."""
+        self.tool_runs.append(record)
+        self.log("tool_run_recorded", record.model_dump(mode="json"))
 
     def should_continue(self) -> bool:
         """Determines if the workflow should continue to the next iteration."""

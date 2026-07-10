@@ -16,7 +16,7 @@ class EnumerationStrategy(str, Enum):
 
 
 class HealerMode(str, Enum):
-    """High-level HEALER enumeration modes used by the EnumeratorTool."""
+    """High-level HEALER enumeration modes used by the HEALER enumerator."""
     MOLECULE_HEALER = "MoleculeHEALER"
     SITE_HEALER = "SiteHEALER"
     FRAGMENT_HEALER = "FragmentHEALER"
@@ -26,11 +26,16 @@ class EnumerationRequest(BaseModel):
     """Request for molecule enumeration."""
     starting_smiles: str
     strategy: EnumerationStrategy = EnumerationStrategy.REACTION_BASED
-    healer_mode: Optional[HealerMode] = Field(default=HealerMode.MOLECULE_HEALER, description="Which HEALER mode to use: MoleculeHEALER, SiteHEALER or FragmentHEALER.")
+    molecule_source: Optional[str] = None
+    healer_mode: Optional[HealerMode] = Field(
+        default=None,
+        description="HEALER-specific mode. Other enumerators should ignore this field.",
+    )
     max_molecules: int = Field(default=100, ge=1, le=10000)
     diversity_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
     property_filters: Optional[Dict[str, tuple[float, float]]] = None
     reaction_types: Optional[List[str]] = None
+    tool_options: Dict[str, Any] = Field(default_factory=dict)
 
 
 class EnumerationResult(BaseModel):
@@ -43,14 +48,19 @@ class EnumerationResult(BaseModel):
 
 class CharacterizationRequest(BaseModel):
     """Request for molecule characterization."""
-    smiles: Union[str, List[str]]
+    smiles: Union[str, List[str], Dict[str, str]]
     properties: List[str]  # e.g., ["QED", "TPSA", "LogP"]
     include_descriptors: bool = False
+    molecule_ids: List[str] = Field(default_factory=list)
+    search_space: Dict[str, str] = Field(default_factory=dict)
+    proteins: List[Dict[str, Any]] = Field(default_factory=list)
+    precision: int = 2
+    tool_options: Dict[str, Any] = Field(default_factory=dict)
 
 
 class CharacterizationResult(BaseModel):
     """Result from molecule characterization."""
-    results: Dict[str, Dict[str, float]]  # SMILES -> {property: value}
+    results: Dict[str, Dict[str, Any]]  # molecule ID or SMILES -> {property: value}
     failed_molecules: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
@@ -62,14 +72,52 @@ class BORecommendationRequest(BaseModel):
     measurements: Optional[List[Dict[str, Any]]] = None  # Previous measurements
     batch_size: int = Field(default=5, ge=1)
     encoding: str = os.getenv("MOLECULAR_FP", "MORDRED")
+    optimizer_strategy: Optional[str] = None
+    search_space_id_column: str = "Molecule_ID"
+    tool_options: Dict[str, Any] = Field(default_factory=dict)
 
 
 class BORecommendationResult(BaseModel):
     """Result from Bayesian Optimization."""
     recommended_ids: List[str]
-    acquisition_scores: Dict[str, float]
+    acquisition_scores: Dict[str, float] = Field(default_factory=dict)
     model_metrics: Dict[str, Any] = Field(default_factory=dict)
-    iteration: int
+    iteration: int = 0
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ArgumentExtractionRequest(BaseModel):
+    """Request for extracting structured workflow arguments from user input."""
+    prompt: str
+    context: Dict[str, Any] = Field(default_factory=dict)
+    preferred_properties: Optional[List[str]] = None
+
+
+class ArgumentExtractionResult(BaseModel):
+    """Structured arguments extracted from a prompt."""
+    parsed_arguments: Dict[str, Any] = Field(default_factory=dict)
+    starting_molecules: List[str] = Field(default_factory=list)
+    target_properties: List[Dict[str, Any]] = Field(default_factory=list)
+    proteins: List[Dict[str, Any]] = Field(default_factory=list)
+    confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    method: str = "unknown"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SummaryRequest(BaseModel):
+    """Request for summarizing a completed workflow state."""
+    workflow_id: str
+    user_prompt: str
+    results: Dict[str, Any] = Field(default_factory=dict)
+    logs: List[Dict[str, Any]] = Field(default_factory=list)
+    context: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SummaryResult(BaseModel):
+    """Result from a summarization stage."""
+    summary: str
+    highlights: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class LLMExperimentRequest(BaseModel):
