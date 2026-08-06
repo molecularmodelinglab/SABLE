@@ -19,6 +19,7 @@ _FPGEN = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
 PROPERTY_UNITS = {
   # Fill in as needed
   "binding_affinity": "logIC50",
+  
 }
 
 # Plotly modebar export settings for generated HTML plots.
