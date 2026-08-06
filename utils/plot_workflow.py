@@ -16,6 +16,18 @@ from rdkit.Chem import QED, rdMolDescriptors, Descriptors, rdFingerprintGenerato
 from rdkit.Chem.Draw import rdMolDraw2D
 
 _FPGEN = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+PROPERTY_UNITS = {
+  # Fill in as needed
+  "binding_affinity": "logIC50",
+  
+}
+
+# Plotly modebar export settings for generated HTML plots.
+PLOTLY_HTML_CONFIG = {
+    "toImageButtonOptions": {
+        "format": "svg",
+    }
+}
 
 
 HTML_POST_SCRIPT = r"""
@@ -282,6 +294,11 @@ def direction_label(prop: str, directions: dict[str, str]) -> str:
     return f"{prop} (opt: {m})" if m else f"{prop} (opt: ?)"
 
 
+def label_with_unit(prop: str) -> str:
+    u = PROPERTY_UNITS.get(_norm_key(prop))
+    return f"{prop} ({u})" if u else prop
+
+
 def build_search_space_df(raw: Dict[str, Any]) -> pd.DataFrame:
     space: Dict[str, str] = raw["search_space"]
     df = pd.DataFrame({"molecule_id": list(space.keys()), "smiles": list(space.values())})
@@ -532,7 +549,7 @@ def plot_prop_vs_iteration(obs_df: pd.DataFrame, prop: str, kind: str = "box",
     fig.update_layout(
         title=f"{direction_label(prop, directions or {})} vs iteration ({kind})",
         xaxis_title="Iteration",
-        yaxis_title=prop,
+        yaxis_title=label_with_unit(prop),
         xaxis=dict(type="category"),
     )
     return fig
@@ -568,7 +585,7 @@ def plot_bestN_so_far_box(
         fig.update_layout(
             title=f"{direction_label(prop, directions)} | best-N-so-far (empty)",
             xaxis_title="Iteration",
-            yaxis_title=prop,
+            yaxis_title=label_with_unit(prop),
             xaxis=dict(type="category"),
         )
         return fig
@@ -644,8 +661,15 @@ def plot_bestN_so_far_box(
         title=f"{direction_label(prop, directions)} | best-{N}-so-far box vs iteration" if N > 0
               else f"{direction_label(prop, directions)} | best-so-far box vs iteration",
         xaxis_title="Iteration",
-        yaxis_title=prop,
+        yaxis_title=label_with_unit(prop),
         xaxis=dict(type="category"),
+        legend=dict(
+            x=0.99,
+            y=0.99,
+            xanchor="right",
+            yanchor="top",
+            bgcolor="rgba(255,255,255,0.7)",
+        ),
     )
     return fig
 
@@ -656,7 +680,8 @@ def plot_tsne_space(space_df: pd.DataFrame,
                     directions: dict[str, str],
                     color_by: str = "first_seen_iteration",
                     perplexity: int = 30,
-                    random_state: int = 0) -> go.Figure:
+                    random_state: int = 0,
+                    starting_smiles: list[str] | None = None) -> go.Figure:
     """
     TSNE over the WHOLE search space.
     - Untested molecules plotted gray.
@@ -754,6 +779,20 @@ def plot_tsne_space(space_df: pd.DataFrame,
         hovertemplate="%{customdata[0].hover}<extra></extra>",
     ))
 
+    # starting molecules
+    if starting_smiles:
+        start_mask = df["smiles"].isin(starting_smiles)
+        if start_mask.any():
+            fig.add_trace(go.Scatter(
+                x=df.loc[start_mask, "x"],
+                y=df.loc[start_mask, "y"],
+                mode="markers",
+                name="starting",
+                marker=dict(symbol="star", size=16, color="red", line=dict(color="black", width=1)),
+                customdata=df.loc[start_mask, ["_payload"]].to_numpy(),
+                hovertemplate="%{customdata[0].hover}<extra></extra>",
+            ))
+
     fig.update_layout(
         width=1200,
         height=1000,
@@ -779,7 +818,7 @@ def plot_diversity(div_df: pd.DataFrame) -> go.Figure:
     fig.update_layout(
         title="Diversity vs iteration (Tanimoto similarity to previously tested set)",
         xaxis_title="Iteration",
-        yaxis_title="Tanimoto similarity (0..1)",
+        yaxis_title="Tanimoto similarity",
         height=450,
     )
     return fig
@@ -803,7 +842,11 @@ def plot_minmax_vs_iteration(obs_df: pd.DataFrame, prop: str,
         fig.add_hline(y=gmin, line_dash="dash", annotation_text="global min", annotation_position="bottom left")
         fig.add_hline(y=gmax, line_dash="dash", annotation_text="global max", annotation_position="top left")
 
-    fig.update_layout(title=f"{direction_label(prop, directions or {})} min/max vs iteration", xaxis_title="Iteration", yaxis_title=prop)
+    fig.update_layout(
+        title=f"{direction_label(prop, directions or {})} min/max vs iteration", 
+        xaxis_title="Iteration", 
+        yaxis_title=label_with_unit(prop)
+    )
     return fig
 
 
@@ -844,8 +887,11 @@ def plot_prop_pair(obs_df: pd.DataFrame, prop_x: str, prop_y: str,
         width=800,
         height=600,
         title=f"{direction_label(prop_x, directions or {})} vs {direction_label(prop_y, directions or {})}",
-        xaxis_title=prop_x, 
-        yaxis_title=prop_y
+        xaxis_title=label_with_unit(prop_x), 
+        yaxis_title=label_with_unit(prop_y),
+        legend=dict(x=1.18, y=1.0, xanchor="left", yanchor="top",
+                bgcolor="rgba(255,255,255,0.6)"),
+        margin=dict(l=40, r=240, t=60, b=40),
     )
     return fig
 
@@ -895,7 +941,9 @@ def plot_prop_triplet_3d(obs_df: pd.DataFrame, a: str, b: str, c: str,
     ))
     fig.update_layout(
         title=f"{direction_label(a, directions or {})} vs {direction_label(b, directions or {})} vs {direction_label(c, directions or {})} (3D)",
-        scene=dict(xaxis_title=a, yaxis_title=b, zaxis_title=c),
+        scene=dict(xaxis_title=label_with_unit(a), yaxis_title=label_with_unit(b), zaxis_title=label_with_unit(c)),
+        legend=dict(x=1.18, y=1.0, xanchor="left", yanchor="top", bgcolor="rgba(255,255,255,0.6)"),
+        margin=dict(l=40, r=240, t=60, b=40),
     )
     return fig
 
@@ -915,34 +963,71 @@ def make_triplet_plots(obs_df: pd.DataFrame, props: list[str],
 def plot_radial_iterations(obs_df: pd.DataFrame,
                            space_df: pd.DataFrame,
                            props: list[str],
-                           directions: dict[str, str]) -> go.Figure:
+                           directions: dict[str, str],
+                           starting_smiles: list[str] | None = None,
+                           top_n: int = 10) -> go.Figure:
     """
     Rings = iterations, wedges = properties.
-    Color = normalized value per (iteration, property).
+    Color = normalized mean of the best-top_n molecules *so far* (cumulative up to
+    and including that iteration) per property, direction-aware.
 
-    Normalization uses global min/max from space_df for each prop.
+    Normalization uses global min/max from space_df for each prop (falls back to obs_df).
     """
     df = obs_df.copy()
     df["iteration"] = df["iteration"].astype(int)
 
-    g = df.groupby("iteration")
-
-    # per-property aggregation based on direction:
-    # max for "max", min for "min"
-    it = pd.DataFrame(index=sorted(df["iteration"].unique()))
-    for p in props:
-        mode = (directions.get(_norm_key(p), "max")).lower()
-        if mode == "min":
-            it[p] = g[p].min()
-        else:
-            it[p] = g[p].max()
+    # best-N-so-far mean: for each iteration, take the best top_n unique molecules
+    # seen up to and including that iteration, then average their values.
+    iterations = sorted(df["iteration"].unique())
+    it = pd.DataFrame(index=iterations, columns=props, dtype=float)
+    for t in iterations:
+        sub = df[df["iteration"] <= t]
+        for p in props:
+            valid = sub[sub[p].notna()]
+            if valid.empty:
+                it.loc[t, p] = float("nan")
+                continue
+            mode = (directions.get(_norm_key(p), "max") or "max").lower()
+            # best value per unique molecule (handles re-tested molecules)
+            if mode == "min":
+                best_per_mol = valid.groupby("molecule_id")[p].min()
+                top = best_per_mol.nsmallest(top_n) if top_n > 0 else best_per_mol
+            else:
+                best_per_mol = valid.groupby("molecule_id")[p].max()
+                top = best_per_mol.nlargest(top_n) if top_n > 0 else best_per_mol
+            it.loc[t, p] = float(top.median())
 
     it = it.sort_index()
     iterations = it.index.tolist()
 
     # global min/max for normalization
-    gmin = {p: float(pd.to_numeric(space_df[p], errors="coerce").min(skipna=True)) for p in props}
-    gmax = {p: float(pd.to_numeric(space_df[p], errors="coerce").max(skipna=True)) for p in props}
+    # prefer space_df when the property is there; fall back to obs_df otherwise
+    def _global_min(p: str) -> float:
+        if p in space_df.columns:
+            return float(pd.to_numeric(space_df[p], errors="coerce").min(skipna=True))
+        return float(pd.to_numeric(obs_df[p], errors="coerce").min(skipna=True))
+
+    def _global_max(p: str) -> float:
+        if p in space_df.columns:
+            return float(pd.to_numeric(space_df[p], errors="coerce").max(skipna=True))
+        return float(pd.to_numeric(obs_df[p], errors="coerce").max(skipna=True))
+
+    gmin = {p: _global_min(p) for p in props}
+    gmax = {p: _global_max(p) for p in props}
+
+    # handle starting molecules
+    start_vals = None
+    if starting_smiles:
+        start_vals = {}
+        for p in props:
+            smi_to_v = starting_value_map(p, starting_smiles, space_df=space_df, obs_df=obs_df, directions=directions)
+            if not smi_to_v:
+                start_vals[p] = np.nan
+                continue
+            # represent starting "state" as direction-consistent best across starting molecules
+            mode = (directions.get(_norm_key(p), "max") or "max").lower()
+            vals = list(smi_to_v.values())
+            start_vals[p] = float(min(vals)) if mode == "min" else float(max(vals))
 
     def norm(p: str, v: float) -> float:
         lo, hi = gmin[p], gmax[p]
@@ -967,15 +1052,29 @@ def plot_radial_iterations(obs_df: pd.DataFrame,
     color = []
     hovertext = []
 
+    ring_offset = 0
+    # starting ring first (base=0)
+    if start_vals is not None:
+        for j, p in enumerate(props):
+            v = float(start_vals[p]) if pd.notna(start_vals[p]) else np.nan
+            nv = norm(p, v)
+            theta.append(angles[j])
+            r.append(1.0)
+            base.append(0.0)
+            color.append(nv)
+            hovertext.append(f"start<br>prop={p}<br>value={v}")
+        ring_offset = 1
+
+    # then iteration rings start at base=1
     for ring_idx, it_num in enumerate(iterations):
         for j, p in enumerate(props):
             v = float(it.loc[it_num, p])
             nv = norm(p, v)
             theta.append(angles[j])
             r.append(1.0)
-            base.append(float(ring_idx))
+            base.append(float(ring_idx + ring_offset))
             color.append(nv)
-            hovertext.append(f"iter={it_num}<br>prop={p}<br>value={v}")
+            hovertext.append(f"iter={it_num} (mean best-{top_n} so far)<br>prop={p}<br>value={v}")
 
     fig = go.Figure(go.Barpolar(
         theta=theta,
@@ -984,7 +1083,7 @@ def plot_radial_iterations(obs_df: pd.DataFrame,
         width=width,
         marker=dict(
             color=color,
-            colorscale="Viridis",
+            colorscale="Sunset_r",
             cmin=0.0,
             cmax=1.0,
             showscale=True,
@@ -996,8 +1095,18 @@ def plot_radial_iterations(obs_df: pd.DataFrame,
     ))
 
     # label rings with iteration numbers
-    tickvals = [i + 0.5 for i in range(len(iterations))]
-    ticktext = [str(it_num) for it_num in iterations]
+    if start_vals is not None:
+        tickvals = [0.0] + [i + 1.5 for i in range(len(iterations))]
+        tickvals += [tickvals[-1] + 1.0]
+        inner = [str(it) for it in iterations]
+        outer = ["It."]
+        ticktext = ["start"] + inner + outer
+    else:
+        tickvals = [i + 0.5 for i in range(len(iterations))]
+        tickvals += [tickvals[-1] + 1.0]
+        inner = [str(it) for it in iterations]
+        outer = ["It."]
+        ticktext = inner + outer
 
     fig.update_layout(
         width=800,
@@ -1015,6 +1124,8 @@ def plot_radial_iterations(obs_df: pd.DataFrame,
                 tickmode="array",
                 tickvals=tickvals,
                 ticktext=ticktext,
+                angle=0,
+                tickangle=0,
                 showline=False,
                 ticks="",
             ),
@@ -1174,8 +1285,8 @@ def plot_pareto_evolution_2d(obs_df: pd.DataFrame,
     # toggle overlay vs cumulative
     fig.update_layout(
         title=f"Pareto evolution: {direction_label(prop_x, directions)} vs {direction_label(prop_y, directions)}",
-        xaxis_title=prop_x,
-        yaxis_title=prop_y,
+        xaxis_title=label_with_unit(prop_x),
+        yaxis_title=label_with_unit(prop_y),
         width=1000, height=750,
         margin=dict(l=40, r=120, t=60, b=40),
         legend=dict(x=0.01, y=0.99, bgcolor="rgba(255,255,255,0.6)"),
@@ -1309,9 +1420,224 @@ def plot_pareto_evolution_3d(obs_df: pd.DataFrame,
                       for it in iters],
             "currentvalue": {"prefix": "iteration: "},
         }],
-        scene=dict(xaxis_title=a, yaxis_title=b, zaxis_title=c),
+        scene=dict(xaxis_title=label_with_unit(a), yaxis_title=label_with_unit(b), zaxis_title=label_with_unit(c)),
     )
     return fig
+
+
+def starting_value_map(
+    prop: str,
+    starting_smiles: list[str],
+    *,
+    space_df: pd.DataFrame,
+    obs_df: pd.DataFrame,
+    directions: dict[str, str],
+) -> dict[str, float]:
+    """
+    Returns {starting_smiles: value} where value is taken:
+      1) from space_df[prop] (if available; one row per starting SMILES)
+      2) else from obs_df[prop] aggregated by direction over rows matching starting SMILES
+    Missing stays absent (so caller can skip).
+    """
+    out: dict[str, float] = {}
+    mode = (directions.get(_norm_key(prop), "max") or "max").lower()
+
+    # Prefer space_df values when available
+    if prop in space_df.columns:
+        for smi in starting_smiles:
+            s = space_df.loc[space_df["smiles"] == smi, prop]
+            if not s.empty and pd.notna(s.iloc[0]):
+                out[smi] = float(s.iloc[0])
+
+    # Fill any missing from obs_df when available
+    if prop in obs_df.columns:
+        tmp = obs_df.loc[
+            obs_df["smiles"].isin(starting_smiles) & obs_df[prop].notna(),
+            ["smiles", prop],
+        ].copy()
+        if not tmp.empty:
+            if mode == "min":
+                agg = tmp.groupby("smiles")[prop].min()
+            else:
+                agg = tmp.groupby("smiles")[prop].max()
+            for smi, v in agg.items():
+                out.setdefault(str(smi), float(v))
+
+    return out
+
+
+def add_starting_hlines(
+    fig: go.Figure,
+    prop: str,
+    starting_smiles: list[str],
+    *,
+    space_df: pd.DataFrame,
+    obs_df: pd.DataFrame,
+    directions: dict[str, str],
+    row: int | None = None,
+    col: int | None = None,
+) -> None:
+    """
+    Adds one red dotted hline per starting molecule (when value is available).
+    """
+    smi_to_v = starting_value_map(prop, starting_smiles, space_df=space_df, obs_df=obs_df, directions=directions)
+    if not smi_to_v:
+        return
+
+    # Shapes from add_hline do not appear in legends, so add a dummy line trace once.
+    has_starting_score_legend = any(getattr(tr, "name", None) == "starting score" for tr in fig.data)
+    if not has_starting_score_legend:
+        legend_trace = go.Scatter(
+            x=[None],
+            y=[None],
+            mode="lines",
+            name="starting score",
+            line=dict(color="rgba(255,0,0,0.5)", dash="dot", width=2),
+            hoverinfo="skip",
+            showlegend=True,
+            legendgroup="starting_score",
+        )
+        if row is not None and col is not None:
+            fig.add_trace(legend_trace, row=row, col=col)
+        else:
+            fig.add_trace(legend_trace)
+
+    for i, (smi, v) in enumerate(smi_to_v.items(), start=1):
+        fig.add_hline(
+            y=v,
+            line_color="rgba(255,0,0,0.5)",
+            line_dash="dot",
+            row=row,
+            col=col,
+        )
+
+
+def _starting_image_svg(smi: str, space_df: pd.DataFrame) -> str:
+    if "image_svg" not in space_df.columns:
+        return ""
+    s = space_df.loc[space_df["smiles"] == smi, "image_svg"]
+    if s.empty or pd.isna(s.iloc[0]):
+        return ""
+    return str(s.iloc[0])
+
+
+def add_starting_star_2d(
+    fig: go.Figure,
+    *,
+    prop_x: str,
+    prop_y: str,
+    starting_smiles: list[str],
+    space_df: pd.DataFrame,
+    obs_df: pd.DataFrame,
+    directions: dict[str, str],
+    name: str = "starting",
+) -> None:
+    """
+    Adds red star markers for starting molecules on 2D scatter-type figures.
+    Skips molecules missing either coordinate.
+    """
+    xs = starting_value_map(prop_x, starting_smiles, space_df=space_df, obs_df=obs_df, directions=directions)
+    ys = starting_value_map(prop_y, starting_smiles, space_df=space_df, obs_df=obs_df, directions=directions)
+
+    pts = []
+    for smi in starting_smiles:
+        if smi in xs and smi in ys:
+            pts.append((smi, xs[smi], ys[smi]))
+
+    if not pts:
+        return
+
+    payloads = []
+    X, Y = [], []
+    for i, (smi, xv, yv) in enumerate(pts, start=1):
+        payload = {
+            "id": f"start_{i}",
+            "iter": None,
+            "smiles": smi,
+            "img": _starting_image_svg(smi, space_df),
+            "props": {prop_x: xv, prop_y: yv},
+        }
+        payload["hover"] = make_hover_string(payload["id"], payload["iter"], payload["smiles"], payload["props"], directions)
+        payloads.append(payload)
+        X.append(xv); Y.append(yv)
+
+    fig.add_trace(go.Scatter(
+        x=X, y=Y,
+        mode="markers",
+        name=name,
+        marker=dict(symbol="star", size=16, color="red", line=dict(color="black", width=1)),
+        customdata=np.array(payloads, dtype=object).reshape(-1, 1),
+        hovertemplate="%{customdata[0].hover}<extra></extra>",
+    ))
+
+
+def add_starting_star_3d(
+    fig: go.Figure,
+    *,
+    a: str, b: str, c: str,
+    starting_smiles: list[str],
+    space_df: pd.DataFrame,
+    obs_df: pd.DataFrame,
+    directions: dict[str, str],
+    name: str = "starting",
+) -> None:
+    xs = starting_value_map(a, starting_smiles, space_df=space_df, obs_df=obs_df, directions=directions)
+    ys = starting_value_map(b, starting_smiles, space_df=space_df, obs_df=obs_df, directions=directions)
+    zs = starting_value_map(c, starting_smiles, space_df=space_df, obs_df=obs_df, directions=directions)
+
+    pts = []
+    for smi in starting_smiles:
+        if smi in xs and smi in ys and smi in zs:
+            pts.append((smi, xs[smi], ys[smi], zs[smi]))
+
+    if not pts:
+        return
+
+    payloads = []
+    X, Y, Z = [], [], []
+    for i, (smi, xv, yv, zv) in enumerate(pts, start=1):
+        payload = {
+            "id": f"start_{i}",
+            "iter": None,
+            "smiles": smi,
+            "img": _starting_image_svg(smi, space_df),
+            "props": {a: xv, b: yv, c: zv},
+        }
+        payload["hover"] = make_hover_string(payload["id"], payload["iter"], payload["smiles"], payload["props"], directions)
+        payloads.append(payload)
+        X.append(xv); Y.append(yv); Z.append(zv)
+
+    fig.add_trace(go.Scatter3d(
+        x=X, y=Y, z=Z,
+        mode="markers",
+        name=name,
+        marker=dict(symbol="x", size=3.5, color="red"),
+        customdata=np.array(payloads, dtype=object).reshape(-1, 1),
+        hovertemplate="%{customdata[0].hover}<extra></extra>",
+    ))
+
+
+def fix_updatemenus_visible_for_added_trace(fig: go.Figure) -> None:
+    """
+    Pareto evolution buttons use explicit visible arrays. If we add a starting trace,
+    extend those arrays by one True so the star stays visible in both modes.
+    """
+    if not getattr(fig.layout, "updatemenus", None):
+        return
+    for menu in fig.layout.updatemenus:
+        if not getattr(menu, "buttons", None):
+            continue
+        for btn in menu.buttons:
+            args = getattr(btn, "args", None)
+            if not args or not isinstance(args, (list, tuple)):
+                continue
+            if len(args) < 1 or not isinstance(args[0], dict):
+                continue
+            if "visible" in args[0] and isinstance(args[0]["visible"], (list, tuple)):
+                vis = list(args[0]["visible"])
+                vis.append(True)
+                args[0]["visible"] = vis
+                btn.args = args
 
 
 def plot_from_raw(
@@ -1358,6 +1684,7 @@ def plot_from_raw(
 
     directions = get_opt_directions(raw)
     opt_props = list(directions.keys())
+    starting_smiles = list(raw["parsed_arguments"].get("starting_molecules", []))
 
     batch_size = int(raw["parsed_arguments"]["batch_size"])
 
@@ -1385,7 +1712,12 @@ def plot_from_raw(
     extrema_space_df = space_df if allow_global_extrema else None
 
     def _write(fig: go.Figure, name: str, post_script: str | None = None) -> None:
-        fig.write_html(outdir / f"{prefix}{name}.html", include_plotlyjs="cdn", post_script=post_script)
+        fig.write_html(
+            outdir / f"{prefix}{name}.html",
+            include_plotlyjs="cdn",
+            post_script=post_script,
+            config=PLOTLY_HTML_CONFIG,
+        )
 
     # --- Always make TSNE (chemical space) ---
     fig = plot_tsne_space(
@@ -1395,6 +1727,7 @@ def plot_from_raw(
         directions=directions,
         perplexity=tsne_perplexity,
         random_state=tsne_random_state,
+        starting_smiles=starting_smiles
     )
     _write(fig, "tsne_space", post_script=HTML_POST_SCRIPT)
 
@@ -1415,6 +1748,7 @@ def plot_from_raw(
             space_df=extrema_space_df,
             directions=directions,
         )
+        add_starting_hlines(fig, p, starting_smiles, space_df=space_df, obs_df=obs_df, directions=directions)
         _write(fig, f"{dist_kind}_iter_{p}", post_script=HTML_POST_SCRIPT)
 
         fig = plot_minmax_vs_iteration(
@@ -1423,9 +1757,11 @@ def plot_from_raw(
             space_df=extrema_space_df,
             directions=directions,
         )
+        add_starting_hlines(fig, p, starting_smiles, space_df=space_df, obs_df=obs_df, directions=directions)
         _write(fig, f"minmax_iter_{p}")
 
         prog = compute_objective_progress(obs_df, extrema_space_df, p, directions[_norm_key(p)])
+        add_starting_hlines(fig, p, starting_smiles, space_df=space_df, obs_df=obs_df, directions=directions, row=1, col=1)
         _write(plot_objective_progress(prog, p, directions[_norm_key(p)], space_df=extrema_space_df), f"progress_{p}")
 
         fig = plot_bestN_so_far_box(
@@ -1437,6 +1773,7 @@ def plot_from_raw(
             space_df=extrema_space_df,
             show_points=True,
         )
+        add_starting_hlines(fig, p, starting_smiles, space_df=space_df, obs_df=obs_df, directions=directions)
         _write(fig, f"bestN_sofar_box_{p}", post_script=HTML_POST_SCRIPT)
 
     # --- Pair plots (if >=2 objectives) ---
@@ -1448,9 +1785,14 @@ def plot_from_raw(
                     continue
 
                 fig = plot_prop_pair(obs_df, a, b, directions=directions)
+                add_starting_star_2d(fig, prop_x=a, prop_y=b, starting_smiles=starting_smiles,
+                                     space_df=space_df, obs_df=obs_df, directions=directions)
                 _write(fig, f"pair_{a}_vs_{b}", post_script=HTML_POST_SCRIPT)
 
                 fig = plot_pareto_evolution_2d(obs_df, a, b, directions=directions, overlay_all=True)
+                add_starting_star_2d(fig, prop_x=a, prop_y=b, starting_smiles=starting_smiles,
+                                     space_df=space_df, obs_df=obs_df, directions=directions)
+                fix_updatemenus_visible_for_added_trace(fig)
                 _write(fig, f"pareto_evolution_{a}_vs_{b}", post_script=HTML_POST_SCRIPT)
 
     # --- Triplet plots + radial (if >=3 objectives) ---
@@ -1463,16 +1805,23 @@ def plot_from_raw(
                         continue
 
                     fig = plot_prop_triplet_3d(obs_df, a, b, c, directions=directions)
+                    add_starting_star_3d(fig, a=a, b=b, c=c, starting_smiles=starting_smiles,
+                                         space_df=space_df, obs_df=obs_df, directions=directions)
                     _write(fig, f"triplet_{a}_{b}_{c}", post_script=HTML_POST_SCRIPT)
 
                     fig = plot_pareto_evolution_3d(obs_df, a, b, c, directions=directions, overlay_all=True)
+                    add_starting_star_3d(fig, a=a, b=b, c=c, starting_smiles=starting_smiles,
+                                         space_df=space_df, obs_df=obs_df, directions=directions)
+                    fix_updatemenus_visible_for_added_trace(fig)
                     _write(fig, f"pareto_evolution_{a}_{b}_{c}", post_script=HTML_POST_SCRIPT)
 
         fig = plot_radial_iterations(
             obs_df=obs_df,
             space_df=space_df,
-            props=[p for p in opt_props if p in obs_df.columns and p in space_df.columns],
+            props=[p for p in opt_props if p in obs_df.columns],
             directions=directions,
+            starting_smiles=starting_smiles,
+            top_n=bestN_min_n,
         )
         _write(fig, "radial_iterations", post_script=HTML_POST_SCRIPT)
 

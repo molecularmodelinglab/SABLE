@@ -12,7 +12,7 @@ Required Environment Variables:
 """
 
 import os
-from typing import Protocol, Optional
+from typing import Callable, Protocol, Optional
 from pathlib import Path
 from .system import prompt as system_instruction
 
@@ -92,41 +92,50 @@ class GeminiClient:
             return ""
 
 
+def _create_openai_client() -> Optional[LLMClient]:
+    api_key = os.environ.get("OPENAI_API_KEY")
+    base_url = os.environ.get("OPENAI_URL")
+    model = os.environ.get("OPENAI_MODEL", "gpt-5-chat")
+    if not api_key:
+        print("Warning: LLM_PROVIDER is 'openai' but OPENAI_API_KEY is not set.")
+        return None
+    print("Initializing OpenAI client...")
+    return OpenAIClient(base_url=base_url, api_key=api_key, model=model, system_prompt=system_instruction)
+
+
+def _create_gemini_client() -> Optional[LLMClient]:
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        print("Warning: LLM_PROVIDER is 'gemini' but GOOGLE_API_KEY is not set.")
+        return None
+    print("Initializing Gemini client...")
+    return GeminiClient(api_key=api_key)
+
+
+LLM_PROVIDER_FACTORIES: dict[str, Callable[[], Optional[LLMClient]]] = {
+    "openai": _create_openai_client,
+    "gemini": _create_gemini_client,
+}
+
+
+def create_llm_client(provider: Optional[str] = None) -> Optional[LLMClient]:
+    """Create an LLM client by provider id."""
+    provider_id = (provider or os.environ.get("LLM_PROVIDER", "gemini")).lower()
+    factory = LLM_PROVIDER_FACTORIES.get(provider_id)
+    if not factory:
+        print(
+            f"Warning: Unknown LLM_PROVIDER '{provider_id}'. "
+            f"Supported values are {', '.join(sorted(LLM_PROVIDER_FACTORIES))}."
+        )
+        return None
+    return factory()
+
+
 def get_llm_client() -> Optional[LLMClient]:
     """
     Factory function to get an LLM client based on environment variables.
 
-    Reads the `LLM_PROVIDER` environment variable to determine which client
-    to instantiate ('openai' or 'gemini'). It then uses the corresponding
-    API key environment variable (`OPENAI_API_KEY` or `GOOGLE_API_KEY`).
-
-    Returns:
-        An instance of a class that conforms to the LLMClient protocol,
-        or None if the configuration is invalid or keys are missing.
+    Returns an instance conforming to LLMClient, or None if configuration is
+    invalid or credentials are missing.
     """
-    provider = os.environ.get("LLM_PROVIDER", "gemini").lower()
-
-    if provider == "openai":
-        api_key = os.environ.get("OPENAI_API_KEY")
-        base_url = os.environ.get("OPENAI_URL")
-        model = os.environ.get("OPENAI_MODEL", "gpt-5-chat")
-        if not api_key:
-            print("Warning: LLM_PROVIDER is 'openai' but OPENAI_API_KEY is not set.")
-            return None
-        print("Initializing OpenAI client...")
-        return OpenAIClient(base_url=base_url, api_key=api_key, model=model, system_prompt=system_instruction)
-
-    elif provider == "gemini":
-        api_key = os.environ.get("GOOGLE_API_KEY")
-        if not api_key:
-            print("Warning: LLM_PROVIDER is 'gemini' but GOOGLE_API_KEY is not set.")
-            return None
-        print("Initializing Gemini client...")
-        return GeminiClient(api_key=api_key)
-
-    elif provider:
-        print(f"Warning: Unknown LLM_PROVIDER '{provider}'. Supported values are 'openai', 'gemini'.")
-        return None
-
-    else:
-        return None
+    return create_llm_client()

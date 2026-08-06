@@ -1,0 +1,187 @@
+properties:
+  qed:
+    label: QED
+    parser_keywords: [qed, drug-likeness, drug likeness, druglike]
+    default_bounds: [0.0, 1.0]
+    tool_names:
+      rdkit: QED
+      stoplight:
+
+  logp:
+    label: LogP
+    aliases: [alogp]
+    parser_keywords: [logp, lipophilicity, hydrophobicity, partition]
+    default_bounds: [-10.0, 10.0]
+    tool_names:
+      rdkit: LogP
+      stoplight: ALogP
+
+  tpsa:
+    label: TPSA
+    aliases: [polar_surface_area, psa]
+    parser_keywords: [tpsa, polar surface area, psa]
+    default_bounds: [0.0, 300.0]
+    tool_names:
+      rdkit: TPSA
+      stoplight: Polar Surface Area
+
+  molecular_weight:
+    label: Molecular Weight
+    aliases: [mw]
+    parser_keywords: [molecular weight, mw, weight, mass]
+    default_bounds: [0.0, 1000.0]
+    tool_names:
+      rdkit: Molecular_Weight
+      stoplight: Molecular Weight
+
+  h_bond_donors:
+    label: H-Bond Donors
+    aliases: [hbd]
+    parser_keywords: [h bond donor, hbd, hydrogen bond donor, donor]
+    default_bounds: [0.0, 20.0]
+    tool_names:
+      rdkit: H_Bond_Donors
+      stoplight: HBD
+
+  h_bond_acceptors:
+    label: H-Bond Acceptors
+    aliases: [hba]
+    parser_keywords: [h bond acceptor, hba, hydrogen bond acceptor, acceptor]
+    default_bounds: [0.0, 20.0]
+    tool_names:
+      rdkit: H_Bond_Acceptors
+      stoplight: HBA
+
+  rotatable_bonds:
+    label: Rotatable Bonds
+    parser_keywords: [rotatable, flexibility, rotatable bond]
+    default_bounds: [0.0, 30.0]
+    tool_names:
+      rdkit: Rotatable_Bonds
+      stoplight: Number of Rotatable Bonds
+
+  ring_count:
+    label: Ring Count
+    parser_keywords: [ring, cyclic, rings]
+    default_bounds: [0.0, 10.0]
+    tool_names:
+      rdkit: Ring_Count
+      stoplight: Number of Rings
+
+  heavy_atom_count:
+    label: Heavy Atom Count
+    aliases: [heavy_atoms]
+    parser_keywords: [heavy atom, non-hydrogen, heavy atoms]
+    default_bounds: [0.0, 100.0]
+    tool_names:
+      rdkit: Heavy_Atom_Count
+      stoplight: Num Heavy Atoms
+
+  solubility:
+    label: Solubility
+    parser_keywords: [solubility, soluble, water solubility, aqueous]
+    default_bounds: [-10.0, 0.0]
+    tool_names:
+      stoplight: Solubility in Water (mg/L)
+
+  fsp3:
+    label: FSP3
+    parser_keywords: [fsp3, fraction sp3, saturation]
+    default_bounds: [0.0, 1.0]
+    tool_names:
+      stoplight: FSP3
+
+  cns_activity:
+    label: CNS Activity
+    parser_keywords: [cns, brain, bbb, blood brain barrier, central nervous]
+    default_bounds: [0.0, 1.0]
+    tool_names:
+      stoplight: CNS Activity
+
+  toxicity:
+    label: Toxicity
+    parser_keywords: [toxicity, toxic, safe, safety]
+    default_bounds: [0.0, 1.0]
+
+  binding_affinity:
+    label: Binding Affinity
+    aliases: [affinity]
+    parser_keywords: [binding, affinity, ic50, ki, kd]
+    default_bounds: [-20.0, 20.0]
+    tool_names:
+      boltz: binding_affinity
+
+  permeability:
+    label: Permeability
+    parser_keywords: [permeability, permeable, caco-2, caco2]
+    default_bounds: [0.0, 1000.0]
+
+  molecular_formula:
+    label: Molecular Formula
+    tool_names:
+      rdkit: Molecular_Formula
+
+  exact_mass:
+    label: Exact Mass
+    tool_names:
+      rdkit: Exact_Mass
+
+  aromatic_ring_count:
+    label: Aromatic Ring Count
+    tool_names:
+      rdkit: Aromatic_Ring_Count
+
+  ampc_aggregation:
+    label: AMPC Aggregation
+    tool_names:
+      stoplight: AmpC β-lactamase aggregation
+
+  cruzain_aggregation:
+    label: Cruzain Aggregation
+    tool_names:
+      stoplight: Cysteine protease cruzain aggregation
+
+  firefly_luciferase:
+    label: Firefly Luciferase
+    tool_names:
+      stoplight: Firefly Luciferase interference
+
+  nano_luciferase:
+    label: Nano Luciferase
+    tool_names:
+      stoplight: Nano Luciferase interference
+
+  num_heavy_atoms:
+    label: Num Heavy Atoms
+    tool_names:
+      stoplight: Num Heavy Atoms
+
+  num_quaternary_carbons:
+    label: Num Quaternary Carbons
+    tool_names:
+      stoplight: Num Saturated Quaternary Carbons
+
+  number_of_rings:
+    label: Number of Rings
+    tool_names:
+      stoplight: Number of Rings
+
+  number_of_rotatable_bonds:
+    label: Number of Rotatable Bonds
+    tool_names:
+      stoplight: Number of Rotatable Bonds
+
+  redox_interference:
+    label: Redox Interference
+    tool_names:
+      stoplight: Redox Interference
+
+  solubility_water:
+    label: Solubility in Water
+    tool_names:
+      stoplight: Solubility in Water (mg/L)
+
+  thiol_interference:
+    label: Thiol Interference
+    tool_names:
+      stoplight: Thiol Interference

@@ -13,6 +13,7 @@ __pycache__/
 
 # Environments
 .env
+.lizard_auth_token.json
 .venv/
 .conda/
 

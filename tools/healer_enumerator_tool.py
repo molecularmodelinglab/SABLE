@@ -7,11 +7,12 @@ from rdkit import Chem
 
 from healer import MoleculeHEALER, SiteHEALER, FragmentHEALER
 from schemas.errors import ToolError
+from schemas.tool_schemas import EnumerationRequest, EnumerationResult
 
 from healer.domain import get_repository
 
-class EnumeratorInput(BaseModel):
-    """Input schema for the EnumeratorTool."""
+class HealerEnumeratorInput(BaseModel):
+    """Input schema for the HealerEnumeratorTool."""
     molecule: str = Field(..., description="SMILES string of the molecule to enumerate.")
     healer_mode: Optional[Any] = Field(default="MoleculeHEALER", description="Enumeration mode to use (default: ' MoleculeHEALER').")
     n_compositions: Optional[int] = Field(default=10, description="Number of compositions to enumerate (default: 10).")
@@ -23,15 +24,15 @@ class EnumeratorInput(BaseModel):
     verbose: Optional[int] = Field(default=0, description="Verbosity level for the enumeration process.")
 
 
-class EnumeratorTool(BaseTool):
+class HealerEnumeratorTool(BaseTool):
     """
     Enumerates a library of new molecules based on a starting molecule,
     using specified reactions and building blocks. Returns a dictionary
     mapping molecule IDs to their SMILES strings.
     """
-    name: str = "Enumerator"
-    description: str = Field(default="Enumerates new molecules from a starting compound using chemical reactions.")
-    args_schema: Type[BaseModel] = EnumeratorInput
+    name: str = "HealerEnumerator"
+    description: str = Field(default="Enumerates new molecules from a starting compound using HEALER.")
+    args_schema: Type[BaseModel] = HealerEnumeratorInput
     healer_mode: str = Field(default="MoleculeHEALER", description="HEALER enumeration mode: MoleculeHEALER, FragmentHEALER, or SiteHEALER")
     
     # Use PrivateAttr to exclude enumerator from Pydantic field validation
@@ -144,7 +145,7 @@ class EnumeratorTool(BaseTool):
             elapsed = time.perf_counter() - started_at
     
             print(
-                f"EnumeratorTool generated {len(enumerated_molecules_dict)} molecules "
+                f"HealerEnumeratorTool generated {len(enumerated_molecules_dict)} molecules "
                 f"in {elapsed:.2f}s."
             )
             return enumerated_molecules_dict
@@ -152,8 +153,29 @@ class EnumeratorTool(BaseTool):
         except ToolError:
             raise
         except Exception as e:
-            raise ToolError(f"Error in EnumeratorTool: {e}", tool="Enumerator", code="EXCEPTION")
-    
+            raise ToolError(f"Error in HealerEnumeratorTool: {e}", tool="healer", code="EXCEPTION")
+
+    def enumerate(self, request: EnumerationRequest) -> EnumerationResult:
+        """Run HEALER through the shared enumeration request/result contract."""
+        result = self._run(
+            molecule=request.starting_smiles,
+            n_compositions=request.max_molecules,
+        )
+        if isinstance(result, str):
+            raise ToolError(result, tool="healer", code="ENUMERATOR_FAILED")
+
+        strategy = request.strategy.value if hasattr(request.strategy, "value") else str(request.strategy)
+        return EnumerationResult(
+            molecules={str(mol_id): str(smiles) for mol_id, smiles in result.items()},
+            count=len(result),
+            strategy_used=strategy,
+            metadata={
+                "tool_id": "healer",
+                "healer_mode": self.healer_mode,
+                "starting_smiles": request.starting_smiles,
+            },
+        )
+
     @staticmethod
     def validate_smiles(smiles_string) -> bool:
         """Return True iff smiles parses and sanitizes, False otherwise (no exceptions)."""
@@ -181,4 +203,4 @@ class EnumeratorTool(BaseTool):
 
 
     async def _arun(self, **kwargs):
-        raise NotImplementedError("EnumeratorTool does not support async")
+        raise NotImplementedError("HealerEnumeratorTool does not support async")

@@ -11,19 +11,17 @@ import json
 from pathlib import Path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from rdkit import Chem
-from rdkit.Chem import Descriptors
 from schemas.state import WorkflowState, ExperimentResult, ProteinTarget
 from schemas.errors import NodeError
+from schemas.tool_registry import ToolKind, ToolRunRecord, ToolSpec
+from schemas.tool_schemas import CharacterizationRequest, CharacterizationResult
 from utils.telemetry import emit_event
 from schemas.characterization import (
-    CharacterizationTool,
     PROPERTY_MAPPINGS,
-    normalize_property_name
+    normalize_property_name,
+    select_characterization_tool_ids,
 )
-from tools.molecule_characterization_tool import MoleculeCharacterizationTool
-from tools.stoplight_tool import StoplightTool
-from tools.boltz_tool import BoltzTool, ToolException
+from tools.registry import get_tool_registry
 
 
 def _protein_target_to_polymer(protein: ProteinTarget) -> Dict[str, Any]:
@@ -79,245 +77,170 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
         print(f"   Total molecules tested: {len(state.experimental_results)}")
         return state
     
-    # Get tool choice
-    raw_tool_choice = state.characterization_config.get('tool', CharacterizationTool.AUTO)
-    tool_choice = (
-        CharacterizationTool(raw_tool_choice)
-        if not isinstance(raw_tool_choice, CharacterizationTool)
-        else raw_tool_choice
-    )
+    registry = get_tool_registry()
+    normalized_target_names = [normalize_property_name(t.name) for t in state.targets]
+    selected_tool_ids = _resolve_characterization_tool_ids(state, normalized_target_names)
+    tool_choice = state.characterization_config.get('tool') or _legacy_tool_label(selected_tool_ids)
+    state.characterization_config['tool'] = tool_choice
+    state.characterization_config['tool_ids'] = selected_tool_ids
 
     results: Dict[str, Dict[str, Any]] = {}
-    tools_executed: List[CharacterizationTool] = []
+    tools_executed: List[str] = []
     boltz_metadata: Dict[str, Dict[str, Any]] = {}
 
-    normalized_target_names = [normalize_property_name(t.name) for t in state.targets]
+    characterization_ids: List[str] = list(state.current_bo_recommendations or [])
+    characterization_smiles_map: Dict[str, str] = {
+        mol_id: state.search_space.get(mol_id)
+        for mol_id in characterization_ids
+        if state.search_space.get(mol_id)
+    }
+    baseline_molecule_ids: List[str] = []
+    baselines_profile = state.profiling.setdefault("baselines", {})
+
+    # Record one-time structured baseline entries for starting molecules.
+    # These IDs are synthetic and stored in metadata as baselines.
+    if not baselines_profile.get("starting_molecules_structured_done", False) and state.starting_molecules:
+        measured_smiles = {result.smiles for result in state.experimental_results}
+        known_smiles = set(characterization_smiles_map.values())
+
+        for index, smiles in enumerate(state.starting_molecules):
+            if not smiles or smiles in known_smiles or smiles in measured_smiles:
+                continue
+
+            baseline_id = f"start_baseline_{index:03d}"
+            suffix = 1
+            while baseline_id in characterization_smiles_map:
+                baseline_id = f"start_baseline_{index:03d}_{suffix}"
+                suffix += 1
+
+            characterization_smiles_map[baseline_id] = smiles
+            characterization_ids.append(baseline_id)
+            baseline_molecule_ids.append(baseline_id)
+            known_smiles.add(smiles)
+
+        baselines_profile["starting_molecules_structured_done"] = True
+        state.log("characterize_structured_baseline_selection", {
+            "starting_molecules": len(state.starting_molecules),
+            "baseline_added": len(baseline_molecule_ids),
+            "already_present_or_measured": len(state.starting_molecules) - len(baseline_molecule_ids),
+        })
+
+    characterization_search_space: Dict[str, str] = dict(state.search_space)
+    characterization_search_space.update(characterization_smiles_map)
+
     requires_boltz = state.characterization_config.get('requires_boltz', False) or (
         'binding_affinity' in normalized_target_names
     )
-    boltz_only = state.characterization_config.get('boltz_only', False) or tool_choice == CharacterizationTool.BOLTZ
-
-    should_run_rdkit = tool_choice in {CharacterizationTool.RDKIT, CharacterizationTool.COMBINED}
-    should_run_stoplight = tool_choice in {CharacterizationTool.STOPLIGHT, CharacterizationTool.COMBINED}
-    
-    # Use RDKit tool
-    if should_run_rdkit:
-        try:
-            rdkit_started_at = time.perf_counter()
-            rdkit_tool = MoleculeCharacterizationTool()
-            rdkit_result = rdkit_tool._run(
-                search_space=state.search_space,
-                ids_to_process=state.current_bo_recommendations
-            )
-            tools_executed.append(CharacterizationTool.RDKIT)
-            
-            # Extract results from memory
-            if rdkit_result:
-                for mol_id, props in rdkit_result.items():
-                    if mol_id not in results:
-                        results[mol_id] = {}
-                    results[mol_id].update(props)
-                    
-            state.log("characterize_rdkit_completed", {
-                "molecules_processed": len(results),
-                "properties": list(next(iter(results.values())).keys()) if results else [],
-                "elapsed_seconds": round(time.perf_counter() - rdkit_started_at, 3),
-            })
-        except Exception as e:
-            emit_event(state, kind="rdkit_tool_exception", node="characterize_molecules", tool="MoleculeCharacterizer", severity="error", data={"error": str(e)})
-    
-    # Use Stoplight tool
-    if should_run_stoplight:
-        try:
-            stoplight_started_at = time.perf_counter()
-            stoplight_tool = StoplightTool()
-            stoplight_result = stoplight_tool._run(
-                precision=2,
-                search_space=state.search_space,
-                ids_to_process=state.current_bo_recommendations
-            )
-            tools_executed.append(CharacterizationTool.STOPLIGHT)
-
-            # Extract results from memory
-            if stoplight_result:
-                for mol_id, props in stoplight_result.items():
-                    if mol_id not in results:
-                        results[mol_id] = {}
-                    results[mol_id].update(props)
-                    
-            state.log("characterize_stoplight_completed", {
-                "molecules_processed": len(results),
-                "api_response": stoplight_result,
-                "elapsed_seconds": round(time.perf_counter() - stoplight_started_at, 3),
-            })
-        except Exception as e:
-            emit_event(state, kind="stoplight_tool_exception", node="characterize_molecules", tool="Stoplight", severity="error", data={"error": str(e)})
-    
-    # Run Boltz affinity predictions if required
+    boltz_only = state.characterization_config.get('boltz_only', False) or selected_tool_ids == ['boltz']
     boltz_recorded = False
-    if requires_boltz or boltz_only:
-        proteins = getattr(state, 'protein_targets', [])
-        ligands_map = {
-            mol_id: state.search_space.get(mol_id)
-            for mol_id in (state.current_bo_recommendations or [])
-            if state.search_space.get(mol_id)
-        }
 
-        if not proteins:
+    for tool_id in selected_tool_ids:
+        spec = registry.get(tool_id)
+        request: CharacterizationRequest | None = None
+        try:
+            request = _build_characterization_request(
+                tool_id=tool_id,
+                state=state,
+                characterization_ids=characterization_ids,
+                characterization_smiles_map=characterization_smiles_map,
+                characterization_search_space=characterization_search_space,
+                baseline_molecule_ids=baseline_molecule_ids,
+                baselines_profile=baselines_profile,
+            )
+            if not request.molecule_ids:
+                emit_event(
+                    state,
+                    kind="characterizer_no_molecules",
+                    node="characterize_molecules",
+                    tool=tool_id,
+                    severity="warning",
+                )
+                continue
+
+            tool_started_at = time.perf_counter()
+            tool = _create_characterization_tool(registry, spec, request)
+            result = _run_characterization_tool(spec, tool, request)
+            _merge_characterization_result(results, boltz_metadata, result)
+            tools_executed.append(tool_id)
+
+            if tool_id == "boltz":
+                boltz_recorded = True
+
+            state.record_tool_run(ToolRunRecord(
+                tool_id=tool_id,
+                stage=ToolKind.CHARACTERIZER,
+                status="completed",
+                inputs=_characterization_run_inputs(request),
+                outputs={
+                    "molecule_count": len(result.results),
+                    "failed_molecule_count": len(result.failed_molecules),
+                },
+                metadata={"result_metadata": result.metadata},
+            ))
+            state.log(f"characterize_{tool_id}_completed", {
+                "molecules_processed": len(result.results),
+                "properties": _result_property_names(result),
+                "elapsed_seconds": round(time.perf_counter() - tool_started_at, 3),
+            })
+        except NodeError as exc:
+            state.record_tool_run(ToolRunRecord(
+                tool_id=tool_id,
+                stage=ToolKind.CHARACTERIZER,
+                status="failed",
+                inputs=_characterization_run_inputs(request) if request else {"molecule_count": len(characterization_ids)},
+                errors=[str(exc)],
+            ))
+            raise
+        except Exception as exc:
+            state.record_tool_run(ToolRunRecord(
+                tool_id=tool_id,
+                stage=ToolKind.CHARACTERIZER,
+                status="failed",
+                inputs=_characterization_run_inputs(request) if request else {"molecule_count": len(characterization_ids)},
+                errors=[str(exc)],
+            ))
             emit_event(
                 state,
-                kind="boltz_missing_proteins",
+                kind=f"{tool_id}_tool_exception",
                 node="characterize_molecules",
+                tool=tool_id,
                 severity="error",
-                data={"message": "Binding affinity requested but no protein targets available."}
+                data={"error": str(exc)},
             )
-        elif not ligands_map:
-            emit_event(
-                state,
-                kind="boltz_missing_ligands",
-                node="characterize_molecules",
-                severity="error",
-                data={"message": "Binding affinity requested but no ligand SMILES available."}
-            )
-        else:
-            boltz_config = state.characterization_config.get('boltz_config', {}) or {}
-
-            if not boltz_config.get('cif_save_dir'):
-                env_cif_dir = os.environ.get("BOLTZ_CIF_DIR")
-                if env_cif_dir:
-                    boltz_config['cif_save_dir'] = env_cif_dir
-                else:
-                    run_paths = getattr(state, 'run_paths', {}) or {}
-                    artifacts_dir = run_paths.get('artifacts')
-                    if artifacts_dir:
-                        boltz_config['cif_save_dir'] = str(Path(artifacts_dir) / "boltz_cifs")
-
-            state.characterization_config['boltz_config'] = boltz_config
-            base_url = boltz_config.get('base_url') or os.environ.get("BOLTZ_BASE_URL", "").strip()
-            api_token = boltz_config.get('api_token') or os.environ.get("BOLTZ_API_TOKEN", "").strip()
-
-            polymers_payload = [_protein_target_to_polymer(protein) for protein in proteins]
-
-            if base_url and api_token:
-                try:
-                    boltz_started_at = time.perf_counter()
-                    print("⚙️  Invoking Boltz affinity tool for", len(ligands_map), "ligands and", len(polymers_payload), "proteins")
-                    boltz_tool = BoltzTool(
-                        base_url=base_url,
-                        api_token=api_token,
-                        timeout=boltz_config.get('timeout', 900.0),
-                        max_retries=boltz_config.get('max_retries', 1),
-                        fetch_cif=boltz_config.get('fetch_cif', True),
-                        cif_save_dir=boltz_config.get('cif_save_dir'),
-                        latency_seconds=boltz_config.get('latency_seconds'),
-                        poll_interval=boltz_config.get('poll_interval'),
-                        poll_attempts=boltz_config.get('poll_attempts'),
-                    )
-
-                    response = asyncio.run(boltz_tool._arun(
-                        ligands=ligands_map,
-                        polymers=polymers_payload,
-                        constraints=boltz_config.get('constraints'),
-                        templates=boltz_config.get('templates'),
-                    ))
-
-                    print("✅ Boltz tool returned response")
-
-                    if isinstance(response, str):
-                        try:
-                            response_data = json.loads(response)
-                        except json.JSONDecodeError as exc:
-                            raise ToolException(f"Failed to decode Boltz response: {exc}")
-                    else:
-                        response_data = response
-
-                    per_ligand = response_data.get('per_ligand', {})
-                    for ligand_id, info in per_ligand.items():
-                        affinity = info.get('affinity')
-                        if affinity is None:
-                            continue
-                        
-                        # Handle affinity as dict (Boltz returns multiple prediction values)
-                        if isinstance(affinity, dict):
-                            affinity_value = affinity.get('affinity_pred_value')
-                            if affinity_value is None:
-                                # Fallback to first numeric value if primary key not found
-                                for v in affinity.values():
-                                    if isinstance(v, (int, float)):
-                                        affinity_value = v
-                                        break
-                            if affinity_value is None:
-                                continue
-                        else:
-                            affinity_value = affinity
-                        results.setdefault(ligand_id, {})
-                        results[ligand_id]['binding_affinity'] = float(affinity_value)
-                        boltz_metadata[ligand_id] = {
-                            **info,
-                            'reliability_weighted': False,
-                        }
-
-
-
-                    missing_affinity = set(ligands_map.keys()) - set(per_ligand.keys())
-                    if missing_affinity:
-                        raise NodeError(
-                            "Boltz did not return affinity for all requested ligands",
-                            node="characterize_molecules",
-                            code="BOLTZ_MISSING_AFFINITY",
-                            details={"missing_ligand_ids": sorted(missing_affinity)},
-                        )
-
-                    boltz_recorded = True
-                    tools_executed.append(CharacterizationTool.BOLTZ)
-                    state.log("characterize_boltz_completed", {
-                        "ligands": len(ligands_map),
-                        "proteins": len(proteins),
-                        "response_keys": list(per_ligand.keys()),
-                        "elapsed_seconds": round(time.perf_counter() - boltz_started_at, 3),
-                    })
-
-                except ToolException as exc:
-                    emit_event(state, kind="boltz_tool_error", node="characterize_molecules", tool="Boltz", severity="error", data={"error": str(exc)})
-                    raise NodeError(
-                        f"Boltz execution failed: {str(exc)}",
-                        node="characterize_molecules",
-                        code="BOLTZ_TOOL_ERROR",
-                    )
-                except Exception as exc:  # Catch network/JSON issues
-                    emit_event(state, kind="boltz_exception", node="characterize_molecules", severity="error", data={"error": str(exc)})
-                    raise NodeError(
-                        f"Boltz execution failed: {str(exc)}",
-                        node="characterize_molecules",
-                        code="BOLTZ_EXCEPTION",
-                    )
-            else:
-                emit_event(state, kind="boltz_unconfigured", node="characterize_molecules", severity="error", data={"message": "Boltz credentials missing while binding affinity is required."})
+            if tool_id == "boltz":
+                error_code = "BOLTZ_TOOL_ERROR" if type(exc).__name__ == "ToolException" else "BOLTZ_EXCEPTION"
                 raise NodeError(
-                    "Binding affinity requested but Boltz is not configured",
+                    f"Boltz execution failed: {str(exc)}",
                     node="characterize_molecules",
-                    code="BOLTZ_UNCONFIGURED",
+                    code=error_code,
                 )
 
-            if not boltz_recorded and (requires_boltz or boltz_only):
-                raise NodeError(
-                    "Binding affinity requested but Boltz did not complete successfully",
-                    node="characterize_molecules",
-                    code="BOLTZ_NOT_RECORDED",
-                )
+    if (requires_boltz or boltz_only or "boltz" in selected_tool_ids) and "boltz" in selected_tool_ids and not boltz_recorded:
+        raise NodeError(
+            "Binding affinity requested but Boltz did not complete successfully",
+            node="characterize_molecules",
+            code="BOLTZ_NOT_RECORDED",
+        )
 
     # Prepare metadata for experiment results
     executed_tool_names: List[str] = []
-    for tool in tools_executed:
-        value = tool.value if isinstance(tool, CharacterizationTool) else str(tool)
-        if value not in executed_tool_names:
-            executed_tool_names.append(value)
+    for tool_id in tools_executed:
+        if tool_id not in executed_tool_names:
+            executed_tool_names.append(tool_id)
 
     # Convert results to ExperimentResult objects
     mapped_any = False
-    for mol_id in state.current_bo_recommendations:
-        if mol_id in state.search_space and mol_id in results:
-            smiles = state.search_space[mol_id]
+    baseline_molecule_id_set = set(baseline_molecule_ids)
+    result_molecule_ids: List[str] = []
+    seen_result_ids = set()
+    for mol_id in [*characterization_ids, *baseline_molecule_ids]:
+        if mol_id in seen_result_ids:
+            continue
+        seen_result_ids.add(mol_id)
+        result_molecule_ids.append(mol_id)
+    for mol_id in result_molecule_ids:
+        smiles = characterization_smiles_map.get(mol_id) or state.search_space.get(mol_id)
+        if smiles and mol_id in results:
             
             # Map properties to target names
             mapped_properties = {}
@@ -356,9 +279,11 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
             # Create ExperimentResult
             if mapped_properties:
                 metadata: Dict[str, Any] = {
-                    "characterization_tool": tool_choice.value if isinstance(tool_choice, CharacterizationTool) else str(tool_choice),
+                    "characterization_tool": str(tool_choice),
+                    "selected_tool_ids": list(selected_tool_ids),
                     "tools_used": executed_tool_names,
-                    "all_properties": dict(results[mol_id])
+                    "all_properties": dict(results[mol_id]),
+                    "is_starting_molecule_baseline": mol_id in baseline_molecule_id_set,
                 }
 
                 boltz_info = boltz_metadata.get(mol_id)
@@ -380,7 +305,8 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
         raise NodeError("Characterization produced no mappable properties for targets", node="characterize_molecules", code="NO_USABLE_DATA")
     
     state.log("characterize_molecules_completed", {
-        "tool_used": tool_choice.value if isinstance(tool_choice, CharacterizationTool) else str(tool_choice),
+        "tool_used": str(tool_choice),
+        "tool_ids": selected_tool_ids,
         "tools_executed": executed_tool_names,
         "molecules_characterized": len(results),
         "properties_mapped": len(state.experimental_results),
@@ -394,3 +320,377 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
     print(f"   - Should continue: {state.should_continue()}")
     
     return state
+
+
+def _build_characterization_request(
+    tool_id: str,
+    state: WorkflowState,
+    characterization_ids: List[str],
+    characterization_smiles_map: Dict[str, str],
+    characterization_search_space: Dict[str, str],
+    baseline_molecule_ids: List[str],
+    baselines_profile: Dict[str, Any],
+) -> CharacterizationRequest:
+    ids_to_process = list(characterization_ids)
+    properties = [target.name for target in state.targets]
+    proteins_payload: List[Dict[str, Any]] = []
+    tool_options: Dict[str, Any] = {}
+
+    if tool_id == "boltz":
+        ids_to_process = _boltz_ids_to_process(
+            state=state,
+            characterization_ids=characterization_ids,
+            characterization_smiles_map=characterization_smiles_map,
+            characterization_search_space=characterization_search_space,
+            baseline_molecule_ids=baseline_molecule_ids,
+            baselines_profile=baselines_profile,
+        )
+        proteins = getattr(state, 'protein_targets', [])
+        if not proteins:
+            emit_event(
+                state,
+                kind="boltz_missing_proteins",
+                node="characterize_molecules",
+                severity="error",
+                data={"message": "Binding affinity requested but no protein targets available."}
+            )
+            raise NodeError(
+                "Binding affinity requested but no protein targets are available",
+                node="characterize_molecules",
+                code="BOLTZ_MISSING_PROTEINS",
+            )
+        proteins_payload = [_protein_target_to_polymer(protein) for protein in proteins]
+        tool_options = _boltz_tool_options(state)
+
+    smiles_by_id = {
+        mol_id: characterization_search_space.get(mol_id) or characterization_smiles_map.get(mol_id)
+        for mol_id in ids_to_process
+    }
+    smiles_by_id = {mol_id: smiles for mol_id, smiles in smiles_by_id.items() if smiles}
+
+    if tool_id == "boltz" and not smiles_by_id:
+        emit_event(
+            state,
+            kind="boltz_missing_ligands",
+            node="characterize_molecules",
+            severity="error",
+            data={"message": "Binding affinity requested but no ligand SMILES available."}
+        )
+        raise NodeError(
+            "Binding affinity requested but no ligand SMILES are available",
+            node="characterize_molecules",
+            code="BOLTZ_MISSING_LIGANDS",
+        )
+
+    return CharacterizationRequest(
+        smiles=smiles_by_id,
+        properties=properties,
+        molecule_ids=list(smiles_by_id.keys()),
+        search_space=smiles_by_id,
+        proteins=proteins_payload,
+        precision=2,
+        tool_options=tool_options,
+    )
+
+
+def _boltz_ids_to_process(
+    state: WorkflowState,
+    characterization_ids: List[str],
+    characterization_smiles_map: Dict[str, str],
+    characterization_search_space: Dict[str, str],
+    baseline_molecule_ids: List[str],
+    baselines_profile: Dict[str, Any],
+) -> List[str]:
+    boltz_ids_to_process = list(characterization_ids)
+    starting_affinity_baseline_done = bool(
+        baselines_profile.get("binding_affinity_starting_molecules_done", False)
+    )
+
+    affinity_baseline_added = 0
+    if not starting_affinity_baseline_done and state.starting_molecules:
+        measured_affinity_smiles = {
+            result.smiles
+            for result in state.experimental_results
+            if any(
+                normalize_property_name(prop_name) in {"binding_affinity", "affinity"}
+                for prop_name in result.properties
+            )
+        }
+        known_smiles = set(characterization_smiles_map.values())
+
+        for index, smiles in enumerate(state.starting_molecules):
+            if not smiles or smiles in known_smiles or smiles in measured_affinity_smiles:
+                continue
+
+            baseline_id = f"start_baseline_{index:03d}"
+            suffix = 1
+            while baseline_id in characterization_smiles_map:
+                baseline_id = f"start_baseline_{index:03d}_{suffix}"
+                suffix += 1
+
+            characterization_smiles_map[baseline_id] = smiles
+            characterization_search_space[baseline_id] = smiles
+            boltz_ids_to_process.append(baseline_id)
+            baseline_molecule_ids.append(baseline_id)
+            known_smiles.add(smiles)
+            affinity_baseline_added += 1
+
+        baselines_profile["binding_affinity_starting_molecules_done"] = True
+        state.log("characterize_boltz_baseline_selection", {
+            "starting_molecules": len(state.starting_molecules),
+            "baseline_added": affinity_baseline_added,
+            "already_had_affinity": len(state.starting_molecules) - affinity_baseline_added,
+        })
+
+    return boltz_ids_to_process
+
+
+def _boltz_tool_options(state: WorkflowState) -> Dict[str, Any]:
+    boltz_config = state.characterization_config.get('boltz_config', {}) or {}
+
+    if not boltz_config.get('cif_save_dir'):
+        env_cif_dir = os.environ.get("BOLTZ_CIF_DIR")
+        if env_cif_dir:
+            boltz_config['cif_save_dir'] = env_cif_dir
+        else:
+            run_paths = getattr(state, 'run_paths', {}) or {}
+            artifacts_dir = run_paths.get('artifacts')
+            if artifacts_dir:
+                boltz_config['cif_save_dir'] = str(Path(artifacts_dir) / "boltz_cifs")
+
+    state.characterization_config['boltz_config'] = boltz_config
+    base_url = boltz_config.get('base_url') or os.environ.get("BOLTZ_BASE_URL", "").strip()
+    api_token = boltz_config.get('api_token') or os.environ.get("BOLTZ_API_TOKEN", "").strip()
+
+    if not base_url or not api_token:
+        emit_event(
+            state,
+            kind="boltz_unconfigured",
+            node="characterize_molecules",
+            severity="error",
+            data={"message": "Boltz credentials missing while binding affinity is required."},
+        )
+        raise NodeError(
+            "Binding affinity requested but Boltz is not configured",
+            node="characterize_molecules",
+            code="BOLTZ_UNCONFIGURED",
+        )
+
+    return {
+        "base_url": base_url,
+        "api_token": api_token,
+        "timeout": boltz_config.get('timeout', 900.0),
+        "max_retries": boltz_config.get('max_retries', 1),
+        "fetch_cif": boltz_config.get('fetch_cif', True),
+        "cif_save_dir": boltz_config.get('cif_save_dir'),
+        "latency_seconds": boltz_config.get('latency_seconds'),
+        "poll_interval": boltz_config.get('poll_interval'),
+        "poll_attempts": boltz_config.get('poll_attempts'),
+        "constraints": boltz_config.get('constraints'),
+        "templates": boltz_config.get('templates'),
+    }
+
+
+def _create_characterization_tool(registry: Any, spec: ToolSpec, request: CharacterizationRequest) -> Any:
+    if spec.id == "boltz":
+        tool_config = {
+            key: value
+            for key, value in request.tool_options.items()
+            if key not in {"constraints", "templates"} and value is not None
+        }
+        return registry.create(spec.id, **tool_config)
+    return registry.create(spec.id)
+
+
+def _run_characterization_tool(
+    spec: ToolSpec,
+    tool: Any,
+    request: CharacterizationRequest,
+) -> CharacterizationResult:
+    if hasattr(tool, "characterize"):
+        return _normalize_characterization_result(tool.characterize(request), spec.id)
+
+    if spec.id == "rdkit":
+        raw_result = tool._run(
+            search_space=request.search_space,
+            ids_to_process=request.molecule_ids,
+        )
+        return _normalize_characterization_result(raw_result, spec.id)
+
+    if spec.id == "stoplight":
+        raw_result = tool._run(
+            precision=request.precision,
+            search_space=request.search_space,
+            ids_to_process=request.molecule_ids,
+        )
+        return _normalize_characterization_result(raw_result, spec.id)
+
+    if spec.id == "boltz":
+        return _run_boltz_characterization_tool(tool, request)
+
+    if hasattr(tool, "_run"):
+        raw_result = tool._run(request=request)
+        return _normalize_characterization_result(raw_result, spec.id)
+
+    raise TypeError(f"Characterizer tool {spec.id} does not expose a supported execution method")
+
+
+def _run_boltz_characterization_tool(tool: Any, request: CharacterizationRequest) -> CharacterizationResult:
+    print(
+        "Invoking Boltz affinity tool for",
+        len(request.search_space),
+        "ligands and",
+        len(request.proteins),
+        "proteins",
+    )
+    response = asyncio.run(tool._arun(
+        ligands=request.search_space,
+        polymers=request.proteins,
+        constraints=request.tool_options.get('constraints'),
+        templates=request.tool_options.get('templates'),
+    ))
+
+    print("Boltz tool returned response")
+
+    if isinstance(response, str):
+        try:
+            response_data = json.loads(response)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Failed to decode Boltz response: {exc}")
+    else:
+        response_data = response
+
+    per_ligand = response_data.get('per_ligand', {}) if isinstance(response_data, dict) else {}
+    results: Dict[str, Dict[str, Any]] = {}
+    per_molecule_metadata: Dict[str, Dict[str, Any]] = {}
+
+    for ligand_id, info in per_ligand.items():
+        affinity = info.get('affinity') if isinstance(info, dict) else None
+        if affinity is None:
+            continue
+
+        if isinstance(affinity, dict):
+            affinity_value = affinity.get('affinity_pred_value')
+            if affinity_value is None:
+                for value in affinity.values():
+                    if isinstance(value, (int, float)):
+                        affinity_value = value
+                        break
+            if affinity_value is None:
+                continue
+        else:
+            affinity_value = affinity
+
+        results.setdefault(ligand_id, {})
+        results[ligand_id]['binding_affinity'] = float(affinity_value)
+        per_molecule_metadata[ligand_id] = {
+            **info,
+            'reliability_weighted': False,
+        }
+
+    missing_affinity = set(request.search_space.keys()) - set(per_ligand.keys())
+    if missing_affinity:
+        raise NodeError(
+            "Boltz did not return affinity for all requested ligands",
+            node="characterize_molecules",
+            code="BOLTZ_MISSING_AFFINITY",
+            details={"missing_ligand_ids": sorted(missing_affinity)},
+        )
+
+    return CharacterizationResult(
+        results=results,
+        failed_molecules=[],
+        metadata={
+            "per_ligand": per_ligand,
+            "per_molecule_metadata": per_molecule_metadata,
+        },
+    )
+
+
+def _normalize_characterization_result(raw_result: Any, tool_id: str) -> CharacterizationResult:
+    if isinstance(raw_result, CharacterizationResult):
+        raw_result.metadata.setdefault("tool_id", tool_id)
+        return raw_result
+
+    if isinstance(raw_result, str):
+        raise ValueError(raw_result)
+
+    if isinstance(raw_result, dict):
+        return CharacterizationResult(
+            results={
+                str(mol_id): dict(props)
+                for mol_id, props in raw_result.items()
+                if isinstance(props, dict)
+            },
+            metadata={"tool_id": tool_id},
+        )
+
+    raise TypeError(f"Unexpected characterization result type from {tool_id}: {type(raw_result)}")
+
+
+def _merge_characterization_result(
+    results: Dict[str, Dict[str, Any]],
+    boltz_metadata: Dict[str, Dict[str, Any]],
+    result: CharacterizationResult,
+) -> None:
+    for mol_id, props in result.results.items():
+        results.setdefault(mol_id, {})
+        results[mol_id].update(props)
+
+    per_molecule_metadata = result.metadata.get("per_molecule_metadata", {})
+    if isinstance(per_molecule_metadata, dict):
+        for mol_id, metadata in per_molecule_metadata.items():
+            if isinstance(metadata, dict):
+                boltz_metadata[mol_id] = metadata
+
+
+def _characterization_run_inputs(request: CharacterizationRequest) -> Dict[str, Any]:
+    return {
+        "molecule_count": len(request.molecule_ids),
+        "properties": list(request.properties),
+        "protein_count": len(request.proteins),
+    }
+
+
+def _result_property_names(result: CharacterizationResult) -> List[str]:
+    names: List[str] = []
+    for props in result.results.values():
+        for name in props:
+            if name not in names:
+                names.append(name)
+    return names
+
+
+def _resolve_characterization_tool_ids(state: WorkflowState, normalized_target_names: List[str]) -> List[str]:
+    configured_tool_ids = state.characterization_config.get('tool_ids')
+    if isinstance(configured_tool_ids, list) and configured_tool_ids:
+        return [str(tool_id) for tool_id in configured_tool_ids]
+
+    legacy_tool = state.characterization_config.get('tool')
+    legacy_ids = _tool_ids_from_legacy_label(legacy_tool)
+    if legacy_ids:
+        return legacy_ids
+
+    return select_characterization_tool_ids(normalized_target_names)
+
+
+def _tool_ids_from_legacy_label(value: Any) -> List[str]:
+    label = value.value if hasattr(value, "value") else value
+    label = str(label or "").strip().lower()
+    if label in {"rdkit", "stoplight", "boltz"}:
+        return [label]
+    if label == "combined":
+        return ["rdkit", "stoplight"]
+    return []
+
+
+def _legacy_tool_label(tool_ids: List[str]) -> str:
+    if tool_ids == ["rdkit"]:
+        return "rdkit"
+    if tool_ids == ["stoplight"]:
+        return "stoplight"
+    if tool_ids == ["boltz"]:
+        return "boltz"
+    if tool_ids:
+        return "combined"
+    return "auto"
