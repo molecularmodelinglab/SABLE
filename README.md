@@ -1,159 +1,158 @@
-# LIZARD — LIgand optimiZation via Agentic Research and Discovery
+# LIZARD
 
-LIZARD is an agentic workflow that enumerates, characterizes, and optimizes small molecules toward user‑defined target properties. It wires together nodes (argument extraction, enumeration, Bayesian optimization, characterization, summarization) with clear telemetry and checkpoints.
+**LIgand optimiZation via Agentic Research and Discovery**
 
-<img src="images/lizard.png" width="300" />
+LIZARD is an agentic molecular optimization platform. It converts natural-language objectives into iterative workflows that enumerate compounds, evaluate molecular properties, apply Bayesian optimization, and report promising candidates.
+
+<p align="center">
+  <img src="images/lizard.png" alt="LIZARD logo" width="200">
+</p>
 
 ## Features
 
-- Prompt-driven optimization over a molecular search space
-- Enumeration + RDKit/predictive model characterization + Bayesian optimization
-- Checkpoints and resumability
-- Clean summary with best molecules and baseline vs. optimized comparison
+- Natural-language molecular optimization objectives
+- Compound enumeration and RDKit-based characterization
+- Single- and multi-objective Bayesian optimization
+- Persistent runs, checkpoints, and audit records
+- FastAPI backend, React frontend, and asynchronous Celery workers
+- Optional OpenAI or Google Gemini argument extraction
 
 ## Requirements
 
-- Python 3.12
-- RDKit (installed via conda/micromamba in Docker image)
-- External dependency: healer (molecule enumerator)
-- Optional: LLM API key (OpenAI or Google Gemini) for enhanced argument extraction
+The recommended setup requires:
 
-Note: Files in `legacy/` are old and not used by the current workflow. They remain for reference but are excluded from the Docker build context.
+- Docker with Docker Compose
+- An OpenAI or Google Gemini API key for LLM-assisted extraction (optional)
 
-## LLM Configuration (Optional but Recommended)
+For local CLI development, use Python 3.12 and an environment that provides RDKit.
 
-LIZARD uses a hybrid approach for extracting arguments from natural language prompts:
-- **LLM-based extraction** (if configured): Uses GPT or Gemini for intelligent parsing
-- **Rule-based extraction** (fallback): Uses regex patterns when LLM is unavailable
+## Quick Start
 
-To enable LLM-based extraction, set up your API keys:
+1. Create a local environment file:
 
-```bash
-# Copy the example environment file
-cp .env.example .env
+   ```bash
+   cp .env.example .env
+   ```
 
-# Edit .env and add your API key:
-# For OpenAI:
-LLM_PROVIDER=openai
-OPENAI_API_KEY=your_api_key_here
+2. Set secure values for `POSTGRES_PASSWORD` and `SECRET_KEY` in `.env`. Add an LLM provider and API key if needed:
 
-# OR for Google Gemini:
-LLM_PROVIDER=gemini
-GOOGLE_API_KEY=your_api_key_here
-```
+   ```dotenv
+   LLM_PROVIDER=gemini
+   GOOGLE_API_KEY=your_api_key
+   ```
 
-Get API keys:
-- OpenAI: https://platform.openai.com/api-keys
-- Google Gemini: https://aistudio.google.com/app/apikey
+   OpenAI is also supported with `LLM_PROVIDER=openai` and `OPENAI_API_KEY`.
 
-**Note:** LIZARD works without an LLM (using rule-based extraction), but LLM extraction provides better accuracy for complex prompts.
+3. Start the development stack:
 
-## Quick start (Docker)
+   ```bash
+   docker compose --profile dev up --build api celery_worker ui
+   ```
 
-Build the image and run with the example prompt. The image bundles Python 3.12, RDKit, and pip dependencies.
+4. Open the application:
+
+   - Web interface: http://localhost:5173
+   - API: http://localhost:8000
+   - API documentation: http://localhost:8000/docs
+
+PostgreSQL, Redis, and database migrations start automatically as dependencies of the stack. Stop all services with `docker compose --profile dev down`.
+
+## Command-Line Workflow
+
+Build the image and run an optimization directly:
 
 ```bash
 docker build -t lizard:latest .
-
-# Run the example prompt
-docker run --rm lizard:latest
-
-# Provide your own prompt
 docker run --rm lizard:latest run "Optimize aspirin for better QED. Enumerate 50 analogs and run 3 iterations."
-
-# Resume from a checkpoint mounted from the host
-docker run --rm -v "$PWD/checkpoints:/app/checkpoints" lizard:latest resume /app/checkpoints/<checkpoint_file>.pkl
-
-# Export results to a mounted path
-docker run --rm -v "$PWD:/app" lizard:latest export --output /app/results.json "Optimize caffeine for higher logP and lower TPSA"
 ```
 
-### Using docker compose
+Persist checkpoints and results by mounting local directories as needed:
 
-The repo includes a `docker-compose.yml` you can customize. Examples:
+The workflow creates `checkpoints/` automatically on its first run.
 
 ```bash
-# Build
-docker compose build
-
-# Run with the example prompt
-docker compose up
-
-# Run with a custom prompt via env var
-PROMPT='Optimize aspirin for better QED and solubility. Enumerate 50 analogs and run 3 iterations.' \
-docker compose up
-
-# Or override the command
-docker compose run --rm lizard run "Optimize ibuprofen for lower TPSA"
-
-# Start the full developer stack (API + Vite dev server)
-docker compose --profile dev up api ui
-
-# The UI is available at http://localhost:5173 and proxies API calls to http://localhost:8000.
-
-# Run only the API (useful if you want to point an existing frontend at it)
-docker compose --profile dev up api
-
-# Build production images (FastAPI API + Nginx static frontend)
-docker compose --profile prod build api frontend
-
-# Run the production stack locally
-docker compose --profile prod up api frontend
-
-# Override the frontend API base (defaults to /api when building the prod image)
-VITE_API_BASE=https://your-api.example.com docker compose --profile prod build frontend
+docker run --rm \
+  -v "$PWD/checkpoints:/app/checkpoints" \
+  -v "$PWD/data:/app/data" \
+  lizard:latest run "Optimize caffeine for higher QED"
 ```
 
-### Mounting configuration and API keys
-
-Copy `config.example.yml` to `config.yml` and edit as needed (e.g., credentials for external services). Mount it into the container:
+Resume a saved checkpoint:
 
 ```bash
-cp config.example.yml config.yml
-docker run --rm -v "$PWD/config.yml:/app/config.yml" lizard:latest run "Your prompt here"
+docker run --rm \
+  -v "$PWD/checkpoints:/app/checkpoints" \
+  lizard:latest resume /app/checkpoints/<checkpoint>.pkl
 ```
 
-### Checkpoints and artifacts
+## Local Development
 
-- Checkpoints are written to `checkpoints/` (mount this directory to persist across runs).
-- Final results are exportable via `--output` flag.
-
-## Local development
-
-You can run LIZARD locally if you have Python 3.12 and RDKit available.
+Create an environment with Python 3.12 and RDKit, then install the Python dependencies:
 
 ```bash
-# Optional: use conda/mamba to install rdkit, then pip install the rest
-conda create -n lizard python=3.12 -c conda-forge rdkit
+conda create -n lizard -c conda-forge python=3.12 rdkit
 conda activate lizard
 pip install -r requirements.txt
-
-# Run
 python run_workflow.py --example
 ```
 
-## Extending the agent and workflow
+Run a custom objective or resume a checkpoint:
 
-The codebase is organized into clear modules so you can swap or add nodes/tools without changing the whole system.
+```bash
+python run_workflow.py "Optimize ibuprofen for lower TPSA" --output results.json
+python run_workflow.py --checkpoint checkpoints/<checkpoint>.pkl
+```
 
-- `edges/graph_builder.py`: builds the LangGraph state graph and wires node transitions
-- `nodes/`: individual workflow nodes (e.g., `extract_arguments_hybrid.py`, `enumerate_molecules.py`, `bo_iteration.py`, `characterize_molecules.py`, `check_exit_conditions.py`, `summarize_results.py`)
-- `tools/`: pluggable tools used by nodes (e.g., `healer_enumerator_tool.py`, `molecule_characterization_tool.py`, `baybe_optimizer_tool.py`, `stoplight_tool.py`)
-- `schemas/`: Pydantic models for state, characterization schemas, error types
-- `run_workflow.py`: runner with checkpointing and exporting
+Run the test suite with:
 
-Common extension points:
-
-- Add a new property or tool: extend `schemas/characterization.py` mappings, implement a tool under `tools/`, and register it in `config/tools.yml`.
-- Change selection strategy: update `nodes/bo_iteration.py` or the optimizer tool.
-- New inputs or parsing rules: modify `nodes/argument_extraction/` and keep `nodes/extract_arguments_hybrid.py` as the graph-facing wrapper.
-
-Tip: emit structured telemetry for new nodes/tools so failures are actionable.
+```bash
+pytest
+```
 
 ## Configuration
 
-Use `config.yml` to store credentials and options. See `config.example.yml` for the shape. At runtime the workflow will prefer `config.yml` if present.
+Configuration is loaded from environment variables. Copy `.env.example` to `.env` for the complete list.
+
+| Variable | Purpose |
+| --- | --- |
+| `LLM_PROVIDER` | Argument extraction provider: `openai` or `gemini` |
+| `OPENAI_API_KEY` | OpenAI credentials |
+| `GOOGLE_API_KEY` | Google Gemini credentials |
+| `POSTGRES_PASSWORD` | PostgreSQL password used by Docker Compose |
+| `REDIS_PASSWORD` | Redis password used by Docker Compose |
+| `SECRET_KEY` | Application signing key |
+| `MOLECULAR_FP` | Molecular fingerprint or descriptor strategy |
+| `MULTI_OPT_TYPE` | Multi-objective optimization strategy |
+| `LIZARD_DATA_ROOT` | Root directory for run artifacts |
+
+The workflow can fall back to rule-based argument extraction when no LLM is configured. Protein structure prediction and HPC execution require the additional Boltz and HPC variables documented in `.env.example`.
+
+## Project Structure
+
+| Path | Description |
+| --- | --- |
+| `nodes/` | LangGraph workflow steps |
+| `edges/` | Workflow graph construction |
+| `tools/` | Enumeration, characterization, and optimization tools |
+| `schemas/` | Workflow state and validation models |
+| `server/` | FastAPI application and background tasks |
+| `ui/` | React and Vite web interface |
+| `config/` | Property and tool definitions |
+| `migrations/` | Alembic database migrations |
+| `run_workflow.py` | Standalone workflow runner |
+
+To extend the optimization pipeline, add or update a tool in `tools/`, connect it through the relevant node in `nodes/`, and register configurable behavior in `config/tools.yml` or `config/properties.yml`.
+
+## Production
+
+Build and start the production API, worker, and Nginx frontend with:
+
+```bash
+docker compose --profile prod up --build api celery_worker frontend
+```
+
+The frontend is served at http://localhost:8080. Review all secrets, authentication, storage, CORS, and infrastructure settings in `.env` before deploying outside a local environment.
 
 ## License
 
-See `LICENSE`.
+This project is licensed under the terms in [LICENSE](LICENSE).
