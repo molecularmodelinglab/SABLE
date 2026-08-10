@@ -1,5 +1,5 @@
 """
-Pytest configuration and shared fixtures for LIZARD tests.
+Pytest configuration and shared fixtures for SABLE tests.
 """
 import os
 import pytest

@@ -1,6 +1,6 @@
-# LIZARD Tests
+# SABLE Tests
 
-Comprehensive test suite for the LIZARD application with 96 test cases covering authentication, services, API endpoints, and complete user workflows.
+Comprehensive test suite for the SABLE application with 96 test cases covering authentication, services, API endpoints, and complete user workflows.
 
 ## Quick Start
 

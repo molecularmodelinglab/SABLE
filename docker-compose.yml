@@ -54,7 +54,7 @@ services:
     networks:
       - lizard-network
 
-  # LIZARD API
+  # SABLE API
   api:
     build:
       context: .

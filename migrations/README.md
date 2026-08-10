@@ -1,6 +1,6 @@
 # Database Migrations
 
-This directory contains Alembic database migrations for LIZARD.
+This directory contains Alembic database migrations for SABLE.
 
 ## Creating a New Migration
 

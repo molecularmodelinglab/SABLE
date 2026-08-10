@@ -3,9 +3,10 @@ FROM mambaorg/micromamba:1.5.8
 ARG MAMBA_DOCKERFILE_ACTIVATE=1
 SHELL ["/bin/bash", "-lc"]
 
-LABEL org.opencontainers.image.title="LIZARD"
-LABEL org.opencontainers.image.description="LIgand optimiZation via Agentic Research and Discovery"
-LABEL org.opencontainers.image.source="https://github.com/molecularmodelinglab/LIZARD"
+
+LABEL org.opencontainers.image.title="SABLE"
+LABEL org.opencontainers.image.description="Synthetically-accessible Agentic Bayesian Ligand Exploration"
+LABEL org.opencontainers.image.source="https://github.com/molecularmodelinglab/SABLE"
 
 # Create a clean env with Python 3.12 and RDKit
 RUN micromamba create -y -n lizard -c conda-forge \
@@ -33,13 +34,10 @@ RUN cp requirements.txt requirements.base.txt \
 
 RUN micromamba run -n lizard python -m pip install baybe[chem]==0.14.1 --no-cache-dir
 
-## add env variables 
 ENV HEALER_DATA_DIR=/app/building_blocks
 
-# Copy the source
 COPY --chown=$MAMBA_USER:$MAMBA_USER . .
 
-# Entrypoint wrapper for convenient CLI usage (invoke via bash to avoid chmod)
 ENTRYPOINT ["bash", "/app/docker/entrypoint.sh"]
 
 CMD []

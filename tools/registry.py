@@ -1,4 +1,4 @@
-"""Registry for declarative LIZARD workflow tools.
+"""Registry for declarative SABLE workflow tools.
 
 Phase 3 introduces this registry without changing node execution. Later phases
 can use it to select and instantiate stage implementations.

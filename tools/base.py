@@ -1,4 +1,4 @@
-"""Base interfaces for modular LIZARD workflow tools.
+"""Base interfaces for modular SABLE workflow tools.
 
 These contracts are intentionally small. Existing tools can be adapted to them
 incrementally while current LangChain BaseTool implementations remain in place.
