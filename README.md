@@ -5,7 +5,7 @@
 SABLE is an agentic molecular optimization platform. It converts natural-language objectives into iterative workflows that enumerate compounds, evaluate molecular properties, apply Bayesian optimization, and report promising candidates.
 
 <p align="center">
-  <img src="images/sable.png" alt="SABLE logo" width="200">
+  <img src="images/sable.png" alt="SABLE logo">
 </p>
 
 ## Features
