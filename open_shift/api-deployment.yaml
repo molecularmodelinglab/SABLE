@@ -1,35 +1,35 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: lizard-api
+  name: sable-api
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: lizard-api
+      app: sable-api
   template:
     metadata:
       labels:
-        app: lizard-api
+        app: sable-api
     spec:
       containers:
         - name: api
-          image: image-registry.openshift-image-registry.svc:5000/dept-lizard-prod/lizard-api:latest
+          image: image-registry.openshift-image-registry.svc:5000/dept-sable-prod/sable-api:latest
           ports:
             - containerPort: 8000
           command: ["/bin/bash", "-lc"]
           args:
             - |
-              micromamba run -n lizard uvicorn server.app:app \
+              micromamba run -n sable uvicorn server.app:app \
                 --host 0.0.0.0 --port 8000
           envFrom:
             - configMapRef:
-                name: lizard-config
+                name: sable-config
             - secretRef:
-                name: lizard-secrets
+                name: sable-secrets
           env:
             - name: CORS_ORIGINS
-              value: "https://lizard-frontend-dept-lizard-prod.apps.cloudapps.unc.edu"
+              value: "https://sable-frontend-dept-sable-prod.apps.cloudapps.unc.edu"
           volumeMounts:
             - name: artifacts
               mountPath: /app/data
@@ -55,4 +55,4 @@ spec:
       volumes:
         - name: artifacts
           persistentVolumeClaim:
-            claimName: lizard-artifacts
+            claimName: sable-artifacts

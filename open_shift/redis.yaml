@@ -20,7 +20,7 @@ spec:
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: lizard-secrets
+                  name: sable-secrets
                   key: PREDIS_PASSWORD
           ports:
             - containerPort: 6379

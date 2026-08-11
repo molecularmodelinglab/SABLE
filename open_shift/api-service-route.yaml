@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: lizard-api
+  name: sable-api
 spec:
   selector:
-    app: lizard-api
+    app: sable-api
   ports:
     - port: 8000
       targetPort: 8000
@@ -12,11 +12,11 @@ spec:
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: lizard-api
+  name: sable-api
 spec:
   to:
     kind: Service
-    name: lizard-api
+    name: sable-api
   port:
     targetPort: 8000
   tls:

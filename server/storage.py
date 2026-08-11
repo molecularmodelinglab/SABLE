@@ -27,11 +27,11 @@ class StorageConfig:
 
     @classmethod
     def from_env(cls) -> "StorageConfig":
-        backend = os.getenv("LIZARD_STORAGE_BACKEND", "local").lower()
-        data_root = _resolve_data_root(os.getenv("LIZARD_DATA_ROOT"))
-        bucket = os.getenv("LIZARD_STORAGE_S3_BUCKET")
-        prefix = os.getenv("LIZARD_STORAGE_S3_PREFIX", "runs/")
-        kms_key_id = os.getenv("LIZARD_STORAGE_S3_KMS_KEY_ID")
+        backend = os.getenv("SABLE_STORAGE_BACKEND", "local").lower()
+        data_root = _resolve_data_root(os.getenv("SABLE_DATA_ROOT"))
+        bucket = os.getenv("SABLE_STORAGE_S3_BUCKET")
+        prefix = os.getenv("SABLE_STORAGE_S3_PREFIX", "runs/")
+        kms_key_id = os.getenv("SABLE_STORAGE_S3_KMS_KEY_ID")
         return cls(
             backend=backend,
             data_root=data_root,
@@ -182,7 +182,7 @@ class S3StorageBackend(StorageBackend):
     def __init__(self, config: StorageConfig):
         super().__init__(config)
         if not config.bucket:
-            raise ValueError("S3 bucket must be configured via LIZARD_STORAGE_S3_BUCKET")
+            raise ValueError("S3 bucket must be configured via SABLE_STORAGE_S3_BUCKET")
         # A boto3 client would be initialised here lazily when first needed.
 
     # The following methods intentionally raise NotImplementedError to

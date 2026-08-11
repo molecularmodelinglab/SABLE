@@ -39,7 +39,7 @@ class ToolExecutionContext(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class LizardTool(ABC, Generic[RequestT, ResultT]):
+class SableTool(ABC, Generic[RequestT, ResultT]):
     """Abstract base class for future registry-managed tool adapters."""
 
     spec: ToolSpec

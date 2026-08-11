@@ -27,16 +27,16 @@ import { AdminAnalyticsSummary } from './types/admin'
 export const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:8000'
 
 // Access token storage
-let accessToken: string | null = localStorage.getItem('lizard_access_token')
+let accessToken: string | null = localStorage.getItem('sable_access_token')
 
 export function setAccessToken(token: string) {
   accessToken = token
-  localStorage.setItem('lizard_access_token', token)
+  localStorage.setItem('sable_access_token', token)
 }
 
 export function clearAccessToken() {
   accessToken = null
-  localStorage.removeItem('lizard_access_token')
+  localStorage.removeItem('sable_access_token')
 }
 
 export function getAccessToken(): string | null {

@@ -17,7 +17,7 @@ from sqlalchemy.pool import Pool
 # Get database URL from environment
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://lizard_user:lizard_password@localhost:5432/lizard"
+    "postgresql://sable_user:sable_password@localhost:5432/sable"
 )
 
 # Convert to async URL for asyncpg

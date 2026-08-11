@@ -1,23 +1,23 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: lizard-migrations
+  name: sable-migrations
 spec:
   template:
     spec:
       restartPolicy: OnFailure
       containers:
         - name: migrations
-          image: image-registry.openshift-image-registry.svc:5000/dept-lizard-prod/lizard-api:latest
-          command: ["/bin/bash", "-lc", "micromamba run -n lizard alembic upgrade head"]
+          image: image-registry.openshift-image-registry.svc:5000/dept-sable-prod/sable-api:latest
+          command: ["/bin/bash", "-lc", "micromamba run -n sable alembic upgrade head"]
           envFrom:
             - configMapRef:
-                name: lizard-config
+                name: sable-config
             - secretRef:
-                name: lizard-secrets
+                name: sable-secrets
           env:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: lizard-secrets
+                  name: sable-secrets
                   key: DATABASE_URL
