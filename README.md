@@ -124,8 +124,21 @@ Configuration is loaded from environment variables. Copy `.env.example` to `.env
 | `MOLECULAR_FP` | Molecular fingerprint or descriptor strategy |
 | `MULTI_OPT_TYPE` | Multi-objective optimization strategy |
 | `SABLE_DATA_ROOT` | Root directory for run artifacts |
+| `BOLTZ_BASE_URL` | Base URL of a user-managed Boltz2 API deployment |
+| `BOLTZ_API_TOKEN` | Authentication token for the Boltz2 API |
 
 The workflow can fall back to rule-based argument extraction when no LLM is configured. Protein structure prediction and HPC execution require the additional Boltz and HPC variables documented in `.env.example`.
+
+### Boltz2 Binding Affinity
+
+Binding-affinity runs require a separate [Boltz2 API](https://github.com/eneskelestemur/boltz2-api) deployment. Deploy and operate that service on your own NVIDIA GPU machine by following the instructions in its repository, then add the resulting API endpoint and token to your `.env` file:
+
+```dotenv
+BOLTZ_BASE_URL=https://your-boltz2-api.example.com
+BOLTZ_API_TOKEN=your_api_token
+```
+
+SABLE does not deploy or host the Boltz2 service. The configured endpoint must be reachable from the SABLE API and Celery worker containers.
 
 ## Project Structure
 
