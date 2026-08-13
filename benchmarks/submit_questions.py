@@ -5,9 +5,9 @@ from pathlib import Path
 
 BASE_URL = "http://localhost:8000"
 
-EMAIL = os.environ.get("LIZARD_EMAIL", "dummyuser@gmail.com")
-PASSWORD = os.environ.get("LIZARD_PASSWORD", "@DummyUserPA22")
-TOKEN_CACHE_FILE = Path(".lizard_auth_token.json")
+EMAIL = os.environ.get("SABLE_EMAIL", "dummyuser@gmail.com")
+PASSWORD = os.environ.get("SABLE_PASSWORD", "@DummyUserPA22")
+TOKEN_CACHE_FILE = Path(".sable_auth_token.json")
 
 def _load_cached_token():
     if not TOKEN_CACHE_FILE.exists():

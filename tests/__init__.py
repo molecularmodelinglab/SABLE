@@ -1,7 +1,7 @@
 """
-LIZARD Test Suite
+SABLE Test Suite
 
-This package contains all tests for the LIZARD application.
+This package contains all tests for the SABLE application.
 
 Structure:
 - unit/: Unit tests for individual components

@@ -1,4 +1,4 @@
-"""SQLAlchemy database models for LIZARD."""
+"""SQLAlchemy database models for SABLE."""
 
 from server.models.user import User
 from server.models.session import Session, SessionToken

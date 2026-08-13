@@ -23,17 +23,17 @@ spec:
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
-                  name: lizard-secrets
+                  name: sable-secrets
                   key: POSTGRES_USER
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: lizard-secrets
+                  name: sable-secrets
                   key: POSTGRES_PASSWORD
             - name: POSTGRES_DB
               valueFrom:
                 secretKeyRef:
-                  name: lizard-secrets
+                  name: sable-secrets
                   key: POSTGRES_DB
           volumeMounts:
             - name: data

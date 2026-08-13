@@ -1,4 +1,4 @@
-"""Alembic environment configuration for LIZARD database migrations."""
+"""Alembic environment configuration for SABLE database migrations."""
 
 import os
 import sys

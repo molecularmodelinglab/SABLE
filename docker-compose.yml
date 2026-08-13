@@ -2,28 +2,28 @@ services:
   # PostgreSQL Database
   postgres:
     image: postgres:16-alpine
-    container_name: lizard-postgres
+    container_name: sable-postgres
     environment:
-      POSTGRES_DB: lizard
-      POSTGRES_USER: lizard_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lizard_password}
+      POSTGRES_DB: sable
+      POSTGRES_USER: sable_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sable_password}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U lizard_user -d lizard"]
+      test: ["CMD-SHELL", "pg_isready -U sable_user -d sable"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
-      - lizard-network
+      - sable-network
     restart: unless-stopped
 
   # Redis Cache
   redis:
     image: redis:7-alpine
-    container_name: lizard-redis
+    container_name: sable-redis
     ports:
       - "6379:6379"
     volumes:
@@ -35,7 +35,7 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - lizard-network
+      - sable-network
     restart: unless-stopped
 
   # Database Migrations (runs once then exits)
@@ -43,31 +43,31 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: lizard-migrations
+    container_name: sable-migrations
     entrypoint: ["bash", "-lc"]
-    command: ["micromamba run -n lizard alembic upgrade head"]
+    command: ["micromamba run -n sable alembic upgrade head"]
     environment:
-      - DATABASE_URL=postgresql://lizard_user:${POSTGRES_PASSWORD:-lizard_password}@postgres:5432/lizard
+      - DATABASE_URL=postgresql://sable_user:${POSTGRES_PASSWORD:-sable_password}@postgres:5432/sable
     depends_on:
       postgres:
         condition: service_healthy
     networks:
-      - lizard-network
+      - sable-network
 
-  # LIZARD API
+  # SABLE API
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: lizard-api
+    container_name: sable-api
     profiles: ["dev", "prod"]
     entrypoint: ["bash", "-lc"]
-    command: ["micromamba run -n lizard uvicorn server.app:app --host 0.0.0.0 --port 8000"]
+    command: ["micromamba run -n sable uvicorn server.app:app --host 0.0.0.0 --port 8000"]
     ports:
       - "8000:8000"
     environment:
       - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql://lizard_user:${POSTGRES_PASSWORD:-lizard_password}@postgres:5432/lizard
+      - DATABASE_URL=postgresql://sable_user:${POSTGRES_PASSWORD:-sable_password}@postgres:5432/sable
       - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
       - SECRET_KEY=${SECRET_KEY:-change_this_secret_key_in_production}
       - ENVIRONMENT=${ENVIRONMENT:-development}
@@ -94,7 +94,7 @@ services:
       migrations:
         condition: service_completed_successfully
     networks:
-      - lizard-network
+      - sable-network
     restart: unless-stopped
 
   # Celery Worker
@@ -102,13 +102,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: lizard-worker
+    container_name: sable-worker
     profiles: ["dev", "prod"]
     entrypoint: ["bash", "-lc"]
-    command: ["micromamba run -n lizard celery -A server.tasks.celery_app worker --loglevel=info"]
+    command: ["micromamba run -n sable celery -A server.tasks.celery_app worker --loglevel=info"]
     environment:
       - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql://lizard_user:${POSTGRES_PASSWORD:-lizard_password}@postgres:5432/lizard
+      - DATABASE_URL=postgresql://sable_user:${POSTGRES_PASSWORD:-sable_password}@postgres:5432/sable
       - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
       - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
@@ -135,7 +135,7 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - lizard-network
+      - sable-network
     restart: unless-stopped
 
   # Celery Beat (Scheduler)
@@ -143,13 +143,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: lizard-beat
+    container_name: sable-beat
     profiles: ["dev", "prod"]
     entrypoint: ["bash", "-lc"]
-    command: ["micromamba run -n lizard celery -A server.tasks.celery_app beat --loglevel=info --schedule /app/data/celerybeat-schedule"]
+    command: ["micromamba run -n sable celery -A server.tasks.celery_app beat --loglevel=info --schedule /app/data/celerybeat-schedule"]
     environment:
       - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql://lizard_user:${POSTGRES_PASSWORD:-lizard_password}@postgres:5432/lizard
+      - DATABASE_URL=postgresql://sable_user:${POSTGRES_PASSWORD:-sable_password}@postgres:5432/sable
       - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
       - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
@@ -167,13 +167,13 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - lizard-network
+      - sable-network
     restart: unless-stopped
 
   # Flower (Celery Monitoring)
   flower:
     image: mher/flower
-    container_name: lizard-flower
+    container_name: sable-flower
     profiles: ["dev"]
     environment:
       - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
@@ -184,13 +184,13 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - lizard-network
+      - sable-network
     restart: unless-stopped
 
   # Frontend development server (Vite)
   ui:
     image: node:20-alpine
-    container_name: lizard-ui
+    container_name: sable-ui
     working_dir: /app
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
     ports:
@@ -205,7 +205,7 @@ services:
       api:
         condition: service_started
     networks:
-      - lizard-network
+      - sable-network
     profiles: ["dev"]
     restart: unless-stopped
 
@@ -216,29 +216,29 @@ services:
       dockerfile: ui/Dockerfile
       args:
         VITE_API_BASE: ${VITE_API_BASE:-/api}
-    container_name: lizard-frontend
+    container_name: sable-frontend
     ports:
       - "8080:80"
     depends_on:
       api:
         condition: service_started
     networks:
-      - lizard-network
+      - sable-network
     profiles: ["prod"]
     restart: unless-stopped
 
-  # CLI/Workflow Runner (original lizard service)
-  lizard:
+  # CLI/Workflow Runner (original sable service)
+  sable:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: lizard-cli
-    image: lizard:latest
+    container_name: sable-cli
+    image: sable:latest
     entrypoint: ["/bin/bash", "-c"]
     command: ["sleep infinity"] # Keep container running without auto-starting workflow
     environment:
       - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql://lizard_user:${POSTGRES_PASSWORD:-lizard_password}@postgres:5432/lizard
+      - DATABASE_URL=postgresql://sable_user:${POSTGRES_PASSWORD:-sable_password}@postgres:5432/sable
       - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
       - LLM_PROVIDER=${LLM_PROVIDER}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -253,11 +253,11 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - lizard-network
+      - sable-network
     # command: ["run", "Optimize aspirin for better QED and solubility. Enumerate 50 analogs and run 3 iterations."]
 
 networks:
-  lizard-network:
+  sable-network:
     driver: bridge
 
 volumes:

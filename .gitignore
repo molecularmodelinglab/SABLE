@@ -15,7 +15,7 @@ data/
 *pyc
 
 .env
-.lizard_auth_token.json
+.sable_auth_token.json
 
 config.yml
 debug.py

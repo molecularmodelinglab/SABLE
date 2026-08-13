@@ -56,7 +56,7 @@ export function NewRunPage() {
       <div className="new-run__header">
         <div>
           <h1>Start a Run</h1>
-          <p>Describe the molecular design or analysis task you want LIZARD to run.</p>
+          <p>Describe the molecular design or analysis task you want SABLE to run.</p>
         </div>
       </div>
 

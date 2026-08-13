@@ -1,4 +1,4 @@
-"""Service layer for LIZARD business logic."""
+"""Service layer for SABLE business logic."""
 
 from server.services.cache_service import cache_service, CacheService
 from server.services.auth_service import auth_service, AuthService

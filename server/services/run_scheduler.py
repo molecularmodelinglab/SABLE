@@ -103,7 +103,7 @@ class RunScheduler:
     def _resolve_max_concurrent(self, override: Optional[int]) -> int:
         if override is not None:
             return max(1, int(override))
-        env_value = os.getenv("MAX_CONCURRENT_RUNS") or os.getenv("LIZARD_MAX_CONCURRENT_RUNS")
+        env_value = os.getenv("MAX_CONCURRENT_RUNS") or os.getenv("SABLE_MAX_CONCURRENT_RUNS")
         if not env_value:
             return DEFAULT_MAX_CONCURRENT
         try:

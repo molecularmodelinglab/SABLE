@@ -1,5 +1,5 @@
 """
-Pytest configuration and shared fixtures for LIZARD tests.
+Pytest configuration and shared fixtures for SABLE tests.
 """
 import os
 import pytest
@@ -20,14 +20,14 @@ load_dotenv(PROJECT_ROOT / ".env")
 os.environ["ENVIRONMENT"] = "testing"
 
 # Use temporary directory for test data
-test_data_dir = tempfile.mkdtemp(prefix="lizard_test_")
-os.environ["LIZARD_DATA_ROOT"] = test_data_dir
+test_data_dir = tempfile.mkdtemp(prefix="sable_test_")
+os.environ["SABLE_DATA_ROOT"] = test_data_dir
 
 test_db_password = os.getenv('POSTGRES_PASSWORD')
 test_redis_password = os.getenv('REDIS_PASSWORD')
 os.environ["DATABASE_URL"] = os.getenv(
     "TEST_DATABASE_URL",
-    f"postgresql://lizard_user:{test_db_password}@postgres:5432/lizard_test"
+    f"postgresql://sable_user:{test_db_password}@postgres:5432/sable_test"
 )
 os.environ["REDIS_URL"] = os.getenv(
     "TEST_REDIS_URL",

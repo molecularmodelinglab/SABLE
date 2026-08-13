@@ -1,11 +1,11 @@
-# LIZARD
+# SABLE
 
-**LIgand optimiZation via Agentic Research and Discovery**
+**Synthetically-accessible Agentic Bayesian Ligand Exploration**
 
-LIZARD is an agentic molecular optimization platform. It converts natural-language objectives into iterative workflows that enumerate compounds, evaluate molecular properties, apply Bayesian optimization, and report promising candidates.
+SABLE is an agentic molecular optimization platform. It converts natural-language objectives into iterative workflows that enumerate compounds, evaluate molecular properties, apply Bayesian optimization, and report promising candidates.
 
 <p align="center">
-  <img src="images/lizard.png" alt="LIZARD logo" width="200">
+  <img src="images/sable.png" alt="SABLE logo">
 </p>
 
 ## Features
@@ -62,8 +62,8 @@ PostgreSQL, Redis, and database migrations start automatically as dependencies o
 Build the image and run an optimization directly:
 
 ```bash
-docker build -t lizard:latest .
-docker run --rm lizard:latest run "Optimize aspirin for better QED. Enumerate 50 analogs and run 3 iterations."
+docker build -t sable:latest .
+docker run --rm sable:latest run "Optimize aspirin for better QED. Enumerate 50 analogs and run 3 iterations."
 ```
 
 Persist checkpoints and results by mounting local directories as needed:
@@ -74,7 +74,7 @@ The workflow creates `checkpoints/` automatically on its first run.
 docker run --rm \
   -v "$PWD/checkpoints:/app/checkpoints" \
   -v "$PWD/data:/app/data" \
-  lizard:latest run "Optimize caffeine for higher QED"
+  sable:latest run "Optimize caffeine for higher QED"
 ```
 
 Resume a saved checkpoint:
@@ -82,7 +82,7 @@ Resume a saved checkpoint:
 ```bash
 docker run --rm \
   -v "$PWD/checkpoints:/app/checkpoints" \
-  lizard:latest resume /app/checkpoints/<checkpoint>.pkl
+  sable:latest resume /app/checkpoints/<checkpoint>.pkl
 ```
 
 ## Local Development
@@ -90,8 +90,8 @@ docker run --rm \
 Create an environment with Python 3.12 and RDKit, then install the Python dependencies:
 
 ```bash
-conda create -n lizard -c conda-forge python=3.12 rdkit
-conda activate lizard
+conda create -n sable -c conda-forge python=3.12 rdkit
+conda activate sable
 pip install -r requirements.txt
 python run_workflow.py --example
 ```
@@ -123,9 +123,22 @@ Configuration is loaded from environment variables. Copy `.env.example` to `.env
 | `SECRET_KEY` | Application signing key |
 | `MOLECULAR_FP` | Molecular fingerprint or descriptor strategy |
 | `MULTI_OPT_TYPE` | Multi-objective optimization strategy |
-| `LIZARD_DATA_ROOT` | Root directory for run artifacts |
+| `SABLE_DATA_ROOT` | Root directory for run artifacts |
+| `BOLTZ_BASE_URL` | Base URL of a user-managed Boltz2 API deployment |
+| `BOLTZ_API_TOKEN` | Authentication token for the Boltz2 API |
 
 The workflow can fall back to rule-based argument extraction when no LLM is configured. Protein structure prediction and HPC execution require the additional Boltz and HPC variables documented in `.env.example`.
+
+### Boltz2 Binding Affinity
+
+Binding-affinity runs require a separate [Boltz2 API](https://github.com/eneskelestemur/boltz2-api) deployment. Deploy and operate that service on your own NVIDIA GPU machine by following the instructions in its repository, then add the resulting API endpoint and token to your `.env` file:
+
+```dotenv
+BOLTZ_BASE_URL=https://your-boltz2-api.example.com
+BOLTZ_API_TOKEN=your_api_token
+```
+
+SABLE does not deploy or host the Boltz2 service. The configured endpoint must be reachable from the SABLE API and Celery worker containers.
 
 ## Project Structure
 

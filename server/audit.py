@@ -112,7 +112,7 @@ class AuditLogger:
     """Manages audit logging and querying."""
     
     def __init__(self, data_root: Optional[Path] = None):
-        default_root = Path(os.getenv("LIZARD_DATA_ROOT", "data"))
+        default_root = Path(os.getenv("SABLE_DATA_ROOT", "data"))
         self.data_root = data_root or default_root
         self.audit_dir = self.data_root / "audit"
         self.audit_dir.mkdir(parents=True, exist_ok=True)

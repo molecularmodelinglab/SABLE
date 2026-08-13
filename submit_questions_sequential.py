@@ -7,13 +7,13 @@ from typing import Optional
 
 BASE_URL = "http://localhost:8000"
 
-EMAIL = os.environ.get("LIZARD_EMAIL", "dummyuser@gmail.com")
-PASSWORD = os.environ.get("LIZARD_PASSWORD", "@DummyUserPA22")
+EMAIL = os.environ.get("SABLE_EMAIL", "dummyuser@gmail.com")
+PASSWORD = os.environ.get("SABLE_PASSWORD", "@DummyUserPA22")
 
 
 POLL_INTERVAL = 10 
 MAX_POLL_TIME = 3600*4  # maximum time to wait for a run (3 hour)
-TOKEN_CACHE_FILE = Path(".lizard_auth_token.json")
+TOKEN_CACHE_FILE = Path(".sable_auth_token.json")
 
 
 def _load_cached_token() -> Optional[str]:
@@ -224,10 +224,31 @@ def main():
 
         # "Starting from O=C1Nc2ccccc2OC[C@@H]1NCc1cc(Cl)c2c(c1)OCCCO2, I need to find molecules that with better affinity to P37231. Enumerate 200 compounds, and do 10 Bayesian optimisation iterations. Use a batch size of 20",
 
-        "Starting from O=C(Cc1c[nH]c2ccccc12)N1CCN(CC2(c3ccccc3)CC2)CC1, I need to find molecules that with better affinity to P03372. Enumerate 200 compounds, and do 10 Bayesian optimisation iterations. Use a batch size of 20",
+        # "Starting from O=C(Cc1c[nH]c2ccccc12)N1CCN(CC2(c3ccccc3)CC2)CC1, I need to find molecules that with better affinity to P03372. Enumerate 200 compounds, and do 10 Bayesian optimisation iterations. Use a batch size of 20",
 
-        "Starting from Cc1nc(C(=O)Nc2nc(-c3ccc4c(c3)CCC(=O)N4)cs2)ccc1C#N, I need to find molecules that with better affinity to Q96RR4. Enumerate 200 compounds, and do 10 Bayesian optimisation iterations. Use a batch size of 20",
+        # "Starting from Cc1nc(C(=O)Nc2nc(-c3ccc4c(c3)CCC(=O)N4)cs2)ccc1C#N, I need to find molecules that with better affinity to Q96RR4. Enumerate 200 compounds, and do 10 Bayesian optimisation iterations. Use a batch size of 20",
+    #    "Starting from this compound 'CC1(C)CCN(CC1)CC2=CC=C(C=C2)C(=O)NCC3(CCCN(C3)C4=CC(=NC=N4)NC)O' I need to find molecules that optimize for binding affinity to this target Q86U44. Do 10 iterations and use a batch size of 10"
+        #  "Starting from this compound 'COC(=O)C1CCCN(c2cc(-n3cc(C4(C)CCN(C(=O)c5ccc(CBr)cc5)CC4)nn3)ncn2)C1' I need to find molecules that optimize for binding affinity to this target Q86U44. Do 10 iterations and use a batch size of 10"
+        # "Starting from this compound 'C=1(N=C(C=C(N=1)NC)N2(CCC3(CC2)(NC(CN(C3)C=4(C=C(C(=CC=4F)CN5(CCC(CC5)(C)C))F))=O)))' I need to find molecules that optimize for binding affinity to this target Q86U44. Do 10 iterations and use a batch size of 10"
+      #"Starting from this compound 'CCC/N=C1\S/C(=C\c2ccc(C(=O)OCc3oc(=O)oc3C)cc2)C(=O)N1c1ccccc1O' I need to find molecules that optimize for binding affinity to this target P21453. Do 10 iterations and use a batch size of 10"
+       #"Starting from this compound 'COC1=CC=C(C=C1)C2=NN(C=C2/C=N/NC3=CC=C(C=C3)S(=O)(=O)N)C4=CC=C(C=C4)S(=O)(=O)N' I need to find molecules that optimize for binding affinity to this target O43570. Do 10 iterations and use a batch size of 10",
+       #"Starting from this compound 'COC1=CC(=CC(=C1OC)OC)/C=N\C2CCN(CC3=CC=CC=C3)C2' I need to find molecules that optimize for binding affinity to this target P56817. Do 10 iterations and use a batch size of 10",
+    #   "Starting from this compound 'COc1cc(/C=N\C2CCN(Cc3ccccc3)C2)cc(OC)c1OC' I need to find molecules that optimize for binding affinity to this target P56817. Do 10 iterations and use a batch size of 10",
+    #   "Starting from this compound 'COc1ccc(-c2nn(-c3ccc(S(N)(=O)=O)cc3)cc2/C=N/Nc2ccc(S(N)(=O)=O)cc2)cc1' I need to find molecules that optimize for binding affinity to this target O43570. Do 10 iterations and use a batch size of 10"
+
+    # "I would like to optimize C1C=CC(N2CCN(C3SC=C(C(NCC4C=C(C)C=CC=4)=O)N=3)CC2)=CC=1 for better binding affinity to P30838.  Do 10 iterations and use a batch size of 15.",
+    # "Optimize C1C=CC(N2CCN(C3SC=C(C(NCC4C=C(C5CC5)C=CC=4)=O)N=3)CC2)=CC=1C(F)(F)F for better binding affinity to P30838.  Do 2 iterations and use a batch size of 3.",
+    # "Optimize C1C=CC(N2CCN(C3SC=C(C(NCC4C=C(C5=CSC(C)=N5)C=CC=4)=O)N=3)CC2)=CC=1C(F)(F)F for better binding affinity to P30838.  Do 2 iterations and use a batch size of 3.",
+
+    # "Optimize Fc1ccc(CNC2CCN(Cc3ccccc3)C2)c(F)c1 for better binding affinity to P56817.  Do 2 iterations and use a batch size of 3.",
+    # "Optimize CC(=O)Nc1nnc(S(N)(=O)=O)s1 for better binding affinity to O43570.  Do 2 iterations and use a batch size of 3.",
+    # "Optimize Cc1cn(-c2cc(NC(=O)c3ccc(C)c(Nc4nccc(-c5cccnc5)n4)c3)cc(C(F)(F)F)c2)cn1 for better binding affinity to P00519.  Do 2 iterations and use a batch size of 3.",
+    # "Optimize CCC/N=C1\S/C(=C\c2ccc(C(=O)OC)c(Cl)c2)C(=O)N1c1ccccc1C for better binding affinity to P21453.  Do 2 iterations and use a batch size of 3.",
+    # "Optimize Aspirin for maximum QED",
+    "Optimize Aspirin for maximum affinity to P00519.  Do 2 iterations and use a batch size of 3.",
+
     ]
+
     
     print(f"Loaded {len(questions_list)} question(s) to run sequentially\n")
     print("=" * 80)

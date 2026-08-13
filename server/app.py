@@ -1,4 +1,4 @@
-"""LIZARD API with new database-backed authentication system."""
+"""SABLE API with new database-backed authentication system."""
 import os
 from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,9 +21,9 @@ from server.routers.admin import router as admin_router
 
 
 app = FastAPI(
-    title="LIZARD API",
+    title="SABLE API",
     version="0.2.0",
-    description="LIgand optimiZation via Agentic Research and Discovery"
+    description="Synthetically-accessible Agentic Bayesian Ligand Exploration"
 )
 
 # CORS configuration

@@ -1,4 +1,4 @@
-"""API routers for LIZARD."""
+"""API routers for SABLE."""
 
 from server.routers.auth import router as auth_router
 

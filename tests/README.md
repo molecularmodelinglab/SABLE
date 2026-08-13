@@ -1,6 +1,6 @@
-# LIZARD Tests
+# SABLE Tests
 
-Comprehensive test suite for the LIZARD application with 96 test cases covering authentication, services, API endpoints, and complete user workflows.
+Comprehensive test suite for the SABLE application with 96 test cases covering authentication, services, API endpoints, and complete user workflows.
 
 ## Quick Start
 
@@ -14,13 +14,13 @@ pip install -r requirements.txt
 
 ```bash
 # Option 1: Using createdb
-createdb lizard_test
+createdb sable_test
 
 # Option 2: Using Docker
-docker-compose exec postgres psql -U lizard_user -c "CREATE DATABASE lizard_test;"
+docker-compose exec postgres psql -U sable_user -c "CREATE DATABASE sable_test;"
 
 # Option 3: Using psql directly
-psql -U postgres -c "CREATE DATABASE lizard_test;"
+psql -U postgres -c "CREATE DATABASE sable_test;"
 ```
 
 ### 3. Configure Environment
@@ -28,7 +28,7 @@ psql -U postgres -c "CREATE DATABASE lizard_test;"
 Create `.env.test` (optional - defaults are provided):
 
 ```bash
-TEST_DATABASE_URL=postgresql://lizard_user:lizard_password@localhost:5432/lizard_test
+TEST_DATABASE_URL=postgresql://sable_user:sable_password@localhost:5432/sable_test
 TEST_REDIS_URL=redis://localhost:6379/1
 SECRET_KEY=test-secret-key-for-testing-only-min-32-chars
 ENVIRONMENT=testing
@@ -183,10 +183,10 @@ def test_user_creation(db_session):
 docker-compose ps postgres
 
 # Check if database exists
-psql -U postgres -l | grep lizard_test
+psql -U postgres -l | grep sable_test
 
 # Recreate database
-dropdb lizard_test && createdb lizard_test
+dropdb sable_test && createdb sable_test
 ```
 
 ### Redis Connection Error
@@ -203,10 +203,10 @@ docker-compose up redis
 
 ```bash
 # Make sure you're in project root
-cd /home/kelvin/LIZARD
+cd /home/kelvin/SABLE
 
 # Set PYTHONPATH
-export PYTHONPATH=/home/kelvin/LIZARD:$PYTHONPATH
+export PYTHONPATH=/home/kelvin/SABLE:$PYTHONPATH
 
 # Or install in development mode
 pip install -e .
@@ -227,9 +227,9 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: lizard_user
-          POSTGRES_PASSWORD: lizard_password
-          POSTGRES_DB: lizard_test
+          POSTGRES_USER: sable_user
+          POSTGRES_PASSWORD: sable_password
+          POSTGRES_DB: sable_test
       redis:
         image: redis:7
     

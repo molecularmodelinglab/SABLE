@@ -41,8 +41,8 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
         <div className="app-shell__brand">
           <div className="app-shell__logo">🦎</div>
           <div>
-            <div className="app-shell__title">LIZARD</div>
-            <div className="app-shell__subtitle">LIgand optimiZation via Agentic Research and Discovery</div>
+            <div className="app-shell__title">SABLE</div>
+            <div className="app-shell__subtitle">Synthetically-accessible Agentic Bayesian Ligand Exploration</div>
           </div>
         </div>
         <nav className="app-shell__nav">

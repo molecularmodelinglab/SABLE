@@ -1,6 +1,6 @@
-# Deploying LIZARD to Red Hat OpenShift
+# Deploying SABLE to Red Hat OpenShift
 
-This guide walks through everything you need to run LIZARD (API, background workflow runner, and optional frontend) on an OpenShift cluster. It assumes you are moving the services defined in `docker-compose.yml` (PostgreSQL, Redis, API, migrations, CLI utilities, and UI) into Kubernetes-first resources.
+This guide walks through everything you need to run SABLE (API, background workflow runner, and optional frontend) on an OpenShift cluster. It assumes you are moving the services defined in `docker-compose.yml` (PostgreSQL, Redis, API, migrations, CLI utilities, and UI) into Kubernetes-first resources.
 
 ---
 
@@ -20,15 +20,15 @@ This guide walks through everything you need to run LIZARD (API, background work
 1. **Build and push the image** (or let OpenShift build it):
    ```bash
    # Option A: Build locally and push
-   podman build -t quay.io/<org>/lizard-api:latest .
-   podman push quay.io/<org>/lizard-api:latest
+   podman build -t quay.io/<org>/sable-api:latest .
+   podman push quay.io/<org>/sable-api:latest
 
    # Option B: Use OpenShift Binary Build
-   oc new-build --name=lizard-api --binary --strategy=docker
+   oc new-build --name=sable-api --binary --strategy=docker
    
-   oc patch bc/lizard-api --type=merge -p '{"spec":{"strategy":{"dockerStrategy":{"dockerfilePath":"Dockerfile.prod"}}}}'
+   oc patch bc/sable-api --type=merge -p '{"spec":{"strategy":{"dockerStrategy":{"dockerfilePath":"Dockerfile.prod"}}}}'
 
-   oc start-build lizard-api --from-dir=. --follow
+   oc start-build sable-api --from-dir=. --follow
    ```
 
 2. **Frontend image** (`ui/Dockerfile`) can be built separately if you plan to host the static UI via Nginx. Otherwise, run Vite locally.
@@ -41,10 +41,10 @@ This guide walks through everything you need to run LIZARD (API, background work
 oc new-project < project >
 
 # Import pre-built images (skip if using OpenShift BuildConfig)
-oc import-image lizard-api:latest \
-  --from=quay.io/<org>/lizard-api:latest --confirm
-oc import-image lizard-frontend:latest \
-  --from=quay.io/<org>/lizard-frontend:latest --confirm
+oc import-image sable-api:latest \
+  --from=quay.io/<org>/sable-api:latest --confirm
+oc import-image sable-frontend:latest \
+  --from=quay.io/<org>/sable-frontend:latest --confirm
 ```
 
 ---
@@ -55,9 +55,9 @@ Split sensitive and non-sensitive values into separate resources.
 
 1. **Secrets** (`SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, OAuth keys, LLM keys):
    ```bash
-   oc create secret generic lizard-secrets \
+   oc create secret generic sable-secrets \
      --from-literal=SECRET_KEY="change_this" \
-     --from-literal=DATABASE_URL="postgresql://lizard_user:***@postgresql:5432/lizard" \
+     --from-literal=DATABASE_URL="postgresql://sable_user:***@postgresql:5432/sable" \
      --from-literal=REDIS_URL="redis://:***@redis:6379/0" \
      --from-literal=OPENAI_API_KEY="..." \
      --from-literal=GOOGLE_API_KEY="..."
@@ -65,7 +65,7 @@ Split sensitive and non-sensitive values into separate resources.
 
 2. **ConfigMap** (non-secret configuration—`ENVIRONMENT`, `LLM_PROVIDER`, etc.):
    ```bash
-   oc create configmap lizard-config \
+   oc create configmap sable-config \
      --from-literal=ENVIRONMENT=production \
      --from-literal=LLM_PROVIDER=gemini \
      --from-literal=LOG_LEVEL=INFO
@@ -77,7 +77,7 @@ Update values per environment. Reference them via `envFrom` in Deployments later
 
 ## 5. Persistent storage
 
-LIZARD stores checkpoints/results under `LIZARD_DATA_ROOT` (default `./data`). PostgreSQL and Redis also need storage.
+SABLE stores checkpoints/results under `SABLE_DATA_ROOT` (default `./data`). PostgreSQL and Redis also need storage.
 
 Create PersistentVolumeClaims sized for your workloads (adjust `storageClassName` to match your OpenShift cluster):
 
@@ -106,11 +106,11 @@ spec:
       storage: 5Gi
   storageClassName: managed-premium
 ---
-# lizard-artifacts-pvc.yaml
+# sable-artifacts-pvc.yaml
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: lizard-artifacts
+  name: sable-artifacts
 spec:
   accessModes: [ReadWriteOnce]
   resources:
@@ -123,7 +123,7 @@ Apply them:
 ```bash
 oc apply -f postgres-pvc.yaml
 oc apply -f redis-pvc.yaml
-oc apply -f lizard-artifacts-pvc.yaml
+oc apply -f sable-artifacts-pvc.yaml
 ```
 
 ---
@@ -161,17 +161,17 @@ spec:
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
-                  name: lizard-secrets
+                  name: sable-secrets
                   key: POSTGRES_USER
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: lizard-secrets
+                  name: sable-secrets
                   key: POSTGRES_PASSWORD
             - name: POSTGRES_DB
               valueFrom:
                 secretKeyRef:
-                  name: lizard-secrets
+                  name: sable-secrets
                   key: POSTGRES_DB
           volumeMounts:
             - name: data
@@ -224,7 +224,7 @@ spec:
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: lizard-secrets
+                  name: sable-secrets
                   key: PREDIS_PASSWORD
           ports:
             - containerPort: 6379
@@ -269,37 +269,37 @@ Convert the `migrations` service from `docker-compose.yml` into a Kubernetes Job
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: lizard-migrations
+  name: sable-migrations
 spec:
   template:
     spec:
       restartPolicy: OnFailure
       containers:
         - name: migrations
-          image: image-registry.openshift-image-registry.svc:5000/<project>/lizard-api:latest
-          command: ["/bin/bash", "-lc", "micromamba run -n lizard alembic upgrade head"]
+          image: image-registry.openshift-image-registry.svc:5000/<project>/sable-api:latest
+          command: ["/bin/bash", "-lc", "micromamba run -n sable alembic upgrade head"]
           envFrom:
             - configMapRef:
-                name: lizard-config
+                name: sable-config
             - secretRef:
-                name: lizard-secrets
+                name: sable-secrets
           env:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: lizard-secrets
+                  name: sable-secrets
                   key: DATABASE_URL
 ```
 
 Run migrations after updating the image:
 ```bash
 oc apply -f migrations-job.yaml
-oc wait --for=condition=complete job/lizard-migrations --timeout=180s
+oc wait --for=condition=complete job/sable-migrations --timeout=180s
 ```
 
 ---
 
-## 8. Deploy the LIZARD API
+## 8. Deploy the SABLE API
 
 Create a Deployment that points to the OpenShift image stream (or external registry), mounts volumes, and exposes port 8000.
 
@@ -308,32 +308,32 @@ Create a Deployment that points to the OpenShift image stream (or external regis
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: lizard-api
+  name: sable-api
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: lizard-api
+      app: sable-api
   template:
     metadata:
       labels:
-        app: lizard-api
+        app: sable-api
     spec:
       containers:
         - name: api
-          image: image-registry.openshift-image-registry.svc:5000/<project>/lizard-api:latest
+          image: image-registry.openshift-image-registry.svc:5000/<project>/sable-api:latest
           ports:
             - containerPort: 8000
           command: ["/bin/bash", "-lc"]
           args:
             - |
-              micromamba run -n lizard uvicorn server.app:app \
+              micromamba run -n sable uvicorn server.app:app \
                 --host 0.0.0.0 --port 8000
           envFrom:
             - configMapRef:
-                name: lizard-config
+                name: sable-config
             - secretRef:
-                name: lizard-secrets
+                name: sable-secrets
           volumeMounts:
             - name: artifacts
               mountPath: /app/data
@@ -359,7 +359,7 @@ spec:
       volumes:
         - name: artifacts
           persistentVolumeClaim:
-            claimName: lizard-artifacts
+            claimName: sable-artifacts
 ```
 
 Add the Service and Route:
@@ -369,10 +369,10 @@ Add the Service and Route:
 apiVersion: v1
 kind: Service
 metadata:
-  name: lizard-api
+  name: sable-api
 spec:
   selector:
-    app: lizard-api
+    app: sable-api
   ports:
     - port: 8000
       targetPort: 8000
@@ -380,11 +380,11 @@ spec:
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: lizard-api
+  name: sable-api
 spec:
   to:
     kind: Service
-    name: lizard-api
+    name: sable-api
   port:
     targetPort: 8000
   tls:
@@ -399,8 +399,8 @@ oc apply -f api-service-route.yaml
 
 Verify pod status:
 ```bash
-oc get pods -l app=lizard-api
-oc logs deployment/lizard-api
+oc get pods -l app=sable-api
+oc logs deployment/sable-api
 ```
 
 ---
@@ -416,23 +416,23 @@ Either way, set `VITE_API_BASE` during the build so API calls target your Route.
 
 ```bash
 # From the repo root
-oc new-build --name=lizard-frontend --binary --strategy=docker --context-dir=ui
+oc new-build --name=sable-frontend --binary --strategy=docker --context-dir=ui
 
-oc set env bc/lizard-frontend \
-  VITE_API_BASE=https://lizard-api-url-<domain>
+oc set env bc/sable-frontend \
+  VITE_API_BASE=https://sable-api-url-<domain>
 
-oc start-build lizard-frontend \
+oc start-build sable-frontend \
   --from-dir=ui \
   --follow
 
 # CI or workstation build
-docker build -f ui/Dockerfile -t quay.io/<org>/lizard-frontend:2025-11-13 \
+docker build -f ui/Dockerfile -t quay.io/<org>/sable-frontend:2025-11-13 \
   --build-arg VITE_API_BASE=https://api.apps.<cluster-domain>/api .
-docker push quay.io/<org>/lizard-frontend:2025-11-13
+docker push quay.io/<org>/sable-frontend:2025-11-13
 
 # Or OpenShift build
-oc new-build --name=lizard-frontend --binary --strategy=docker -f ui/Dockerfile
-oc start-build lizard-frontend --env VITE_API_BASE=https://api.apps.<cluster-domain>/api --from-dir=ui --follow
+oc new-build --name=sable-frontend --binary --strategy=docker -f ui/Dockerfile
+oc start-build sable-frontend --env VITE_API_BASE=https://api.apps.<cluster-domain>/api --from-dir=ui --follow
 ```
 
 Because the bundle is baked at build time, changes to `VITE_API_BASE` require a rebuild. If you need dynamic configuration, expose a JSON config file via ConfigMap and fetch it on app bootstrap.
@@ -444,20 +444,20 @@ After the image exists in your project, create a Deployment, Service, and Route:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: lizard-frontend
+  name: sable-frontend
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: lizard-frontend
+      app: sable-frontend
   template:
     metadata:
       labels:
-        app: lizard-frontend
+        app: sable-frontend
     spec:
       containers:
         - name: frontend
-          image: image-registry.openshift-image-registry.svc:5000/<project>/lizard-frontend:latest
+          image: image-registry.openshift-image-registry.svc:5000/<project>/sable-frontend:latest
           ports:
             - containerPort: 8080
           env:
@@ -479,10 +479,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: lizard-frontend
+  name: sable-frontend
 spec:
   selector:
-    app: lizard-frontend
+    app: sable-frontend
   ports:
     - port: 80
       targetPort: 8080
@@ -490,24 +490,24 @@ spec:
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: lizard-frontend
+  name: sable-frontend
 spec:
   to:
     kind: Service
-    name: lizard-frontend
+    name: sable-frontend
   tls:
     termination: edge
 ```
 
 Apply:
 ```bash
-oc create configmap lizard-frontend-nginx --from-file=default.conf=ui/nginx.conf
+oc create configmap sable-frontend-nginx --from-file=default.conf=ui/nginx.conf
 oc apply -f frontend.yaml
 ```
 
 ### Frontend routing models
 
-- **Separate domain:** point a DNS record (e.g., `lizard.example.com`) to the Route host shown by `oc get route lizard-frontend`.
+- **Separate domain:** point a DNS record (e.g., `sable.example.com`) to the Route host shown by `oc get route sable-frontend`.
 - **Subpath under the API domain:** update `nginx.conf` to `location /app/ { try_files ... }` and serve the UI behind the API Route using edge TLS.
 - **Single Route, multiple services:** leverage OpenShift’s [alternateBackends](https://docs.openshift.com/container-platform/latest/networking/routes/route-configuration.html#nw-route-specific-annotations_route-configuration) annotations if you want `/api` to hit the API service and `/` to hit the frontend.
 
@@ -533,7 +533,7 @@ Expose the Auth0 tenant ID via `VITE_AUTH0_DOMAIN` and `VITE_AUTH0_CLIENT_ID` at
 
 ### Verifying the deployment
 
-1. Wait for the rollout: `oc rollout status deployment/lizard-frontend`.
+1. Wait for the rollout: `oc rollout status deployment/sable-frontend`.
 2. Hit the Route URL; ensure assets load without 404s.
 3. Open the browser dev tools to confirm API requests target the expected host and return 200 responses.
 4. Optionally run Lighthouse to check performance and best-practice scores.
@@ -544,43 +544,43 @@ When updates are ready, rebuild/push the image, update the Deployment image tag 
 
 ## 10. Background workflow runner (CLI)
 
-If you need the CLI container for manual jobs (`lizard` service in `docker-compose.yml`), replicate it as a CronJob or Deployment that runs ad-hoc tasks. Make sure it shares the same secrets/config and the artifact PVC.
+If you need the CLI container for manual jobs (`sable` service in `docker-compose.yml`), replicate it as a CronJob or Deployment that runs ad-hoc tasks. Make sure it shares the same secrets/config and the artifact PVC.
 
 ```yaml
 # cli-deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: lizard-cli
+  name: sable-cli
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: lizard-cli
+      app: sable-cli
   template:
     metadata:
       labels:
-        app: lizard-cli
+        app: sable-cli
     spec:
       containers:
         - name: cli
-          image: image-registry.openshift-image-registry.svc:5000/lizard/lizard-api:latest
+          image: image-registry.openshift-image-registry.svc:5000/sable/sable-api:latest
           command: ["/bin/bash", "-lc", "sleep infinity"]
           envFrom:
             - configMapRef:
-                name: lizard-config
+                name: sable-config
             - secretRef:
-                name: lizard-secrets
+                name: sable-secrets
           volumeMounts:
             - name: artifacts
               mountPath: /app/data
       volumes:
         - name: artifacts
           persistentVolumeClaim:
-            claimName: lizard-artifacts
+            claimName: sable-artifacts
 ```
 
-You can `oc rsh` into the pod and run `micromamba run -n lizard python run_workflow.py ...` when needed.
+You can `oc rsh` into the pod and run `micromamba run -n sable python run_workflow.py ...` when needed.
 
 ---
 
@@ -590,8 +590,8 @@ You can `oc rsh` into the pod and run `micromamba run -n lizard python run_workf
 2. Hit the API Route (e.g., `curl https://<api-route>/health`).
 3. Run the test workflow:
    ```bash
-   oc rsh deploy/lizard-cli
-   micromamba run -n lizard python run_workflow.py --example
+   oc rsh deploy/sable-cli
+   micromamba run -n sable python run_workflow.py --example
    ```
 4. Access the frontend Route and log in.
 
@@ -599,11 +599,11 @@ You can `oc rsh` into the pod and run `micromamba run -n lizard python run_workf
 
 ## 12. Day-2 operations
 
-- **Scaling:** use `oc scale deployment/lizard-api --replicas=4`.
-- **Rolling updates:** new image pushes trigger rollout; watch with `oc rollout status deployment/lizard-api`.
-- **Logs:** `oc logs deployment/lizard-api` and `oc logs deployment/lizard-redis`.
+- **Scaling:** use `oc scale deployment/sable-api --replicas=4`.
+- **Rolling updates:** new image pushes trigger rollout; watch with `oc rollout status deployment/sable-api`.
+- **Logs:** `oc logs deployment/sable-api` and `oc logs deployment/sable-redis`.
 - **Backups:** snapshot PostgreSQL PVCs or use pg_dump; archive `/app/data` artifacts.
-- **Secrets rotation:** update values with `oc set env deployment/lizard-api --from=secret/lizard-secrets --prefix=SECRET_` or reapply the Secret.
+- **Secrets rotation:** update values with `oc set env deployment/sable-api --from=secret/sable-secrets --prefix=SECRET_` or reapply the Secret.
 - **Monitoring:** integrate OpenShift monitoring/alerts for pod health, HTTP errors, queue sizes.
 
 ---
@@ -620,13 +620,13 @@ For repeatable deployments:
 ## 14. Clean up
 
 ```bash
-oc delete all -l app=lizard-api
-oc delete all -l app=lizard-frontend
+oc delete all -l app=sable-api
+oc delete all -l app=sable-frontend
 oc delete all -l app=postgres
 oc delete all -l app=redis
-oc delete pvc postgres-data redis-data lizard-artifacts
-oc delete secret lizard-secrets postgres-credentials redis-credentials
-oc delete configmap lizard-config
+oc delete pvc postgres-data redis-data sable-artifacts
+oc delete secret sable-secrets postgres-credentials redis-credentials
+oc delete configmap sable-config
 ```
 
 ---

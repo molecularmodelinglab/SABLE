@@ -1,4 +1,4 @@
-"""Base interfaces for modular LIZARD workflow tools.
+"""Base interfaces for modular SABLE workflow tools.
 
 These contracts are intentionally small. Existing tools can be adapted to them
 incrementally while current LangChain BaseTool implementations remain in place.
@@ -39,7 +39,7 @@ class ToolExecutionContext(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class LizardTool(ABC, Generic[RequestT, ResultT]):
+class SableTool(ABC, Generic[RequestT, ResultT]):
     """Abstract base class for future registry-managed tool adapters."""
 
     spec: ToolSpec

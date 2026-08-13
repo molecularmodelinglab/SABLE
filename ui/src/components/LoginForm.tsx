@@ -30,7 +30,7 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
       borderRadius: '8px',
       backgroundColor: '#fff'
     }}>
-      <h2 style={{ marginBottom: '1.5rem', textAlign: 'center' }}>LIZARD Login</h2>
+      <h2 style={{ marginBottom: '1.5rem', textAlign: 'center' }}>SABLE Login</h2>
       
       <form onSubmit={handleSubmit}>
         <div style={{ marginBottom: '1rem' }}>
