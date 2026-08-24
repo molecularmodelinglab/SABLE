@@ -82,6 +82,13 @@ services:
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
       - MOLECULAR_FP=${MOLECULAR_FP:-MORDRED}
       - MULTI_OPT_TYPE=${MULTI_OPT_TYPE:-pareto}
+      - HEALER_EXECUTION_MODE=${HEALER_EXECUTION_MODE:-internal}
+      - HEALER_ENDPOINT=${HEALER_ENDPOINT:-}
+      - HEALER_STOCK=${HEALER_STOCK:-US_stock}
+      - HEALER_POLL_INTERVAL_SECONDS=${HEALER_POLL_INTERVAL_SECONDS:-2}
+      - HEALER_JOB_TIMEOUT_SECONDS=${HEALER_JOB_TIMEOUT_SECONDS:-900}
+      - HEALER_HTTP_TIMEOUT_SECONDS=${HEALER_HTTP_TIMEOUT_SECONDS:-30}
+      - HEALER_OUTPUT_DIR=${HEALER_OUTPUT_DIR:-data/healer_outputs}
     volumes:
       - ./data:/app/data  # For large artifacts (checkpoints, results)
       - ./logs:/app/logs
@@ -124,6 +131,13 @@ services:
       - HPC_SSH_KEY=/app/secrets/hpc_ssh_key
       - MOLECULAR_FP=${MOLECULAR_FP:-MORDRED}
       - MULTI_OPT_TYPE=${MULTI_OPT_TYPE:-pareto}
+      - HEALER_EXECUTION_MODE=${HEALER_EXECUTION_MODE:-internal}
+      - HEALER_ENDPOINT=${HEALER_ENDPOINT:-}
+      - HEALER_STOCK=${HEALER_STOCK:-US_stock}
+      - HEALER_POLL_INTERVAL_SECONDS=${HEALER_POLL_INTERVAL_SECONDS:-2}
+      - HEALER_JOB_TIMEOUT_SECONDS=${HEALER_JOB_TIMEOUT_SECONDS:-900}
+      - HEALER_HTTP_TIMEOUT_SECONDS=${HEALER_HTTP_TIMEOUT_SECONDS:-30}
+      - HEALER_OUTPUT_DIR=${HEALER_OUTPUT_DIR:-data/healer_outputs}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
