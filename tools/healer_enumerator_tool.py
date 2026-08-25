@@ -323,7 +323,7 @@ class HealerEnumeratorTool(BaseTool):
         deadline = time.monotonic() + self.job_timeout_seconds
 
         while True:
-            response = self._request_json("GET", f"/api/jobs/{job_id}")
+            response = self._request_json("GET", f"/jobs/{job_id}")
             status = str(response.get("status", "")).strip().lower()
             if status == "success":
                 return response
