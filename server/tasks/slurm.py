@@ -19,9 +19,9 @@ def get_job_manager() -> BoltzJobManager:
         raise ValueError("HPC_HOST environment variable not set")
     key_path_env = os.getenv("HPC_SSH_KEY")
     default_key = str(Path.home() / ".ssh" / "id_rsa")
-    key_filename = key_path_env or default_key
+    key_filename = key_path_env or (default_key if os.path.isfile(default_key) else None)
 
-    if not os.path.isfile(key_filename) or not os.access(key_filename, os.R_OK):
+    if key_filename and (not os.path.isfile(key_filename) or not os.access(key_filename, os.R_OK)):
         key_content = os.getenv("HPC_SSH_KEY_CONTENT")
         if key_content:
             tf = tempfile.NamedTemporaryFile(prefix="hpc_key_", delete=False)
@@ -37,11 +37,21 @@ def get_job_manager() -> BoltzJobManager:
                     "Either mount the key into the container with correct permissions, "
                     "or set the key contents via the HPC_SSH_KEY_CONTENT environment variable."
                 )
+    elif not key_filename:
+        key_content = os.getenv("HPC_SSH_KEY_CONTENT")
+        if key_content:
+            tf = tempfile.NamedTemporaryFile(prefix="hpc_key_", delete=False)
+            tf.write(key_content.encode("utf-8"))
+            tf.flush()
+            tf.close()
+            os.chmod(tf.name, stat.S_IRUSR | stat.S_IWUSR)
+            key_filename = tf.name
 
     ssh_config = SSHConfig(
         hostname=hpc_host,
         username=os.getenv("HPC_USER", os.getenv("USER", "root")),
         key_filename=key_filename,
+        password=os.getenv("HPC_PASSWORD"),
     )
     
     hpc = HPCClient(ssh_config)
@@ -169,6 +179,9 @@ def monitor_slurm_jobs() -> None:
     """
     Periodic task to check status of all pending/running jobs.
     """
+    if os.getenv("BOLTZ_EXECUTION_MODE", "api").lower() != "celery":
+        return
+
     manager = get_job_manager()
     active_jobs = manager.list_active_jobs()
     
