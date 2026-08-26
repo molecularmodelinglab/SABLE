@@ -78,3 +78,41 @@ def test_admin_summary_returns_metrics(
     audit_metrics = data["audit"]
     assert "total_last_7_days" in audit_metrics
     assert "top_events_last_30_days" in audit_metrics
+
+
+@pytest.mark.integration
+@pytest.mark.api
+@pytest.mark.admin
+def test_boltz_access_request_and_admin_approval(
+    client,
+    auth_headers,
+    admin_headers,
+    test_user,
+):
+    requested = client.post("/auth/boltz-access-request", headers=auth_headers)
+    assert requested.status_code == 200
+    assert requested.json()["access_status"] == "pending"
+    assert requested.json()["can_use_self_hosted"] is False
+
+    forbidden = client.patch(
+        f"/admin/users/{test_user.id}/boltz-access",
+        headers=auth_headers,
+        json={"status": "approved"},
+    )
+    assert forbidden.status_code == 403
+
+    approved = client.patch(
+        f"/admin/users/{test_user.id}/boltz-access",
+        headers=admin_headers,
+        json={"status": "approved"},
+    )
+    assert approved.status_code == 200
+    payload = approved.json()
+    assert payload["access_status"] == "approved"
+    assert payload["can_use_self_hosted"] is True
+    assert payload["provider"] == "self_hosted"
+    assert payload["metrics"] == ["binding_affinity"]
+
+    queue = client.get("/admin/users/boltz-access", headers=admin_headers)
+    assert queue.status_code == 200
+    assert any(item["user_id"] == str(test_user.id) for item in queue.json())
