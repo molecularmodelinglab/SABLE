@@ -53,6 +53,7 @@ def decide_characterization_node(state: WorkflowState) -> Dict[str, Any]:
             )
         )
     
+    boltz_config = state.characterization_config.get('boltz')
     state.characterization_config = {
         'tool': _legacy_tool_label(tool_ids),
         'tool_ids': tool_ids,
@@ -62,6 +63,8 @@ def decide_characterization_node(state: WorkflowState) -> Dict[str, Any]:
         'boltz_only': tool_ids == ['boltz'],
         'available_proteins': len(getattr(state, 'protein_targets', [])),
     }
+    if boltz_config is not None:
+        state.characterization_config['boltz'] = boltz_config
     
     state.log("decide_characterization_completed", {
         "tool_selected": state.characterization_config['tool'],
