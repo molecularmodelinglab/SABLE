@@ -22,6 +22,12 @@ def normalize_self_hosted_results(
             if isinstance(raw_affinity, dict)
             else raw_affinity
         )
+        raw_confidence = info.get("confidence")
+        confidence_value = (
+            raw_confidence.get("confidence_score")
+            if isinstance(raw_confidence, dict)
+            else raw_confidence
+        )
         succeeded = isinstance(affinity_value, (int, float))
         results.append(BoltzMoleculeResult(
             molecule_id=molecule_id,
@@ -30,8 +36,13 @@ def normalize_self_hosted_results(
             status=BoltzJobStatus.SUCCEEDED if succeeded else BoltzJobStatus.FAILED,
             metrics=BoltzMetricSet(
                 affinity=float(affinity_value) if succeeded else None,
+                binding_confidence=(
+                    float(confidence_value)
+                    if isinstance(confidence_value, (int, float))
+                    else None
+                ),
             ),
-            structure_path=info.get("cif_file"),
+            structure_path=info.get("cif_file") or info.get("cif_path"),
             sanitized_error=None if succeeded else "No affinity score was returned.",
         ))
     return results
