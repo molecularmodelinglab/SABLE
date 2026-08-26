@@ -9,6 +9,7 @@ import { RunDetailPage } from './pages/RunDetailPage'
 import { LoginPage } from './pages/LoginPage'
 import { RegisterPage } from './pages/RegisterPage'
 import { AdminDashboardPage } from './pages/AdminDashboardPage'
+import { AccountPage } from './pages/AccountPage'
 import { useAuthProfile } from './hooks/useAuthProfile'
 
 export function App() {
@@ -28,6 +29,7 @@ export function App() {
                 <Route path="/" element={<DashboardPage />} />
                 <Route path="/runs/new" element={<NewRunPage />} />
                 <Route path="/runs/:id" element={<RunDetailPage />} />
+                <Route path="/account" element={<AccountPage />} />
                 <Route
                   path="/admin"
                   element={
@@ -117,6 +119,12 @@ function buildHeader(pathname: string) {
     return {
       title: 'Administrator Console',
       description: 'Operations, security signals, and aggregate analytics across the platform.',
+    }
+  }
+  if (pathname.startsWith('/account')) {
+    return {
+      title: 'Account Settings',
+      description: 'Manage compute access, provider credentials, and run defaults.',
     }
   }
   return {
