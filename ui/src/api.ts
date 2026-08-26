@@ -325,6 +325,14 @@ export async function getCheckpoints(id: string): Promise<string[]> {
   return request<string[]>(`/runs/${id}/checkpoints`)
 }
 
+export async function getCheckpointText(id: string, filename: string): Promise<string> {
+  return request<string>(
+    `/runs/${id}/checkpoints/${encodeURIComponent(filename)}`,
+    undefined,
+    'text'
+  )
+}
+
 export async function getRunResults(id: string): Promise<RunResults | null> {
   try {
     return await request<RunResults>(`/runs/${id}/artifacts/results.json`)
