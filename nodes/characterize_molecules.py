@@ -4,6 +4,7 @@ Characterize molecules using the selected tool(s).
 
 from typing import Dict, Any, List
 import asyncio
+import hashlib
 import time
 import sys
 import os
@@ -281,7 +282,13 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                             mapped_properties[target.name] = float(result_value)
                             found = True
                             break
-                
+
+                    # Boltz Platform fallback: binding_affinity -> boltz_optimization_score
+                    if target_name_lower == "binding_affinity" and result_key_lower == "boltz_optimization_score":
+                        mapped_properties[target.name] = float(result_value)
+                        found = True
+                        break
+
                 # If not found, try to get any similar property
                 if not found:
                     # Look for partial matches
@@ -551,6 +558,20 @@ def _run_boltz_platform_characterization(
         proteins=request.proteins,
         protein_scope_id=scope_id,
     )
+    idempotency_payload = json.dumps(
+        {
+            "run_id": run_id,
+            "molecules": [molecule.model_dump(mode="json") for molecule in platform_request.molecules],
+            "protein_scope_id": scope_id,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    platform_request = platform_request.model_copy(update={
+        "options": {
+            "idempotency_key": f"sable-{hashlib.sha256(idempotency_payload).hexdigest()}"
+        }
+    })
 
     result_rows = None
     with get_db_context() as db:
