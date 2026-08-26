@@ -1,6 +1,8 @@
+@import url('https://fonts.googleapis.com/css2?family=Rethink+Sans:wght@400;500;600;700&display=swap');
+
 :root {
   color-scheme: light;
-  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+  font-family: 'Rethink Sans', sans-serif;
   font-size: 16px;
   line-height: 1.5;
   background-color: #f5f6fb;
@@ -123,6 +125,8 @@ button.danger:disabled {
   display: flex;
   flex-direction: column;
   gap: 32px;
+  position: relative;
+  z-index: 1;
 }
 
 .app-shell__brand {
@@ -135,7 +139,7 @@ button.danger:disabled {
 .app-shell__logo {
   width: 44px;
   height: 44px;
-  border-radius: 12px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.12);
   display: flex;
   align-items: center;
@@ -163,7 +167,7 @@ button.danger:disabled {
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: 8px;
   color: rgba(255, 255, 255, 0.72);
   font-weight: 500;
 }
@@ -186,6 +190,28 @@ button.danger:disabled {
   width: 24px;
   display: inline-flex;
   justify-content: center;
+}
+
+.app-shell__user-menu-item {
+  width: 100%;
+  padding: 0.75rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.84);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-align: left;
+}
+
+.app-shell__user-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.app-shell__user-menu-item--danger {
+  color: #fca5a5;
 }
 
 .app-shell__footer {
@@ -533,6 +559,71 @@ button.danger:disabled {
   gap: 16px;
 }
 
+.provider-jobs {
+  display: grid;
+  gap: 12px;
+}
+
+.provider-jobs h3 {
+  margin: 0;
+}
+
+.provider-jobs__list {
+  display: grid;
+  gap: 10px;
+}
+
+.provider-job {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+}
+
+.provider-job__header,
+.provider-job__counts {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.provider-job__header > div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.provider-job__header span,
+.provider-job__counts {
+  color: #64748b;
+  font-size: 0.82rem;
+}
+
+.provider-job__progress {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #e2e8f0;
+}
+
+.provider-job__progress span {
+  display: block;
+  height: 100%;
+  background: #0d9488;
+  transition: width 0.25s ease;
+}
+
+.provider-job__error {
+  margin: 0;
+  padding: 10px;
+  border-left: 3px solid #dc2626;
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: 0.85rem;
+}
+
 .run-detail__summary {
   background: rgba(15, 23, 42, 0.04);
   border-radius: 12px;
@@ -816,7 +907,7 @@ button.danger:disabled {
 
 .new-run__form {
   background: var(--panel-bg);
-  border-radius: 16px;
+  border-radius: 8px;
   border: 1px solid var(--panel-border);
   padding: 24px;
   display: grid;
@@ -828,6 +919,256 @@ button.danger:disabled {
   gap: 8px;
   font-size: 0.9rem;
   font-weight: 600;
+}
+
+.run-options,
+.metric-options {
+  margin: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.run-options {
+  display: grid;
+  gap: 16px;
+}
+
+.run-options > legend,
+.metric-options > legend {
+  padding: 0 6px;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.run-options__segmented {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border-radius: 8px;
+  background: #e8edf3;
+}
+
+.run-options__segmented button {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.run-options__segmented button.active {
+  background: #fff;
+  color: #075985;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.14);
+}
+
+.platform-options {
+  display: grid;
+  gap: 16px;
+}
+
+.credential-list {
+  display: grid;
+  gap: 8px;
+}
+
+.credential-list__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
+.credential-status {
+  color: #64748b;
+  text-transform: capitalize;
+}
+
+.credential-status--active {
+  color: #047857;
+}
+
+.credential-create {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.metric-options {
+  display: grid;
+  gap: 10px;
+}
+
+.metric-options label {
+  display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.metric-options input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.run-options__hint {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.82rem;
+}
+
+.account-page {
+  display: grid;
+  gap: 20px;
+  max-width: 900px;
+}
+
+.account-section {
+  padding: 24px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+}
+
+.account-section__heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.account-section__heading h1,
+.account-section__heading h2 {
+  margin: 0 0 4px;
+  font-size: 1.2rem;
+}
+
+.account-section__heading p,
+.access-request p {
+  margin: 0;
+  color: #64748b;
+}
+
+.account-form {
+  display: grid;
+  gap: 18px;
+}
+
+.account-form > label,
+.credential-create label,
+.platform-options > label {
+  display: grid;
+  gap: 7px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.access-request {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #dbe3ec;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.access-request__approved,
+.icon-button--approve {
+  color: #047857;
+}
+
+.access-status,
+.credential-status {
+  border-radius: 999px;
+  padding: 3px 9px;
+  background: #e8edf3;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.access-status--approved {
+  color: #047857;
+  background: #d1fae5;
+}
+
+.access-status--pending {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.access-status--denied {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+
+.form-notice {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+}
+
+.form-notice--success { color: #047857; background: #ecfdf5; }
+.form-notice--error { color: #b91c1c; background: #fef2f2; }
+.account-state { padding: 32px; color: #475569; }
+.account-state--error { color: #b91c1c; }
+.account-empty { margin: 0; color: #64748b; }
+
+.icon-button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  background: #fff;
+}
+
+.icon-button--danger { color: #b91c1c; }
+
+.admin-access-table {
+  overflow-x: auto;
+}
+
+.admin-access-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.admin-access-table th,
+.admin-access-table td {
+  padding: 11px 10px;
+  border-bottom: 1px solid var(--panel-border);
+  text-align: left;
+}
+
+.admin-access-table__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .prompt-run__layout {
@@ -1370,10 +1711,6 @@ button.danger:disabled {
   justify-items: center;
 }
 
-.admin-dashboard__emoji {
-  font-size: 2.5rem;
-}
-
 @media (max-width: 960px) {
   :root {
     --sidebar-width: 88px;
@@ -1382,6 +1719,29 @@ button.danger:disabled {
   .app-shell__sidebar {
     padding: 24px 12px;
     align-items: center;
+  }
+
+  .app-shell__profile {
+    position: relative;
+    width: 100%;
+    padding: 16px 0 !important;
+  }
+
+  .app-shell__profile-trigger {
+    justify-content: center;
+    padding: 8px !important;
+  }
+
+  .app-shell__profile-details,
+  .app-shell__profile-toggle {
+    display: none;
+  }
+
+  .app-shell__user-menu {
+    position: absolute;
+    bottom: 16px;
+    left: calc(100% + 12px);
+    width: 180px;
   }
 
   .app-shell__brand {
@@ -1424,7 +1784,45 @@ button.danger:disabled {
     grid-template-columns: 1fr;
   }
 
+  .credential-create,
+  .credential-list__item {
+    grid-template-columns: 1fr;
+  }
+
+  .credential-list__item button {
+    width: 100%;
+  }
+
+  .access-request {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .access-request button,
+  .access-request__approved {
+    grid-column: 2;
+  }
+
+  .provider-job__header,
+  .provider-job__counts {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
   .conversation-summary {
     order: -1;
+  }
+}
+
+@media (max-width: 600px) {
+  :root {
+    --shell-padding: 16px;
+  }
+
+  .account-section {
+    padding: 16px;
+  }
+
+  .account-section__heading {
+    gap: 12px;
   }
 }
