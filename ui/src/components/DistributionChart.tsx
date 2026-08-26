@@ -32,17 +32,11 @@ export function DistributionChart({ label, values }: { label: string; values: nu
       <div className="distribution-chart__title">{label}</div>
       <ResponsiveContainer width="100%" height={220}>
         <AreaChart data={data} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
-          <defs>
-            <linearGradient id="distributionGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#2563eb" stopOpacity={0.4} />
-              <stop offset="95%" stopColor="#2563eb" stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.25)" />
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(19, 41, 75, 0.2)" />
           <XAxis dataKey="bucket" tick={{ fontSize: 12 }} />
           <YAxis tick={{ fontSize: 12 }} allowDecimals />
           <Tooltip formatter={(value: number) => value.toString()} />
-          <Area type="monotone" dataKey="count" stroke="#2563eb" fillOpacity={1} fill="url(#distributionGradient)" />
+          <Area type="monotone" dataKey="count" stroke="#13294B" fill="#4B9CD3" fillOpacity={0.35} />
         </AreaChart>
       </ResponsiveContainer>
     </div>
