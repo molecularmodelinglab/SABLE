@@ -10,7 +10,7 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { data: profile } = useAuthProfile()
-  
+
   const [showUserMenu, setShowUserMenu] = useState(false)
 
   const navLinks = useMemo(() => {
@@ -42,10 +42,10 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
     <div className="app-shell">
       <aside className="app-shell__sidebar">
         <div className="app-shell__brand">
-          <div className="app-shell__logo" aria-hidden="true">S</div>
+          {/* <div className="app-shell__logo" aria-hidden="true">S</div> */}
           <div>
             <div className="app-shell__title">SABLE</div>
-            <div className="app-shell__subtitle">Synthetically-accessible Agentic Bayesian Ligand Exploration</div>
+            {/* <div className="app-shell__subtitle">Synthetically-accessible Agentic Bayesian Ligand Exploration</div> */}
           </div>
         </div>
         <nav className="app-shell__nav">
