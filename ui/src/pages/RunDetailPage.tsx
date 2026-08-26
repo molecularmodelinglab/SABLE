@@ -25,6 +25,7 @@ import { useEventStream } from '../hooks/useEventStream'
 import { RunStatusBadge } from '../components/RunStatusBadge'
 import { EventLog } from '../components/EventLog'
 import { MoleculeViewer } from '../components/MoleculeViewer'
+import { StructureViewer } from '../components/StructureViewer'
 import { DistributionChart } from '../components/DistributionChart'
 import { ResultsTable, type ResultsColumn } from '../components/ResultsTable'
 import { extractMoleculeRecords, extractNumericSeries, flattenRecord } from '../utils/results'
@@ -57,24 +58,65 @@ async function downloadFile(url: string, filename: string) {
   window.URL.revokeObjectURL(downloadUrl)
 }
 
-function getBoltzMapping(results: any): Record<string, string> {
-  const mapping: Record<string, string> = {}
+type BoltzArtifact = {
+  label: string
+  provider: string
+  metrics: Record<string, number>
+}
+
+function getBoltzArtifacts(results: any): Record<string, BoltzArtifact> {
+  const mapping: Record<string, BoltzArtifact> = {}
   if (!results || !results.experimental_data || !Array.isArray(results.experimental_data)) {
     return mapping
   }
   
   for (const entry of results.experimental_data) {
     const boltz = entry.metadata?.boltz
-    if (boltz && boltz.job_id) {
-      // Prefer molecule_id, fallback to truncated SMILES
+    if (boltz) {
       let label = entry.molecule_id
       if (!label && entry.smiles) {
         label = entry.smiles.length > 15 ? entry.smiles.substring(0, 12) + '...' : entry.smiles
       }
-      mapping[boltz.job_id] = label || 'Unknown Ligand'
+      const allProperties = entry.metadata?.all_properties || {}
+      const rawConfidence = boltz.confidence && typeof boltz.confidence === 'object'
+        ? boltz.confidence
+        : {}
+      const selfHostedConfidence = Object.fromEntries(
+        Object.entries({
+          boltz_binding_confidence: rawConfidence.confidence_score,
+          boltz_ptm: rawConfidence.ptm,
+          boltz_iptm: rawConfidence.iptm,
+          boltz_complex_plddt: rawConfidence.complex_plddt,
+          boltz_complex_iplddt: rawConfidence.complex_iplddt,
+        }).filter(([, value]) => typeof value === 'number')
+      )
+      const metrics = Object.fromEntries(
+        Object.entries({ ...selfHostedConfidence, ...allProperties, ...entry.properties })
+          .filter(([, value]) => typeof value === 'number')
+      ) as Record<string, number>
+      const artifact = {
+        label: label || 'Unknown ligand',
+        provider: boltz.provider || 'self-hosted',
+        metrics,
+      }
+      const structureName = typeof boltz.structure_path === 'string'
+        ? boltz.structure_path.replace(/\\/g, '/').split('/').pop()
+        : undefined
+      for (const key of [boltz.job_id, boltz.provider_result_id, structureName]) {
+        if (typeof key === 'string' && key) mapping[key] = artifact
+      }
     }
   }
   return mapping
+}
+
+function findBoltzArtifact(
+  filename: string,
+  artifacts: Record<string, BoltzArtifact>
+): BoltzArtifact | undefined {
+  return Object.entries(artifacts).find(([key]) => (
+    filename === key || filename.startsWith(`${key}_`) || filename.startsWith(`${key}.`)
+  ))?.[1]
 }
 
 export function RunDetailPage() {
@@ -83,6 +125,7 @@ export function RunDetailPage() {
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<TabKey>('overview')
   const [selectedPlotPath, setSelectedPlotPath] = useState<string | null>(null)
+  const [selectedStructure, setSelectedStructure] = useState<string | null>(null)
   const apiBase = useMemo(() => API_BASE.replace(/\/$/, ''), [])
 
   const { data: run, isLoading, isError } = useQuery<RunInfo>({
@@ -180,7 +223,11 @@ export function RunDetailPage() {
     return filtered.slice(-400)
   }, [logsQuery.data, liveEvents])
 
-  const boltzMapping = useMemo(() => getBoltzMapping(resultsQuery.data), [resultsQuery.data])
+  const boltzArtifacts = useMemo(() => getBoltzArtifacts(resultsQuery.data), [resultsQuery.data])
+  const selectedBoltzArtifact = useMemo(() => {
+    if (!selectedStructure) return undefined
+    return findBoltzArtifact(selectedStructure, boltzArtifacts)
+  }, [boltzArtifacts, selectedStructure])
 
   const moleculeRecords = useMemo(() => extractMoleculeRecords(resultsQuery.data ?? null), [resultsQuery.data])
   const flatRows = useMemo(
@@ -356,35 +403,38 @@ export function RunDetailPage() {
             <ul className="run-detail__checkpoints">
               {checkpointsQuery.data.map((name: string) => {
                 let displayName = name
-                const match = name.match(/^(.+)_model_0\.cif$/)
-                if (match) {
-                  const jobId = match[1]
-                  if (boltzMapping[jobId]) {
-                    displayName = `${boltzMapping[jobId]} (${name})`
-                  }
-                }
+                const artifact = findBoltzArtifact(name, boltzArtifacts)
+                if (artifact) displayName = `${artifact.label} (${name})`
+                const isStructure = /\.(cif|pdb)$/i.test(name)
                 
                 return (
                   <li key={name}>
                     <span>{displayName}</span>
-                    <button
-                      className="ghost"
-                      disabled={!id}
-                      onClick={async () => {
-                        if (!id) return
-                        try {
-                          await downloadFile(
-                            `${apiBase}/runs/${id}/checkpoints/${encodeURIComponent(name)}`,
-                            name
-                          )
-                        } catch (error) {
-                          console.error('Failed to download checkpoint', error)
-                          window.alert('Failed to download checkpoint. Please try again.')
-                        }
-                      }}
-                    >
-                      Download
-                    </button>
+                    <div className="run-detail__checkpoint-actions">
+                      {isStructure ? (
+                        <button className="ghost" disabled={!id} onClick={() => setSelectedStructure(name)}>
+                          View structure
+                        </button>
+                      ) : null}
+                      <button
+                        className="ghost"
+                        disabled={!id}
+                        onClick={async () => {
+                          if (!id) return
+                          try {
+                            await downloadFile(
+                              `${apiBase}/runs/${id}/checkpoints/${encodeURIComponent(name)}`,
+                              name
+                            )
+                          } catch (error) {
+                            console.error('Failed to download checkpoint', error)
+                            window.alert('Failed to download checkpoint. Please try again.')
+                          }
+                        }}
+                      >
+                        Download
+                      </button>
+                    </div>
                   </li>
                 )
               })}
@@ -392,6 +442,27 @@ export function RunDetailPage() {
           ) : (
             <div>No checkpoints available.</div>
           )}
+          {id && selectedStructure ? (
+            <div className="run-detail__structure-panel">
+              <StructureViewer runId={id} filename={selectedStructure} />
+              <aside className="run-detail__structure-metrics">
+                <div>
+                  <span>Structure</span>
+                  <strong>{selectedBoltzArtifact?.label || selectedStructure}</strong>
+                </div>
+                <div>
+                  <span>Provider</span>
+                  <strong>{selectedBoltzArtifact?.provider || 'Boltz'}</strong>
+                </div>
+                {Object.entries(selectedBoltzArtifact?.metrics || {}).map(([metric, value]) => (
+                  <div key={metric}>
+                    <span>{metric.replace(/^boltz_/, '').replace(/_/g, ' ')}</span>
+                    <strong>{Number.isFinite(value) ? value.toFixed(4) : '—'}</strong>
+                  </div>
+                ))}
+              </aside>
+            </div>
+          ) : null}
         </div>
       </section>
 
