@@ -1,7 +1,9 @@
 import { FormEvent, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { createRun } from '../api'
+import {
+  createRun,
+} from '../api'
 
 const EXAMPLE_PROMPTS = [
   {
@@ -36,12 +38,13 @@ export function NewRunPage() {
     event.preventDefault()
     const trimmedPrompt = prompt.trim()
     if (!trimmedPrompt || isSubmitting) return
-
     setIsSubmitting(true)
     setError(null)
 
     try {
-      const run = await createRun(trimmedPrompt)
+      const run = await createRun({
+        prompt: trimmedPrompt,
+      })
       await queryClient.invalidateQueries({ queryKey: ['runs'] })
       navigate(`/runs/${run.id}`)
     } catch (submissionError) {
