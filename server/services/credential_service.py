@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import os
 from datetime import datetime, timezone
 from typing import Optional, Tuple
@@ -15,6 +17,14 @@ class CredentialConfigurationError(RuntimeError):
 class CredentialService:
     def _cipher(self) -> Fernet:
         master_key = os.getenv("PROVIDER_CREDENTIAL_MASTER_KEY", "").strip()
+        environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+        if not master_key and environment == "development":
+            application_secret = os.getenv("SECRET_KEY", "").strip()
+            if application_secret:
+                derived_key = hashlib.sha256(
+                    b"sable-provider-credentials\0" + application_secret.encode("utf-8")
+                ).digest()
+                master_key = base64.urlsafe_b64encode(derived_key).decode("ascii")
         if not master_key:
             raise CredentialConfigurationError(
                 "PROVIDER_CREDENTIAL_MASTER_KEY is required for provider credentials"

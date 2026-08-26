@@ -35,6 +35,16 @@ def test_credential_encryption_fails_closed_without_master_key(monkeypatch):
         CredentialService().encrypt("boltz-secret-key")
 
 
+def test_credential_encryption_uses_stable_development_fallback(monkeypatch):
+    monkeypatch.delenv("PROVIDER_CREDENTIAL_MASTER_KEY", raising=False)
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("SECRET_KEY", "stable-local-application-secret")
+
+    encrypted = CredentialService().encrypt("boltz-secret-key")
+
+    assert CredentialService().decrypt(encrypted) == "boltz-secret-key"
+
+
 def test_credential_response_never_contains_secret_fields():
     credential = ProviderCredential(
         id=uuid4(),
