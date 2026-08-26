@@ -36,6 +36,7 @@ export function AccountPage() {
   const credentialsQuery = useQuery({ queryKey: ['provider-credentials'], queryFn: listProviderCredentials })
   const settings = settingsQuery.data
   const credentials = credentialsQuery.data ?? []
+  const canSaveSelfHosted = Boolean(settings?.can_use_self_hosted || settings?.provider === 'self_hosted')
 
   useEffect(() => {
     if (!settings?.provider) return
@@ -188,7 +189,7 @@ export function AccountPage() {
         </div>
 
         <div className="run-options__segmented" role="group" aria-label="Boltz provider">
-          <button type="button" className={provider === 'self_hosted' ? 'active' : ''} onClick={() => setProvider('self_hosted')} disabled={!settings.can_use_self_hosted}>
+          <button type="button" className={provider === 'self_hosted' ? 'active' : ''} onClick={() => setProvider('self_hosted')}>
             <Server size={17} /> SABLE hosted
           </button>
           <button type="button" className={provider === 'platform' ? 'active' : ''} onClick={() => setProvider('platform')}>
@@ -233,33 +234,35 @@ export function AccountPage() {
 
         {message && <p className="form-notice form-notice--success">{message}</p>}
         {error && <p className="form-notice form-notice--error" role="alert">{error}</p>}
-        <div><button type="submit" className="primary" disabled={busyAction !== null || (provider === 'self_hosted' && !settings.can_use_self_hosted)}>Save defaults</button></div>
+        <div><button type="submit" className="primary" disabled={busyAction !== null || (provider === 'self_hosted' && !canSaveSelfHosted)}>Save defaults</button></div>
       </form>
 
-      <section className="account-section">
-        <div className="account-section__heading">
-          <div>
-            <h2>Boltz Platform credentials</h2>
-            <p>Keys are encrypted at rest and are never returned by the API.</p>
-          </div>
-        </div>
-        <div className="credential-list">
-          {credentials.map((credential) => (
-            <div className="credential-list__item" key={credential.id}>
-              <span><strong>{credential.name}</strong> ending in {credential.key_hint}</span>
-              <span className={`credential-status credential-status--${credential.status}`}>{credential.status}</span>
-              {credential.status !== 'active' && <button type="button" className="icon-button" title="Validate credential" onClick={() => handleValidate(credential.id)}><RefreshCw size={17} /></button>}
-              <button type="button" className="icon-button icon-button--danger" title="Remove credential" onClick={() => handleDelete(credential.id)}><Trash2 size={17} /></button>
+      {provider === 'platform' && (
+        <section className="account-section">
+          <div className="account-section__heading">
+            <div>
+              <h2>Boltz Platform credentials</h2>
+              <p>Keys are encrypted at rest and are never returned by the API.</p>
             </div>
-          ))}
-          {!credentials.length && <p className="account-empty">No credentials saved.</p>}
-        </div>
-        <div className="credential-create">
-          <label htmlFor="credential-name">Name<input id="credential-name" value={credentialName} onChange={(event) => setCredentialName(event.target.value)} placeholder="Research account" /></label>
-          <label htmlFor="credential-key">API key<input id="credential-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="new-password" placeholder="Enter once to validate" /></label>
-          <button type="button" className="secondary" onClick={handleCreateCredential} disabled={busyAction !== null || !credentialName.trim() || !apiKey.trim()}>Validate and save</button>
-        </div>
-      </section>
+          </div>
+          <div className="credential-list">
+            {credentials.map((credential) => (
+              <div className="credential-list__item" key={credential.id}>
+                <span><strong>{credential.name}</strong> ending in {credential.key_hint}</span>
+                <span className={`credential-status credential-status--${credential.status}`}>{credential.status}</span>
+                {credential.status !== 'active' && <button type="button" className="icon-button" title="Validate credential" onClick={() => handleValidate(credential.id)}><RefreshCw size={17} /></button>}
+                <button type="button" className="icon-button icon-button--danger" title="Remove credential" onClick={() => handleDelete(credential.id)}><Trash2 size={17} /></button>
+              </div>
+            ))}
+            {!credentials.length && <p className="account-empty">No credentials saved.</p>}
+          </div>
+          <div className="credential-create">
+            <label htmlFor="credential-name">Name<input id="credential-name" value={credentialName} onChange={(event) => setCredentialName(event.target.value)} placeholder="Research account" /></label>
+            <label htmlFor="credential-key">API key<input id="credential-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="new-password" placeholder="Enter once to validate" /></label>
+            <button type="button" className="secondary" onClick={handleCreateCredential} disabled={busyAction !== null || !credentialName.trim() || !apiKey.trim()}>Validate and save</button>
+          </div>
+        </section>
+      )}
     </div>
   )
 }
