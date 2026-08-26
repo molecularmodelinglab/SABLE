@@ -29,6 +29,7 @@ from server.schemas.conversation import (
 from server.audit import audit_logger, AuditEventType
 from server.experiment_logger import experiment_logger
 from server.storage import ensure_run_dirs
+from server.services.boltz_access_service import boltz_access_service
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -254,6 +255,7 @@ async def confirm_and_create_run(
         # Build prompt from context
         prompt = conversation_service.build_run_prompt(conversation.context)
         context = ConversationContext(**conversation.context)
+        characterization = boltz_access_service.resolve_run_configuration(db, current_user)
 
         note = context.notes.strip() if context.notes else None
 
@@ -299,6 +301,7 @@ async def confirm_and_create_run(
             "max_iterations": context.max_iterations,
             "batch_size": context.batch_size,
             "conversation_id": conversation_id,
+            "characterization": characterization.model_dump(mode="json"),
         }
 
         run_model = run_service.create_run(
