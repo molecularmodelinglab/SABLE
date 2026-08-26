@@ -70,6 +70,7 @@ def _run_workflow_background(run_id: str) -> None:
         max_iterations = metadata.get("max_iterations")
         batch_size = metadata.get("batch_size")
         paths: Dict[str, str] = metadata.get("paths", {}) if isinstance(metadata, dict) else {}
+        characterization_config = metadata.get("characterization", {})
 
         user_id = str(run_model.user_id)
         username = None
@@ -180,6 +181,8 @@ def _run_workflow_background(run_id: str) -> None:
             save_checkpoints=True,
             event_callback=emit,
             run_paths=paths or None,
+            characterization_config=characterization_config or None,
+            extensions={"execution": {"run_id": run_id, "user_id": user_id}},
         )
 
         starting_molecules = list(state.starting_molecules or [])
