@@ -76,7 +76,7 @@ export function LoginPage() {
              SABLE
           </h1>
           <p style={{ color: '#666', fontSize: '0.95rem' }}>
-            LIgand optimiZation via Agentic Research and Discovery
+            Synthetically-accessible Agentic Bayesian Ligand Exploration
           </p>
         </div>
 
