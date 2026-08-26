@@ -12,12 +12,14 @@ import {
   getRunResults,
   getRunSummary,
   getAccessToken,
+  listRunProviderJobs,
   listRunPlots,
   type RunEvent,
   type GenerateRunPlotsResponse,
   type RunInfo,
   type RunPlotArtifact,
   type RunResults,
+  type ProviderJob,
 } from '../api'
 import { useEventStream } from '../hooks/useEventStream'
 import { RunStatusBadge } from '../components/RunStatusBadge'
@@ -116,6 +118,13 @@ export function RunDetailPage() {
     queryFn: () => getRunLogs(id as string),
     enabled: Boolean(id),
     refetchInterval: 60000,
+  })
+
+  const providerJobsQuery = useQuery<ProviderJob[]>({
+    queryKey: ['run', id, 'provider-jobs'],
+    queryFn: () => listRunProviderJobs(id as string),
+    enabled: Boolean(id),
+    refetchInterval: 5000,
   })
 
   const plotsQuery = useQuery<RunPlotArtifact[]>({
@@ -266,6 +275,50 @@ export function RunDetailPage() {
             <InfoCard label="Results" value={run.results_available ? 'Ready' : 'Not yet'} />
             <InfoCard label="Summary" value={run.summary_available ? 'Ready' : 'Not yet'} />
           </div>
+          {providerJobsQuery.data && providerJobsQuery.data.length > 0 && (
+            <div className="provider-jobs">
+              <h3>Provider jobs</h3>
+              <div className="provider-jobs__list">
+                {providerJobsQuery.data.map((job) => {
+                  const processedItems = job.completed_items + job.failed_items
+                  const progress = job.total_items > 0
+                    ? Math.min(100, Math.round((processedItems / job.total_items) * 100))
+                    : 0
+                  return (
+                    <div className="provider-job" key={job.id}>
+                      <div className="provider-job__header">
+                        <div>
+                          <strong>{job.provider === 'boltz_platform' ? 'Boltz Platform' : job.provider}</strong>
+                          <span>{job.execution_kind.replaceAll('_', ' ')}</span>
+                        </div>
+                        <RunStatusBadge status={job.status} />
+                      </div>
+                      <div
+                        className="provider-job__progress"
+                        role="progressbar"
+                        aria-label="Provider job progress"
+                        aria-valuemin={0}
+                        aria-valuemax={job.total_items || 1}
+                        aria-valuenow={processedItems}
+                      >
+                        <span style={{ width: `${progress}%` }} />
+                      </div>
+                      <div className="provider-job__counts">
+                        <span>{job.completed_items} completed</span>
+                        <span>{job.failed_items} failed</span>
+                        <span>{job.total_items} total</span>
+                      </div>
+                      {job.error_message && (
+                        <p className="provider-job__error">
+                          {job.error_code ? `${job.error_code}: ` : ''}{job.error_message}
+                        </p>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
           {run.prompt && (
             <div className="run-detail__prompt">
               <h3>User prompt</h3>
