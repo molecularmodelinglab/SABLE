@@ -23,6 +23,9 @@ from server.schemas.auth import (
 from server.services.auth_service import auth_service
 from server.services.user_service import user_service
 from server.auth.dependencies import get_current_user, get_current_active_user
+from server.schemas.boltz_access import BoltzSettingsResponse, BoltzSettingsUpdate
+from server.services.boltz_access_service import boltz_access_service
+from server.audit import AuditEventType, audit_logger
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -203,6 +206,39 @@ async def get_current_user_info(
     - 403: Account inactive
     """
     return UserResponse.model_validate(current_user)
+
+
+@router.get("/boltz-settings", response_model=BoltzSettingsResponse)
+def get_boltz_settings(
+    current_user: User = Depends(get_current_active_user),
+):
+    return boltz_access_service.get_settings(current_user)
+
+
+@router.post("/boltz-access-request", response_model=BoltzSettingsResponse)
+def request_boltz_access(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    settings = boltz_access_service.request_self_hosted_access(db, current_user)
+    audit_logger.log(
+        event_type=AuditEventType.BOLTZ_ACCESS_REQUESTED,
+        message="Self-hosted Boltz access requested",
+        user_id=str(current_user.id),
+        username=current_user.username,
+        resource_type="user",
+        resource_id=str(current_user.id),
+    )
+    return settings
+
+
+@router.put("/boltz-settings", response_model=BoltzSettingsResponse)
+def update_boltz_settings(
+    payload: BoltzSettingsUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    return boltz_access_service.update_settings(db, current_user, payload)
 
 
 @router.get("/sessions", response_model=SessionListResponse)
