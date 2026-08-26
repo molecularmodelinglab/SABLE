@@ -7,12 +7,14 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from server.models.provider_credential import ProviderCredential
+from server.models.user import User
 from server.schemas.provider_credential import ProviderCredentialResponse
 from server.schemas.run import RunCreateRequest
 from server.services.credential_service import (
     CredentialConfigurationError,
     CredentialService,
 )
+from server.services.run_launcher import _validate_execution_access
 from server.routers import provider_credentials as credential_router
 
 
@@ -77,6 +79,23 @@ def test_run_omits_characterization_for_account_resolution():
     request = RunCreateRequest(prompt="optimize QED")
 
     assert request.characterization is None
+
+
+def test_worker_rechecks_self_hosted_access_before_execution():
+    configuration = {"boltz": {"provider": "self_hosted"}}
+    denied_user = User(extra_metadata={"roles": []})
+
+    with pytest.raises(HTTPException) as error:
+        _validate_execution_access(object(), denied_user, configuration)
+
+    assert error.value.status_code == 403
+    assert error.value.detail == "Self-hosted Boltz access has not been approved"
+
+    approved_user = User(extra_metadata={
+        "roles": [],
+        "boltz_self_hosted_access": {"status": "approved"},
+    })
+    _validate_execution_access(object(), approved_user, configuration)
 
 
 def test_delete_rejects_credential_used_by_active_job(monkeypatch):

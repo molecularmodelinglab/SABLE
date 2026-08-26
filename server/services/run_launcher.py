@@ -16,6 +16,8 @@ from server.audit import AuditEventType, AuditSeverity, audit_logger
 from server.database import get_db_context
 from server.experiment_logger import ExperimentError, experiment_logger
 from server.models.user import User
+from server.schemas.run import CharacterizationRunConfiguration
+from server.services.boltz_access_service import boltz_access_service
 from server.services.cache_service import cache_service
 from server.services.run_events import run_event_hub
 from server.services.run_service import run_service
@@ -57,6 +59,19 @@ def get_environment_info() -> Dict[str, str]:
     }
 
 
+def _validate_execution_access(db: Any, user: User | None, characterization_config: dict) -> None:
+    """Revalidate provider authorization immediately before worker execution."""
+    if user is None:
+        raise RuntimeError("Run owner no longer exists")
+
+    requested = (
+        CharacterizationRunConfiguration.model_validate(characterization_config)
+        if characterization_config
+        else None
+    )
+    boltz_access_service.resolve_run_configuration(db, user, requested)
+
+
 def _run_workflow_background(run_id: str) -> None:
     """Execute a workflow run and manage lifecycle side-effects."""
 
@@ -73,6 +88,7 @@ def _run_workflow_background(run_id: str) -> None:
         characterization_config = metadata.get("characterization", {})
 
         user_id = str(run_model.user_id)
+        user_obj = db.query(User).filter(User.id == run_model.user_id).first()
         username = None
         if run_model.user is not None:
             try:
@@ -80,12 +96,51 @@ def _run_workflow_background(run_id: str) -> None:
             except DetachedInstanceError:
                 username = None
         if not username:
-            user_obj = db.query(User).filter(User.id == run_model.user_id).first()
             username = user_obj.username if user_obj else "unknown"
+
+        try:
+            _validate_execution_access(db, user_obj, characterization_config)
+            execution_access_error = None
+        except Exception as exc:
+            detail = getattr(exc, "detail", str(exc))
+            execution_access_error = f"BOLTZ_EXECUTION_ACCESS_DENIED: {detail}"
 
         prompt = getattr(run_model, "prompt", "")
 
     experiment = experiment_logger.get_experiment(experiment_id) if experiment_id else None
+    if execution_access_error:
+        error = ExperimentError(
+            error_type="BoltzAccessDenied",
+            message=execution_access_error,
+            stack_trace="",
+        )
+        if experiment:
+            experiment.mark_failed(error)
+            experiment_logger.update_experiment(experiment)
+
+        with get_db_context() as db:
+            run_service.update_run_status(db, run_id, "failed", execution_access_error)
+
+        cache_service.invalidate_run(run_id)
+        cache_service.invalidate_user_runs_list(user_id)
+        run_event_hub.append_log(run_id, {
+            "timestamp": datetime.now().isoformat(),
+            "message": execution_access_error,
+            "level": "ERROR",
+        })
+        audit_logger.log(
+            event_type=AuditEventType.EXPERIMENT_FAILED,
+            message=f"Experiment {experiment_id} denied Boltz access for run {run_id}",
+            user_id=user_id,
+            username=username,
+            experiment_id=experiment_id,
+            run_id=run_id,
+            severity=AuditSeverity.ERROR,
+            details={"error": execution_access_error},
+        )
+        _notify_capacity_available(run_id)
+        return
+
     if experiment:
         experiment.environment = get_environment_info()
         experiment_logger.update_experiment(experiment)

@@ -371,6 +371,8 @@ async def confirm_and_create_run(
             message=f"Optimization started! You can track progress at /runs/{run_id}"
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create run: {str(e)}")
 

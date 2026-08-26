@@ -3,6 +3,8 @@ Integration tests for conversation API endpoints.
 """
 import pytest
 
+from server.models.run import Run
+
 
 @pytest.mark.integration
 @pytest.mark.api
@@ -114,6 +116,30 @@ class TestConversationEndpoints:
 @pytest.mark.api
 class TestConversationFlow:
     """Tests for complete conversation flows."""
+
+    def test_confirm_without_boltz_access_preserves_client_error(
+        self, client, auth_headers, test_user, make_conversation, db_session
+    ):
+        conversation = make_conversation(
+            test_user,
+            state="confirmation",
+            context={
+                "starting_molecule": "CC(=O)Oc1ccccc1C(=O)O",
+                "targets": [{"name": "QED", "mode": "maximize", "weight": 1.0}],
+                "max_iterations": 10,
+                "batch_size": 5,
+            },
+        )
+
+        response = client.post(
+            f"/conversations/{conversation.id}/confirm",
+            headers=auth_headers,
+            json={"confirmed": True},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Configure a Boltz provider in Account before starting a run"
+        assert db_session.query(Run).count() == 0
     
     def test_complete_conversation_flow(
         self, client, auth_headers, sample_conversation_context
