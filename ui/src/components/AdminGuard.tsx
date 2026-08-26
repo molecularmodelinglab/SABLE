@@ -1,6 +1,7 @@
 import { ReactNode, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthProfile } from '../hooks/useAuthProfile'
+import { ShieldCheck } from 'lucide-react'
 
 interface AdminGuardProps {
   children: ReactNode
@@ -28,7 +29,7 @@ export function AdminGuard({ children }: AdminGuardProps) {
         backgroundColor: '#f5f5f5'
       }}>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🛡️</div>
+          <div style={{ marginBottom: '1rem' }}><ShieldCheck size={40} aria-hidden="true" /></div>
           <div style={{ fontSize: '1.2rem', color: '#666' }}>Loading admin access…</div>
         </div>
       </div>
