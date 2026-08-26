@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { registerUser, login } from '../api'
 import '../index.css'
+import { CircleAlert, FlaskConical, LoaderCircle } from 'lucide-react'
 
 export function RegisterPage() {
   const navigate = useNavigate()
@@ -73,7 +74,7 @@ export function RegisterPage() {
             WebkitTextFillColor: 'transparent',
             backgroundClip: 'text'
           }}>
-            🦎 Create an account
+            <FlaskConical size={36} style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} aria-hidden="true" /> Create an account
           </h1>
           <p style={{ color: '#666', fontSize: '0.95rem' }}>
             Register to launch and monitor molecular optimization campaigns.
@@ -222,7 +223,7 @@ export function RegisterPage() {
               alignItems: 'center',
               gap: '0.5rem'
             }}>
-              <span>⚠️</span>
+              <CircleAlert size={18} aria-hidden="true" />
               <span>{error}</span>
             </div>
           )}
@@ -260,7 +261,7 @@ export function RegisterPage() {
           >
             {loading ? (
               <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-                <span style={{ animation: 'spin 1s linear infinite' }}>⏳</span>
+                <LoaderCircle size={18} style={{ animation: 'spin 1s linear infinite' }} aria-hidden="true" />
                 Creating account...
               </span>
             ) : (

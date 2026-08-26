@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { login, getAccessToken } from '../api'
 import '../index.css'
+import { CircleAlert, Info, LoaderCircle } from 'lucide-react'
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -158,7 +159,7 @@ export function LoginPage() {
               alignItems: 'center',
               gap: '0.5rem'
             }}>
-              <span>⚠️</span>
+              <CircleAlert size={18} aria-hidden="true" />
               <span>{error}</span>
             </div>
           )}
@@ -196,7 +197,7 @@ export function LoginPage() {
           >
             {loading ? (
               <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-                <span style={{ animation: 'spin 1s linear infinite' }}>⏳</span>
+                <LoaderCircle size={18} style={{ animation: 'spin 1s linear infinite' }} aria-hidden="true" />
                 Logging in...
               </span>
             ) : (
@@ -214,7 +215,7 @@ export function LoginPage() {
           color: '#666'
         }}>
           <p style={{ margin: 0, marginBottom: '0.5rem', fontWeight: 600 }}>
-            ℹ️ Session Information:
+            <Info size={16} style={{ verticalAlign: 'text-bottom', marginRight: '0.35rem' }} aria-hidden="true" /> Session Information:
           </p>
           <ul style={{ margin: 0, paddingLeft: '1.5rem' }}>
             <li>Sessions expire after 24 hours of inactivity</li>
