@@ -110,8 +110,16 @@ async def test_platform_adapter_maps_request_and_lifecycle():
     assert status == BoltzJobStatus.SUCCEEDED
     assert results[0].molecule_id == "mol-1"
     assert results[0].protein_scope_id == "scope-1"
-    assert results[0].metrics.optimization_score == 0.72
-    assert results[0].metrics.affinity is None
+    assert results[0].metrics.model_dump() == {
+        "affinity": None,
+        "binding_confidence": 0.81,
+        "optimization_score": 0.72,
+        "structure_confidence": 0.93,
+        "ptm": 0.61,
+        "iptm": 0.62,
+        "complex_plddt": 0.63,
+        "complex_iplddt": 0.64,
+    }
     assert results[0].warnings == ["low alignment depth"]
     assert resource.calls[-1] == ("stop", "job-1")
 
