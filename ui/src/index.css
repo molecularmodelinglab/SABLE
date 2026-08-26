@@ -690,6 +690,83 @@ button.danger:disabled {
   border-radius: 12px;
 }
 
+.run-detail__checkpoint-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.run-detail__structure-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr);
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.structure-viewer {
+  position: relative;
+  min-width: 0;
+}
+
+.structure-viewer__canvas {
+  width: 100%;
+  height: clamp(360px, 55vh, 620px);
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.structure-viewer__error {
+  position: absolute;
+  inset: 16px;
+  display: grid;
+  place-items: center;
+  color: #b91c1c;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.run-detail__structure-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-top: 1px solid #cbd5e1;
+}
+
+.run-detail__structure-metrics > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px 0;
+  border-bottom: 1px solid #cbd5e1;
+}
+
+.run-detail__structure-metrics span {
+  color: #64748b;
+  font-size: 0.78rem;
+  text-transform: capitalize;
+}
+
+.run-detail__structure-metrics strong {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .run-detail__checkpoints li,
+  .run-detail__structure-panel {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .run-detail__checkpoints li {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .run-detail__checkpoint-actions {
+    justify-content: flex-start;
+  }
+}
+
 .run-detail__molecule-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
