@@ -49,6 +49,19 @@ class AuditEventType(str, Enum):
     CHECKPOINT_CREATED = "checkpoint_created"
     CHECKPOINT_RESTORED = "checkpoint_restored"
     RUN_CREATED = "run_created"
+
+    # Provider credentials and jobs
+    PROVIDER_CREDENTIAL_CREATED = "provider_credential_created"
+    PROVIDER_CREDENTIAL_VALIDATED = "provider_credential_validated"
+    PROVIDER_CREDENTIAL_RENAMED = "provider_credential_renamed"
+    PROVIDER_CREDENTIAL_REPLACED = "provider_credential_replaced"
+    PROVIDER_CREDENTIAL_REVOKED = "provider_credential_revoked"
+    PROVIDER_JOB_SUBMITTED = "provider_job_submitted"
+    PROVIDER_JOB_COMPLETED = "provider_job_completed"
+    PROVIDER_JOB_FAILED = "provider_job_failed"
+    PROVIDER_JOB_CANCELLED = "provider_job_cancelled"
+    BOLTZ_ACCESS_REQUESTED = "boltz_access_requested"
+    BOLTZ_ACCESS_REVIEWED = "boltz_access_reviewed"
     
     # Security events
     UNAUTHORIZED_ACCESS = "unauthorized_access"
