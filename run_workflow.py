@@ -131,7 +131,9 @@ class WorkflowRunner:
             checkpoint_path: Optional[str] = None,
             save_checkpoints: bool = True,
             event_callback: Optional[callable] = None,
-            run_paths: Optional[dict[str, str]] = None) -> WorkflowState:
+            run_paths: Optional[dict[str, str]] = None,
+            characterization_config: Optional[dict[str, Any]] = None,
+            extensions: Optional[dict[str, Any]] = None) -> WorkflowState:
         """
         Run the molecular optimization workflow.
         
@@ -166,6 +168,12 @@ class WorkflowRunner:
                 state.run_paths.update(run_paths)
             except Exception:
                 state.run_paths = dict(run_paths)
+
+        if characterization_config:
+            state.characterization_config.update(characterization_config)
+
+        if extensions:
+            state.extensions.update(extensions)
 
         # Set event callback for streaming logs to UI
         if event_callback:
