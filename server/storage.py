@@ -142,13 +142,15 @@ class LocalStorageBackend(StorageBackend):
         base = (run_base / "checkpoints").resolve()
         target = (base / filename).resolve()
         
-        # if not found in checkpoints, check boltz_cifs
+        # If not found in checkpoints, check provider-specific Boltz artifacts.
         if not (target.exists() and target.is_file()):
-            boltz_dir = (run_base / "artifacts" / "boltz_cifs").resolve()
-            boltz_target = (boltz_dir / filename).resolve()
-            if boltz_target.exists() and boltz_target.is_file():
-                target = boltz_target
-                base = boltz_dir
+            for directory_name in ("boltz_cifs", "boltz_platform"):
+                boltz_dir = (run_base / "artifacts" / directory_name).resolve()
+                boltz_target = (boltz_dir / filename).resolve()
+                if boltz_target.exists() and boltz_target.is_file():
+                    target = boltz_target
+                    base = boltz_dir
+                    break
 
         try:
             target.relative_to(base)
@@ -168,10 +170,14 @@ class LocalStorageBackend(StorageBackend):
         if base.exists():
             checkpoints.extend(sorted(p.name for p in base.iterdir() if p.is_file()))
             
-        # Boltz CIFs
-        boltz_dir = self.run_dir(run_id) / "artifacts" / "boltz_cifs"
-        if boltz_dir.exists():
-            checkpoints.extend(sorted(p.name for p in boltz_dir.iterdir() if p.is_file() and p.suffix == '.cif'))
+        # Boltz structures from self-hosted and Platform providers.
+        for directory_name in ("boltz_cifs", "boltz_platform"):
+            boltz_dir = self.run_dir(run_id) / "artifacts" / directory_name
+            if boltz_dir.exists():
+                checkpoints.extend(sorted(
+                    p.name for p in boltz_dir.iterdir()
+                    if p.is_file() and p.suffix.lower() in {'.cif', '.pdb'}
+                ))
             
         return checkpoints
 

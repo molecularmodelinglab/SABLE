@@ -12,6 +12,10 @@ def canonical_properties(metrics: BoltzMetricSet) -> Dict[str, float]:
         "binding_confidence": "boltz_binding_confidence",
         "optimization_score": "boltz_optimization_score",
         "structure_confidence": "boltz_structure_confidence",
+        "ptm": "boltz_ptm",
+        "iptm": "boltz_iptm",
+        "complex_plddt": "boltz_complex_plddt",
+        "complex_iplddt": "boltz_complex_iplddt",
     }
     for metric_name, property_name in mappings.items():
         value = getattr(metrics, metric_name)

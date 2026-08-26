@@ -632,8 +632,11 @@ def _run_boltz_platform_characterization(
             "protein_scope_id": scope_id,
             "provider": BoltzProvider.PLATFORM.value,
             "provider_result_id": row.provider_result_id,
+            "job_id": row.provider_result_id,
             "warnings": list(row.warnings),
             "reliability_weighted": False,
+            "structure_path": row.structure_path,
+            "cif_file": row.structure_path,
         }
 
     missing = set(request.molecule_ids) - set(results) - set(failed_molecules)
@@ -645,6 +648,7 @@ def _run_boltz_platform_characterization(
             "provider": BoltzProvider.PLATFORM.value,
             "protein_scope_id": scope_id,
             "per_molecule_metadata": per_molecule_metadata,
+            "per_ligand": per_molecule_metadata,
         },
     )
 
