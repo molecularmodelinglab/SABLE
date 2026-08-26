@@ -190,10 +190,20 @@ async function request<T>(path: string, init?: RequestInit, parse: 'json' | 'tex
   
   if (!res.ok) {
     const body = await res.text()
-    throw new Error(body || res.statusText)
+    let message = body || res.statusText
+    try {
+      const payload = JSON.parse(body) as { detail?: unknown }
+      if (typeof payload.detail === 'string') message = payload.detail
+    } catch {
+      // Keep non-JSON response text as the error message.
+    }
+    throw new Error(message)
   }
   if (parse === 'text') {
     return res.text() as unknown as T
+  }
+  if (res.status === 204) {
+    return undefined as T
   }
   return res.json() as Promise<T>
 }

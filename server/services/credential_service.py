@@ -1,16 +1,26 @@
 import base64
 import hashlib
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 
+import httpx
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy.orm import Session
 
 from server.models.provider_credential import ProviderCredential
 
 
+logger = logging.getLogger(__name__)
+BOLTZ_AUTH_URL = "https://api.boltz.bio/compute/v1/auth/me"
+
+
 class CredentialConfigurationError(RuntimeError):
+    pass
+
+
+class CredentialValidationUnavailable(RuntimeError):
     pass
 
 
@@ -58,13 +68,25 @@ class CredentialService:
 
     def validate_secret(self, secret: str) -> Tuple[bool, Optional[str]]:
         try:
-            from boltz_api import Boltz
-
-            with Boltz(api_key=secret) as client:
-                client.auth.me()
-            return True, None
-        except Exception:
-            return False, "Boltz Platform rejected the credential or could not be reached."
+            response = httpx.get(
+                BOLTZ_AUTH_URL,
+                headers={"x-api-key": secret},
+                timeout=10.0,
+            )
+            if response.status_code == 200:
+                return True, None
+            if response.status_code in (401, 403):
+                return False, "Boltz Platform rejected the credential."
+            raise CredentialValidationUnavailable(
+                "Boltz Platform validation is temporarily unavailable. Try again."
+            )
+        except CredentialValidationUnavailable:
+            raise
+        except Exception as exc:
+            logger.warning("Boltz credential validation failed: %s", type(exc).__name__)
+            raise CredentialValidationUnavailable(
+                "Boltz Platform validation is temporarily unavailable. Try again."
+            ) from exc
 
     def apply_validation(self, credential: ProviderCredential, secret: str) -> Optional[str]:
         valid, error = self.validate_secret(secret)

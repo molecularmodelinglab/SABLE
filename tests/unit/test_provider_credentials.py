@@ -13,6 +13,7 @@ from server.schemas.run import RunCreateRequest
 from server.services.credential_service import (
     CredentialConfigurationError,
     CredentialService,
+    CredentialValidationUnavailable,
 )
 from server.services.run_launcher import _validate_execution_access
 from server.routers import provider_credentials as credential_router
@@ -43,6 +44,39 @@ def test_credential_encryption_uses_stable_development_fallback(monkeypatch):
     encrypted = CredentialService().encrypt("boltz-secret-key")
 
     assert CredentialService().decrypt(encrypted) == "boltz-secret-key"
+
+
+def test_transient_validation_failure_does_not_mark_credential_invalid(monkeypatch):
+    def unavailable(*args, **kwargs):
+        raise RuntimeError("temporary upstream failure")
+
+    monkeypatch.setattr("server.services.credential_service.httpx.get", unavailable)
+    credential = ProviderCredential(status="unverified")
+
+    with pytest.raises(CredentialValidationUnavailable):
+        CredentialService().apply_validation(credential, "valid-looking-key==")
+
+    assert credential.status == "unverified"
+
+
+def test_validation_uses_documented_header_without_changing_key(monkeypatch):
+    captured = {}
+
+    class Response:
+        status_code = 200
+
+    def authenticate(url, *, headers, timeout):
+        captured.update(url=url, headers=headers, timeout=timeout)
+        return Response()
+
+    monkeypatch.setattr("server.services.credential_service.httpx.get", authenticate)
+
+    valid, error = CredentialService().validate_secret("valid-looking-key==")
+
+    assert valid is True
+    assert error is None
+    assert captured["url"] == "https://api.boltz.bio/compute/v1/auth/me"
+    assert captured["headers"] == {"x-api-key": "valid-looking-key=="}
 
 
 def test_credential_response_never_contains_secret_fields():

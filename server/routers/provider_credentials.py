@@ -17,6 +17,7 @@ from server.schemas.provider_credential import (
 )
 from server.services.credential_service import (
     CredentialConfigurationError,
+    CredentialValidationUnavailable,
     credential_service,
 )
 from server.services.provider_job_service import provider_job_service
@@ -64,7 +65,10 @@ def create_provider_credential(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     if payload.validate_credential:
-        credential_service.apply_validation(credential, secret)
+        try:
+            credential_service.apply_validation(credential, secret)
+        except CredentialValidationUnavailable:
+            pass
 
     db.add(credential)
     try:
@@ -109,7 +113,10 @@ def update_provider_credential(
         credential.last_validated_at = None
         event_type = AuditEventType.PROVIDER_CREDENTIAL_REPLACED
         if payload.validate_credential:
-            credential_service.apply_validation(credential, secret)
+            try:
+                credential_service.apply_validation(credential, secret)
+            except CredentialValidationUnavailable:
+                pass
 
     try:
         db.commit()
@@ -132,7 +139,10 @@ def validate_provider_credential(
         secret = credential_service.decrypt(credential.encrypted_secret)
     except CredentialConfigurationError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    error = credential_service.apply_validation(credential, secret)
+    try:
+        error = credential_service.apply_validation(credential, secret)
+    except CredentialValidationUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     db.commit()
     db.refresh(credential)
     _audit(AuditEventType.PROVIDER_CREDENTIAL_VALIDATED, current_user, credential)
