@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import the Base and all models
 from server.database import Base
-from server.models import user, session, run, experiment, conversation, audit
+from server.models import user, session, run, experiment, conversation, audit, provider_credential, provider_job
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
