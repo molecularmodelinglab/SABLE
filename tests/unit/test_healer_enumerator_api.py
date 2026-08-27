@@ -3,7 +3,10 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
+from nodes.enumerate_molecules import _create_enumerator_tool, _tool_options_for_enumerator
 from schemas.errors import ToolError
+from schemas.state import WorkflowState
+from schemas.tool_registry import ToolKind, ToolSpec
 from schemas.tool_schemas import EnumerationRequest
 from tools.healer_enumerator_tool import HealerEnumeratorTool
 
@@ -51,7 +54,7 @@ def test_api_mode_polls_saves_complete_rows_and_returns_unique_products(tmp_path
     assert result.metadata["job_id"] == "job-123"
     assert result.metadata["stats"] == {"n_molecules": 3, "seconds": 1.9}
 
-    csv_path = tmp_path / "healer_job-123.csv"
+    csv_path = tmp_path / "molecular_enumerations_job-123.csv"
     saved = pd.read_csv(csv_path)
     assert list(saved.columns) == ["ID", "Product", "BB1", "qed"]
     assert saved["Product"].tolist() == ["CCO", "CCO", "CCN"]
@@ -68,6 +71,31 @@ def test_api_mode_polls_saves_complete_rows_and_returns_unique_products(tmp_path
     }
     assert calls[1].args == ("GET", "https://healer.example/api/jobs/job-123")
     assert calls[2].args == ("GET", "https://healer.example/api/jobs/job-123")
+
+
+def test_workflow_checkpoint_directory_is_used_for_healer_csv(tmp_path):
+    checkpoint_dir = tmp_path / "runs" / "run-123" / "checkpoints"
+    state = WorkflowState(
+        user_prompt="Enumerate ethanol analogs",
+        run_paths={"checkpoints": str(checkpoint_dir)},
+    )
+    spec = ToolSpec(
+        id="healer",
+        kind=ToolKind.ENUMERATOR,
+        class_path="tools.healer_enumerator_tool:HealerEnumeratorTool",
+        metadata={"tool_specific_options": ["healer_mode"]},
+    )
+
+    options = _tool_options_for_enumerator(spec, state)
+    registry = MagicMock()
+    _create_enumerator_tool(registry, spec, options)
+
+    assert options["output_dir"] == str(checkpoint_dir)
+    registry.create.assert_called_once_with(
+        "healer",
+        healer_mode="MoleculeHEALER",
+        output_dir=str(checkpoint_dir),
+    )
 
 
 def test_site_mode_uses_site_route_and_reactive_sites(tmp_path):

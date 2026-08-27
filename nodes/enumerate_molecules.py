@@ -269,13 +269,19 @@ def _tool_options_for_enumerator(spec: ToolSpec, state: WorkflowState) -> Dict[s
             or spec.config.get("healer_mode")
             or "MoleculeHEALER"
         )
+        if state.run_paths.get("checkpoints"):
+            options["output_dir"] = state.run_paths["checkpoints"]
 
     return options
 
 
 def _create_enumerator_tool(registry: ToolRegistry, spec: ToolSpec, tool_options: Dict[str, Any]) -> Any:
     if _supports_tool_option(spec, "healer_mode"):
-        return registry.create(spec.id, healer_mode=tool_options.get("healer_mode", "MoleculeHEALER"))
+        return registry.create(
+            spec.id,
+            healer_mode=tool_options.get("healer_mode", "MoleculeHEALER"),
+            output_dir=tool_options.get("output_dir"),
+        )
     return registry.create(spec.id)
 
 

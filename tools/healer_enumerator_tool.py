@@ -288,7 +288,7 @@ class HealerEnumeratorTool(BaseTool):
         output_dir = Path(self.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         safe_job_id = "".join(character for character in str(job_id) if character.isalnum() or character in {"-", "_"})
-        csv_path = output_dir / f"healer_{safe_job_id}.csv"
+        csv_path = output_dir / f"molecular_enumerations_{safe_job_id}.csv"
         results_df.to_csv(csv_path, index=False)
 
         products = results_df["Product"].dropna().astype(str).drop_duplicates().tolist()
