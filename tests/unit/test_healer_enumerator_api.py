@@ -69,8 +69,8 @@ def test_api_mode_polls_saves_complete_rows_and_returns_unique_products(tmp_path
         "n_compositions": 3,
         "max_total_products": 8000,
     }
-    assert calls[1].args == ("GET", "https://healer.example/api/jobs/job-123")
-    assert calls[2].args == ("GET", "https://healer.example/api/jobs/job-123")
+    assert calls[1].args == ("GET", "https://healer.example/jobs/job-123")
+    assert calls[2].args == ("GET", "https://healer.example/jobs/job-123")
 
 
 def test_workflow_checkpoint_directory_is_used_for_healer_csv(tmp_path):
