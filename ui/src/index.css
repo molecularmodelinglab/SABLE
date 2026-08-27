@@ -707,6 +707,86 @@ button.danger:disabled {
 .structure-viewer {
   position: relative;
   min-width: 0;
+  background: #f8fafc;
+  border-radius: 8px;
+}
+
+.structure-viewer:fullscreen {
+  display: grid;
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+}
+
+.structure-viewer__toolbar {
+  position: absolute;
+  z-index: 2;
+  top: 10px;
+  left: 10px;
+  right: 10px;
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(8px);
+}
+
+.structure-viewer__toolbar label {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.structure-viewer__toolbar label > span {
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.structure-viewer__toolbar select {
+  min-width: 92px;
+  height: 32px;
+  padding: 0 28px 0 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background-color: #fff;
+  color: #172033;
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.structure-viewer__toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.structure-viewer__toolbar-actions button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #fff;
+  color: #334155;
+}
+
+.structure-viewer__toolbar-actions button:hover:not(:disabled) {
+  border-color: #64748b;
+  background: #f1f5f9;
+}
+
+.structure-viewer__toolbar-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .structure-viewer__canvas {
@@ -715,6 +795,12 @@ button.danger:disabled {
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   overflow: hidden;
+}
+
+.structure-viewer:fullscreen .structure-viewer__canvas {
+  height: 100vh;
+  border: 0;
+  border-radius: 0;
 }
 
 .structure-viewer__error {
@@ -764,6 +850,23 @@ button.danger:disabled {
 
   .run-detail__checkpoint-actions {
     justify-content: flex-start;
+  }
+
+  .structure-viewer__toolbar {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .structure-viewer__toolbar label {
+    flex: 1 1 92px;
+  }
+
+  .structure-viewer__toolbar select {
+    width: 100%;
+  }
+
+  .structure-viewer__toolbar-actions {
+    margin-left: 0;
   }
 }
 
