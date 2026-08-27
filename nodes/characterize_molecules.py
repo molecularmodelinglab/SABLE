@@ -37,6 +37,41 @@ from tools.boltz import (
 from tools.registry import get_tool_registry
 
 
+def _map_target_properties(
+    targets: List[Any],
+    result_properties: Dict[str, Any],
+) -> Dict[str, float]:
+    mapped_properties: Dict[str, float] = {}
+    for target in targets:
+        target_name_lower = normalize_property_name(target.name)
+
+        found = False
+        for result_key, result_value in result_properties.items():
+            result_key_lower = normalize_property_name(result_key)
+
+            if result_key_lower == target_name_lower:
+                mapped_properties[target.name] = float(result_value)
+                found = True
+                break
+
+            if target_name_lower in PROPERTY_MAPPINGS:
+                rdkit_name, stoplight_name = PROPERTY_MAPPINGS[target_name_lower]
+                if (rdkit_name and normalize_property_name(rdkit_name) == result_key_lower) or \
+                   (stoplight_name and normalize_property_name(stoplight_name) == result_key_lower):
+                    mapped_properties[target.name] = float(result_value)
+                    found = True
+                    break
+
+        if not found:
+            for result_key, result_value in result_properties.items():
+                result_key_lower = normalize_property_name(result_key)
+                if target_name_lower in result_key_lower or result_key_lower in target_name_lower:
+                    mapped_properties[target.name] = float(result_value)
+                    break
+
+    return mapped_properties
+
+
 def _protein_target_to_polymer(protein: ProteinTarget) -> Dict[str, Any]:
     """Convert a ProteinTarget into the Boltz polymer payload."""
 
@@ -257,46 +292,7 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
     for mol_id in result_molecule_ids:
         smiles = characterization_smiles_map.get(mol_id) or state.search_space.get(mol_id)
         if smiles and mol_id in results:
-            
-            # Map properties to target names
-            mapped_properties = {}
-            for target in state.targets:
-                target_name_lower = normalize_property_name(target.name)
-                
-                # Try to find the property in results
-                found = False
-                for result_key, result_value in results[mol_id].items():
-                    result_key_lower = normalize_property_name(result_key)
-                    
-                    # Direct match
-                    if result_key_lower == target_name_lower:
-                        mapped_properties[target.name] = float(result_value)
-                        found = True
-                        break
-                    
-                    # Check mappings
-                    if target_name_lower in PROPERTY_MAPPINGS:
-                        rdkit_name, stoplight_name = PROPERTY_MAPPINGS[target_name_lower]
-                        if (rdkit_name and normalize_property_name(rdkit_name) == result_key_lower) or \
-                           (stoplight_name and normalize_property_name(stoplight_name) == result_key_lower):
-                            mapped_properties[target.name] = float(result_value)
-                            found = True
-                            break
-
-                    # Boltz Platform fallback: binding_affinity -> boltz_optimization_score
-                    if target_name_lower == "binding_affinity" and result_key_lower == "boltz_optimization_score":
-                        mapped_properties[target.name] = float(result_value)
-                        found = True
-                        break
-
-                # If not found, try to get any similar property
-                if not found:
-                    # Look for partial matches
-                    for result_key, result_value in results[mol_id].items():
-                        if target_name_lower in normalize_property_name(result_key) or \
-                           normalize_property_name(result_key) in target_name_lower:
-                            mapped_properties[target.name] = float(result_value)
-                            break
+            mapped_properties = _map_target_properties(state.targets, results[mol_id])
             
             # Create ExperimentResult
             if mapped_properties:
