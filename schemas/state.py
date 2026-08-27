@@ -266,26 +266,19 @@ class WorkflowState(BaseModel):
                 pass
 
     def add_experimental_result(self, result: ExperimentResult) -> None:
-        """Adds an experimental result and updates the list of best molecules."""
+        """Add an observation and refresh the legacy best-molecule projection."""
         self.experimental_results.append(result)
 
         if not self.targets:
             return
 
-        # Calculate a weighted composite score for the molecule.
-        composite_score = 0.0
-        for target in self.targets:
-            if target.name in result.properties:
-                value = result.properties[target.name]
-                # Invert value for minimization so that higher scores are always better.
-                if target.mode == OptimizationMode.MINIMIZE:
-                    value = -value
-                composite_score += value * target.weight
+        from utils.objective_ranking import (
+            build_optimization_report,
+            compatibility_best_molecules,
+        )
 
-        # Update the list of best-performing molecules, keeping the top 10.
-        self.best_molecules.append((result.smiles, composite_score))
-        self.best_molecules.sort(key=lambda x: x[1], reverse=True)
-        self.best_molecules = self.best_molecules[:10]
+        report = build_optimization_report(self)
+        self.best_molecules = compatibility_best_molecules(report)
 
     def record_tool_selection(self, selection: ToolSelection) -> None:
         """Record a tool selected for a workflow stage."""
