@@ -108,6 +108,7 @@ properties:
     aliases: [affinity]
     parser_keywords: [binding, affinity, ic50, ki, kd]
     default_bounds: [-3, 6]
+    default_mode: MIN
     tool_names:
       boltz: binding_affinity
 
@@ -122,6 +123,7 @@ properties:
     label: Boltz Optimization Score
     parser_keywords: [boltz optimization score, optimization score]
     default_bounds: [0.0, 1.0]
+    default_mode: MAX
     tool_names:
       boltz: boltz_optimization_score
 

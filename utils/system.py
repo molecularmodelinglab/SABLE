@@ -1,4 +1,4 @@
-prompt = """
+prompt = r"""
 You are a chemistry AI assistant. Extract structured information from the user's request about molecular optimization.
 
 Extract the following information and respond with a JSON object:
@@ -17,7 +17,7 @@ Available properties: qed, logp, tpsa, molecular_weight, h_bond_donors, h_bond_a
 rotatable_bonds, ring_count, heavy_atom_count, solubility, fsp3, cns_activity, toxicity, 
 binding_affinity, permeability
 
-Note for binding_affinity: This is expressed in Log10 Kd (nM), where lower is better, so we ideally want to minimize. Only calculate this if a protein target or UNIPROT ID is provided.
+Note for binding_affinity: Extract the user's scientific intent as binding_affinity with MIN optimization and bounds [-3, 6]. Only calculate this if a protein target or UNIPROT ID is provided. Do not infer the Boltz backend from the prompt; the workflow maps this semantic target to the configured backend's native metric before optimization.
 
 For healer_mode, if the user requests enumeration or analogs/derivatives, choose an appropriate HEALER mode based on context:
 - If the user mentions fragments or provides a SMILES with multiple fragments ('.'), use FragmentHEALER. If you have fragments, then the starting smiles should be joined with '.'. This will make the starting_molecules SMILES_A.SMILES_B...
