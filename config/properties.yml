@@ -107,7 +107,7 @@ properties:
     label: Binding Affinity
     aliases: [affinity]
     parser_keywords: [binding, affinity, ic50, ki, kd]
-    default_bounds: [-20.0, 20.0]
+    default_bounds: [-3, 6]
     tool_names:
       boltz: binding_affinity
 
