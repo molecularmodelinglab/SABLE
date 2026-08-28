@@ -17,7 +17,7 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
     const baseLinks = [
       { to: '/dashboard', label: 'Dashboard', icon: BarChart3, end: true },
       { to: '/runs/new', label: 'New Run', icon: Target, end: false },
-      { to: '/account', label: 'Settings & Boltz API', icon: Settings, end: false },
+      { to: '/account', label: 'Settings & API', icon: Settings, end: false },
     ]
 
     if (profile?.user.roles?.includes('admin')) {
