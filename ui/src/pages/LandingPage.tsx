@@ -21,8 +21,8 @@ export function LandingPage() {
           <div className="landing-hero__copy">
             <h1 id="landing-title">Find optimized molecules instantly.</h1>
             <p className="landing-hero__summary">
-             SABLE is an open-source agentic system that translates natural language prompts into a downstream hit-to-lead optimization campaign. All
-              recommended molecules are produced from real-life building blocks with known reaction pathways.
+             SABLE is an open-source agentic system that translates natural language prompts into a downstream lead optimization campaign. All
+            recommended molecules are produced from purchasable building blocks with known reaction pathways.
             </p>
           </div>
         </section>
@@ -40,7 +40,7 @@ export function LandingPage() {
         </section>
 
         <section className="landing-cta" aria-labelledby="cta-title">
-          <h2 id="cta-title">Start a lead optimization campaign.</h2>
+          <h2 id="cta-title">Start an optimization campaign.</h2>
           <Link to="/login">Enter SABLE <ArrowUpRight size={24} aria-hidden="true" /></Link>
         </section>
       </main>
