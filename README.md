@@ -166,6 +166,22 @@ docker compose --profile prod up --build api celery_worker frontend
 
 The frontend is served at http://localhost:8080. Review all secrets, authentication, storage, CORS, and infrastructure settings in `.env` before deploying outside a local environment.
 
+## Citation
+
+If SABLE supports your research, please cite our [paper](https://arxiv.org/abs/2608.11483):
+
+```bibtex
+@misc{idanwekhai2026modularagenticframeworksynthetically,
+   title={A Modular Agentic Framework for Synthetically Constrained Multi-Objective Hit-to-Lead Optimization},
+   author={Kelvin P. Idanwekhai and Enes Kelestemur and Benjamin Strickland and Matthew Hart and Steini Davidsson and Angelos Angelopoulos and Ron Alterovitz and Marcello DeLuca and Alexander Tropsha},
+   year={2026},
+   eprint={2608.11483},
+   archivePrefix={arXiv},
+   primaryClass={cs.AI},
+   url={https://arxiv.org/abs/2608.11483},
+}
+```
+
 ## License
 
 This project is licensed under the terms in [LICENSE](LICENSE).
