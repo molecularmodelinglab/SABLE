@@ -40,7 +40,7 @@ export function LandingPage() {
         </section>
 
         <section className="landing-cta" aria-labelledby="cta-title">
-          <h2 id="cta-title">Start an optimization campaign.</h2>
+          <h2 id="cta-title">Want optimized leads?</h2>
           <Link to="/login">Enter SABLE <ArrowUpRight size={24} aria-hidden="true" /></Link>
         </section>
       </main>
