@@ -48,8 +48,8 @@ export function LandingPage() {
       <footer className="landing-footer">
         <Link className="landing-wordmark" to="/">SABLE</Link>
         <p>Managed by 
-            <a href="https://kelvinpaschal.com" target="_blank" rel="noreferrer">Kelvin Idanwekhai</a> of
-            <a href="https://molecularmodelinglab.github.io/" target="_blank" rel="noreferrer">The Molecular Modeling Lab @ UNC </a>
+            <a href="https://kelvinpaschal.com" target="_blank" rel="noreferrer"> Kelvin Idanwekhai</a> of
+            <a href="https://molecularmodelinglab.github.io/" target="_blank" rel="noreferrer"> The Molecular Modeling Lab @ UNC </a>
             </p>
         <div>
           <a href={GITHUB_URL} target="_blank" rel="noreferrer"><Github size={17} aria-hidden="true" /> GitHub</a>
