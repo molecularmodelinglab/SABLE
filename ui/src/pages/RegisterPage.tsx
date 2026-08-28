@@ -37,7 +37,7 @@ export function RegisterPage() {
 
       // Automatically sign in after successful registration
       await login({ email: email.trim(), password })
-      navigate('/', { replace: true })
+      navigate('/dashboard', { replace: true })
     } catch (err) {
       const message = (err as Error).message
       setError(message || 'Registration failed')

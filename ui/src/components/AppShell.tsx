@@ -15,7 +15,7 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
 
   const navLinks = useMemo(() => {
     const baseLinks = [
-      { to: '/', label: 'Dashboard', icon: BarChart3, end: true },
+      { to: '/dashboard', label: 'Dashboard', icon: BarChart3, end: true },
       { to: '/runs/new', label: 'New Run', icon: Target, end: false },
       { to: '/account', label: 'Settings & Boltz API', icon: Settings, end: false },
     ]
@@ -60,7 +60,7 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
                 [
                   'app-shell__nav-link',
                   isActive ? 'app-shell__nav-link--active' : '',
-                  link.to !== '/' && location.pathname.startsWith(link.to) && !isActive ? 'app-shell__nav-link--pending' : '',
+                  link.to !== '/dashboard' && location.pathname.startsWith(link.to) && !isActive ? 'app-shell__nav-link--pending' : '',
                 ]
                   .filter(Boolean)
                   .join(' ')

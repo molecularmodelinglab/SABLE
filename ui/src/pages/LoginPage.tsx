@@ -14,7 +14,7 @@ export function LoginPage() {
   useEffect(() => {
     const token = getAccessToken()
     if (token) {
-      navigate('/', { replace: true })
+      navigate('/dashboard', { replace: true })
     }
   }, [navigate])
 
@@ -41,7 +41,7 @@ export function LoginPage() {
       })
       
       // Redirect to dashboard
-      navigate('/', { replace: true })
+      navigate('/dashboard', { replace: true })
     } catch (err) {
       setError((err as Error).message || 'Login failed')
     } finally {

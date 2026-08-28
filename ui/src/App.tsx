@@ -10,6 +10,7 @@ import { LoginPage } from './pages/LoginPage'
 import { RegisterPage } from './pages/RegisterPage'
 import { AdminDashboardPage } from './pages/AdminDashboardPage'
 import { AccountPage } from './pages/AccountPage'
+import { LandingPage } from './pages/LandingPage'
 import { useAuthProfile } from './hooks/useAuthProfile'
 
 export function App() {
@@ -18,6 +19,7 @@ export function App() {
 
   return (
     <Routes>
+      <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route
@@ -26,7 +28,7 @@ export function App() {
           <AuthGuard>
             <AppShell header={<Header title={headerContent.title} description={headerContent.description} pathname={location.pathname} />}>
               <Routes>
-                <Route path="/" element={<DashboardPage />} />
+                <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/runs/new" element={<NewRunPage />} />
                 <Route path="/runs/:id" element={<RunDetailPage />} />
                 <Route path="/account" element={<AccountPage />} />
@@ -38,7 +40,7 @@ export function App() {
                     </AdminGuard>
                   }
                 />
-                <Route path="*" element={<Navigate to="/" replace />} />
+                <Route path="*" element={<Navigate to="/dashboard" replace />} />
               </Routes>
             </AppShell>
           </AuthGuard>
@@ -77,7 +79,7 @@ function Header({ title, description, pathname }: { title: string; description: 
               aria-pressed={!onAdminView}
               onClick={() => {
                 if (onAdminView) {
-                  navigate('/')
+                  navigate('/dashboard')
                 }
               }}
             >

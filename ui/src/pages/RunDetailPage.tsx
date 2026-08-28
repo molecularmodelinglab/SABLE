@@ -181,7 +181,7 @@ export function RunDetailPage() {
     mutationFn: () => deleteRun(id as string),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['runs'] })
-      navigate('/')
+      navigate('/dashboard')
     },
   })
 
