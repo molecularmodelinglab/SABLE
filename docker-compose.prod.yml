@@ -1,0 +1,295 @@
+x-backend-image: &backend-image
+  image: sable-backend:${SABLE_IMAGE_TAG:-latest}
+  build:
+    context: .
+    dockerfile: Dockerfile.prod
+
+x-backend-environment: &backend-environment
+  PYTHONUNBUFFERED: "1"
+  ENVIRONMENT: production
+  DATABASE_URL: postgresql://sable_user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/sable
+  REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
+  CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
+  CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
+  SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
+  PROVIDER_CREDENTIAL_MASTER_KEY: ${PROVIDER_CREDENTIAL_MASTER_KEY:?PROVIDER_CREDENTIAL_MASTER_KEY is required}
+  SABLE_DATA_ROOT: /app/data
+  SABLE_STORAGE_BACKEND: ${SABLE_STORAGE_BACKEND:-local}
+  SABLE_STORAGE_S3_BUCKET: ${SABLE_STORAGE_S3_BUCKET:-}
+  SABLE_STORAGE_S3_PREFIX: ${SABLE_STORAGE_S3_PREFIX:-runs/}
+  SABLE_STORAGE_S3_KMS_KEY_ID: ${SABLE_STORAGE_S3_KMS_KEY_ID:-}
+  SQL_ECHO: "false"
+  CORS_ORIGINS: ${CORS_ORIGINS:-}
+  AUTH0_DOMAIN: ${AUTH0_DOMAIN:-}
+  AUTH0_CLIENT_ID: ${AUTH0_CLIENT_ID:-}
+  AUTH0_CLIENT_SECRET: ${AUTH0_CLIENT_SECRET:-}
+  AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-}
+  AUTH0_CALLBACK_URL: ${AUTH0_CALLBACK_URL:-}
+  LLM_PROVIDER: ${LLM_PROVIDER:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+  BOLTZ_BASE_URL: ${BOLTZ_BASE_URL:-}
+  BOLTZ_API_TOKEN: ${BOLTZ_API_TOKEN:-}
+  BOLTZ_EXECUTION_MODE: ${BOLTZ_EXECUTION_MODE:-api}
+  HPC_HOST: ${HPC_HOST:-}
+  HPC_USER: ${HPC_USER:-}
+  HPC_PASSWORD: ${HPC_PASSWORD:-}
+  HPC_SSH_KEY: ${HPC_SSH_KEY:-}
+  HPC_SSH_KEY_CONTENT: ${HPC_SSH_KEY_CONTENT:-}
+  REMOTE_BASE_DIR: ${REMOTE_BASE_DIR:-}
+  BOLTZ_RESOURCES_DIR: ${BOLTZ_RESOURCES_DIR:-}
+  MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-5}
+  MOLECULAR_FP: ${MOLECULAR_FP:-MORDRED}
+  MULTI_OPT_TYPE: ${MULTI_OPT_TYPE:-pareto}
+  HEALER_EXECUTION_MODE: ${HEALER_EXECUTION_MODE:-internal}
+  HEALER_ENDPOINT: ${HEALER_ENDPOINT:-}
+  HEALER_STOCK: ${HEALER_STOCK:-US_stock}
+  HEALER_POLL_INTERVAL_SECONDS: ${HEALER_POLL_INTERVAL_SECONDS:-2}
+  HEALER_JOB_TIMEOUT_SECONDS: ${HEALER_JOB_TIMEOUT_SECONDS:-900}
+  HEALER_HTTP_TIMEOUT_SECONDS: ${HEALER_HTTP_TIMEOUT_SECONDS:-30}
+  HEALER_OUTPUT_DIR: /app/data/healer_outputs
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: sable
+      POSTGRES_USER: sable_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sable_user -d sable"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - sable-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD}\""]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$${REDIS_PASSWORD}\" redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - sable-network
+    restart: unless-stopped
+
+  migrations:
+    <<: *backend-image
+    entrypoint: ["micromamba", "run", "-n", "sable"]
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql://sable_user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/sable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - sable-network
+    restart: "no"
+
+  volume_init:
+    <<: *backend-image
+    user: "0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - chown -R 1001:0 /app/data /var/lib/celery && chmod -R g+rwX /app/data /var/lib/celery
+    volumes:
+      - artifacts_data:/app/data
+      - celerybeat_data:/var/lib/celery
+    networks:
+      - sable-network
+    restart: "no"
+
+  api:
+    <<: *backend-image
+    entrypoint: ["micromamba", "run", "-n", "sable"]
+    command:
+      - uvicorn
+      - server.app:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --proxy-headers
+      - --forwarded-allow-ips=*
+      - --root-path
+      - /api
+    environment: *backend-environment
+    expose:
+      - "8000"
+    volumes:
+      - artifacts_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+      volume_init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import json,sys,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)); sys.exit(0 if data.get('status') == 'healthy' else 1)"
+      interval: 15s
+      timeout: 8s
+      retries: 5
+      start_period: 30s
+    networks:
+      - sable-network
+    restart: unless-stopped
+
+  celery_worker:
+    <<: *backend-image
+    entrypoint: ["micromamba", "run", "-n", "sable"]
+    command: ["celery", "-A", "server.tasks.celery_app", "worker", "--loglevel=info"]
+    environment: *backend-environment
+    volumes:
+      - artifacts_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+      volume_init:
+        condition: service_completed_successfully
+    networks:
+      - sable-network
+    restart: unless-stopped
+
+  celery_beat:
+    <<: *backend-image
+    entrypoint: ["micromamba", "run", "-n", "sable"]
+    command:
+      - celery
+      - -A
+      - server.tasks.celery_app
+      - beat
+      - --loglevel=info
+      - --schedule=/var/lib/celery/celerybeat-schedule
+    environment: *backend-environment
+    volumes:
+      - artifacts_data:/app/data
+      - celerybeat_data:/var/lib/celery
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+      volume_init:
+        condition: service_completed_successfully
+    networks:
+      - sable-network
+    restart: unless-stopped
+
+  frontend:
+    image: sable-frontend:${SABLE_IMAGE_TAG:-latest}
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE: /api
+    environment:
+      SSL_DOMAIN: ${SSL_DOMAIN:-}
+    ports:
+      - "${HTTP_PORT:-8080}:8080"
+      - "${HTTPS_PORT:-8443}:8443"
+    volumes:
+      - certbot_www:/var/www/certbot:ro
+      - letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/nginx-health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - sable-network
+    restart: unless-stopped
+
+  certbot:
+    image: certbot/certbot:latest
+    profiles: ["ssl"]
+    environment:
+      SSL_DOMAIN: ${SSL_DOMAIN:-}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-}
+      LETSENCRYPT_STAGING: ${LETSENCRYPT_STAGING:-0}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        test -n "$$SSL_DOMAIN" || { echo "SSL_DOMAIN is required"; exit 1; }
+        test -n "$$LETSENCRYPT_EMAIL" || { echo "LETSENCRYPT_EMAIL is required"; exit 1; }
+        staging_flag=""
+        if [ "$$LETSENCRYPT_STAGING" = "1" ]; then staging_flag="--staging"; fi
+        certbot certonly --webroot --webroot-path=/var/www/certbot \
+          --non-interactive --agree-tos --email "$$LETSENCRYPT_EMAIL" \
+          --domain "$$SSL_DOMAIN" $$staging_flag
+        chgrp -R 101 /etc/letsencrypt
+        chmod -R g+rX,o-rwx /etc/letsencrypt
+    volumes:
+      - certbot_www:/var/www/certbot
+      - letsencrypt:/etc/letsencrypt
+    depends_on:
+      frontend:
+        condition: service_healthy
+    networks:
+      - sable-network
+    restart: "no"
+
+  certbot_renew:
+    image: certbot/certbot:latest
+    profiles: ["ssl"]
+    environment:
+      SSL_DOMAIN: ${SSL_DOMAIN:-}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        trap exit TERM
+        while :; do
+          certbot renew --webroot --webroot-path=/var/www/certbot --quiet
+          chgrp -R 101 /etc/letsencrypt
+          chmod -R g+rX,o-rwx /etc/letsencrypt
+          sleep 12h & wait $$!
+        done
+    volumes:
+      - certbot_www:/var/www/certbot
+      - letsencrypt:/etc/letsencrypt
+    depends_on:
+      frontend:
+        condition: service_healthy
+    networks:
+      - sable-network
+    restart: unless-stopped
+
+networks:
+  sable-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  artifacts_data:
+  celerybeat_data:
+  certbot_www:
+  letsencrypt:
