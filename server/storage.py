@@ -238,6 +238,17 @@ class AzureBlobStorageBackend(LocalStorageBackend):
         parts = [part for part in (self._prefix, run_id) if part]
         return "/".join(parts) + "/"
 
+    @staticmethod
+    def _is_directory_blob(blob) -> bool:
+        metadata = getattr(blob, "metadata", None) or {}
+        return str(metadata.get("hdi_isfolder", "")).lower() == "true"
+
+    def _list_run_blobs(self, prefix: str):
+        return self._container_client.list_blobs(
+            name_starts_with=prefix,
+            include=["metadata"],
+        )
+
     def _hydrate_run(self, run_id: str) -> None:
         with self._hydration_lock:
             if run_id in self._hydrated_runs:
@@ -245,7 +256,9 @@ class AzureBlobStorageBackend(LocalStorageBackend):
 
             base = super().run_dir(run_id)
             prefix = self._blob_prefix(run_id)
-            for blob in self._container_client.list_blobs(name_starts_with=prefix):
+            for blob in self._list_run_blobs(prefix):
+                if self._is_directory_blob(blob):
+                    continue
                 relative_name = blob.name[len(prefix):]
                 if not relative_name:
                     continue
@@ -281,7 +294,9 @@ class AzureBlobStorageBackend(LocalStorageBackend):
                     self._container_client.upload_blob(blob_name, data, overwrite=True)
 
         remote_blobs = {
-            blob.name for blob in self._container_client.list_blobs(name_starts_with=prefix)
+            blob.name
+            for blob in self._list_run_blobs(prefix)
+            if not self._is_directory_blob(blob)
         }
         for blob_name in remote_blobs - local_blobs:
             self._container_client.delete_blob(blob_name)
@@ -295,7 +310,12 @@ class AzureBlobStorageBackend(LocalStorageBackend):
 
             shutil.rmtree(base)
         prefix = self._blob_prefix(run_id)
-        for blob in self._container_client.list_blobs(name_starts_with=prefix):
+        blobs = sorted(
+            self._list_run_blobs(prefix),
+            key=lambda blob: blob.name.count("/"),
+            reverse=True,
+        )
+        for blob in blobs:
             self._container_client.delete_blob(blob.name)
         self._hydrated_runs.discard(run_id)
 
