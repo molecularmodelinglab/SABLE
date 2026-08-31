@@ -2,7 +2,6 @@
 
 import json
 import os
-import shutil
 import queue
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
@@ -24,6 +23,8 @@ from server.storage import (
     run_dir,
     checkpoint_path,
     list_run_checkpoints,
+    sync_run,
+    delete_run_data,
 )
 from server.services.run_service import run_service
 from server.services.cache_service import cache_service
@@ -197,6 +198,7 @@ async def create_run(
     note = req.note.strip() if req.note else None
     if note:
         (Path(paths["inputs"]) / "note.txt").write_text(note)
+    sync_run(run_id)
 
     # Create run in database
     session = db.query(SessionModel).filter(
@@ -417,10 +419,7 @@ def delete_run(
     cache_service.invalidate_run(run_id)
     cache_service.invalidate_user_runs_list(str(current_user.id))
 
-    # Delete files
-    base = run_dir(run_id)
-    if base.exists():
-        shutil.rmtree(base)
+    delete_run_data(run_id)
 
     return {"deleted": True}
 
@@ -569,6 +568,7 @@ def generate_plots(
     except Exception as exc:
         raise HTTPException(500, f"Failed to generate plots: {exc}") from exc
 
+    sync_run(run_id)
     plots = _iter_plot_files(run_id)
     return {
         "generated": True,

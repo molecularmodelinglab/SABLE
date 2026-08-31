@@ -14,7 +14,7 @@ from server.models.user import User
 from server.services.cache_service import cache_service
 from server.services.run_events import run_event_hub
 from server.services.run_service import run_service
-from server.storage import results_json_path, summary_txt_path, run_dir
+from server.storage import results_json_path, summary_txt_path, run_dir, sync_run
 from run_workflow import WorkflowRunner
 
 @shared_task(bind=True, name="server.tasks.workflow.run_workflow")
@@ -101,7 +101,10 @@ def run_workflow_task(self, run_id: str) -> None:
             details={"status": "success", "mode": "testing"},
         )
 
-        _notify_capacity_available(run_id)
+        try:
+            sync_run(run_id)
+        finally:
+            _notify_capacity_available(run_id)
         return
 
     runner = WorkflowRunner(checkpoint_dir=str(run_dir(run_id) / "checkpoints"))
@@ -254,7 +257,10 @@ def run_workflow_task(self, run_id: str) -> None:
     if experiment:
         experiment_logger.update_experiment(experiment)
 
-    _notify_capacity_available(run_id)
+    try:
+        sync_run(run_id)
+    finally:
+        _notify_capacity_available(run_id)
 
 
 def _notify_capacity_available(run_id: str) -> None:

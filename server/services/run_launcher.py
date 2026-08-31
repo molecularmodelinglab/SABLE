@@ -21,7 +21,7 @@ from server.services.boltz_access_service import boltz_access_service
 from server.services.cache_service import cache_service
 from server.services.run_events import run_event_hub
 from server.services.run_service import run_service
-from server.storage import results_json_path, summary_txt_path, run_dir
+from server.storage import results_json_path, summary_txt_path, run_dir, sync_run
 from run_workflow import WorkflowRunner
 
 
@@ -138,7 +138,10 @@ def _run_workflow_background(run_id: str) -> None:
             severity=AuditSeverity.ERROR,
             details={"error": execution_access_error},
         )
-        _notify_capacity_available(run_id)
+        try:
+            sync_run(run_id)
+        finally:
+            _notify_capacity_available(run_id)
         return
 
     if experiment:
@@ -193,7 +196,10 @@ def _run_workflow_background(run_id: str) -> None:
             details={"status": "success", "mode": "testing"},
         )
 
-        _notify_capacity_available(run_id)
+        try:
+            sync_run(run_id)
+        finally:
+            _notify_capacity_available(run_id)
         return
 
     runner = WorkflowRunner(checkpoint_dir=str(run_dir(run_id) / "checkpoints"))
@@ -329,7 +335,10 @@ def _run_workflow_background(run_id: str) -> None:
     if experiment:
         experiment_logger.update_experiment(experiment)
 
-    _notify_capacity_available(run_id)
+    try:
+        sync_run(run_id)
+    finally:
+        _notify_capacity_available(run_id)
 
 
 def _notify_capacity_available(run_id: str) -> None:
