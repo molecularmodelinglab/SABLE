@@ -73,6 +73,33 @@ def test_api_mode_polls_saves_complete_rows_and_returns_unique_products(tmp_path
     assert calls[2].args == ("GET", "https://healer.example/jobs/job-123")
 
 
+def test_api_mode_continues_polling_started_job(tmp_path):
+    session = MagicMock()
+    session.request.side_effect = [
+        _response({"job_id": "started-job", "status": "submitted"}),
+        _response({"job_id": "started-job", "status": "STARTED"}),
+        _response(
+            {
+                "job_id": "started-job",
+                "status": "SUCCESS",
+                "result": {"complete": [{"Product": "CCO"}], "stats": {}},
+            }
+        ),
+    ]
+    tool = HealerEnumeratorTool(
+        execution_mode="api",
+        endpoint="https://healer.example",
+        output_dir=str(tmp_path),
+        poll_interval_seconds=0,
+        session=session,
+    )
+
+    result = tool.enumerate(EnumerationRequest(starting_smiles="CCO", max_molecules=1))
+
+    assert result.molecules == {"mol_0": "CCO"}
+    assert session.request.call_count == 3
+
+
 def test_workflow_checkpoint_directory_is_used_for_healer_csv(tmp_path):
     checkpoint_dir = tmp_path / "runs" / "run-123" / "checkpoints"
     state = WorkflowState(

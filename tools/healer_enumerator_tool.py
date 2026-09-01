@@ -52,6 +52,14 @@ class HealerEnumeratorTool(BaseTool):
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
     STOCK: ClassVar[str] = "US_stock"
+    IN_PROGRESS_API_STATUSES: ClassVar[frozenset[str]] = frozenset({
+        "pending",
+        "received",
+        "started",
+        "progress",
+        "retry",
+    })
+
     def __init__(
         self,
         healer_mode: str = "MoleculeHEALER",
@@ -327,10 +335,10 @@ class HealerEnumeratorTool(BaseTool):
             status = str(response.get("status", "")).strip().lower()
             if status == "success":
                 return response
-            if status == "failure":
+            if status in {"failure", "revoked"}:
                 message = response.get("error") or "HEALER API job failed"
                 raise ToolError(str(message), tool="healer", code="API_JOB_FAILED", details={"job_id": job_id})
-            if status != "progress":
+            if status not in self.IN_PROGRESS_API_STATUSES:
                 raise ToolError(
                     f"HEALER API returned unknown job status {response.get('status')!r}",
                     tool="healer",
