@@ -366,7 +366,7 @@ export function getRunPlotUrl(id: string, plotPath: string): string {
     .map((part) => encodeURIComponent(part))
     .join('/')
 
-  const url = new URL(`${base}/runs/${id}/artifacts/plots/${encodedPath}`)
+  const url = new URL(`${base}/runs/${id}/artifacts/plots/${encodedPath}`, window.location.origin)
   const token = getAccessToken()
   if (token) {
     url.searchParams.set('access_token', token)
@@ -391,7 +391,7 @@ export async function getRunLogs(id: string, limit = 500): Promise<RunEvent[]> {
 
 export function openEventStream(id: string, onEvent: (evt: RunEvent) => void): () => void {
   const base = API_BASE.replace(/\/$/, '')
-  const url = new URL(`${base}/runs/${id}/events`)
+  const url = new URL(`${base}/runs/${id}/events`, window.location.origin)
   const token = getAccessToken()
   if (token) {
     url.searchParams.set('access_token', token)
