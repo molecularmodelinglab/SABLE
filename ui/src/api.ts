@@ -73,6 +73,94 @@ export type RunEvent = {
 
 export type RunResults = unknown
 
+export type BoltzProvider = 'self_hosted' | 'platform'
+export type BoltzExecutionPreference = 'auto' | 'prediction' | 'library_screen'
+export type BoltzMetric =
+  | 'binding_affinity'
+  | 'boltz_binding_confidence'
+  | 'boltz_optimization_score'
+  | 'boltz_structure_confidence'
+
+export type CreateRunRequest = {
+  prompt: string
+  max_iterations?: number
+  batch_size?: number
+  note?: string
+  characterization?: {
+    boltz: {
+      provider: BoltzProvider
+      credential_id?: string
+      execution_preference: BoltzExecutionPreference
+      metrics: BoltzMetric[]
+    }
+  }
+}
+
+export type ProviderCredential = {
+  id: string
+  provider: string
+  name: string
+  key_hint: string
+  status: string
+  last_validated_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type ProviderCredentialCreate = {
+  provider?: 'boltz_platform'
+  name: string
+  api_key: string
+  validate?: boolean
+}
+
+export type ProviderCredentialUpdate = {
+  name?: string
+  api_key?: string
+  validate?: boolean
+}
+
+export type BoltzAccessStatus = 'not_requested' | 'pending' | 'approved' | 'denied'
+
+export type BoltzSettings = {
+  access_status: BoltzAccessStatus
+  can_use_self_hosted: boolean
+  requested_at: string | null
+  reviewed_at: string | null
+  provider: BoltzProvider | null
+  credential_id: string | null
+  execution_preference: BoltzExecutionPreference
+  metrics: BoltzMetric[]
+}
+
+export type BoltzSettingsUpdate = {
+  provider: BoltzProvider
+  credential_id?: string
+  execution_preference: BoltzExecutionPreference
+  metrics: BoltzMetric[]
+}
+
+export type AdminBoltzUser = BoltzSettings & {
+  user_id: string
+  email: string
+  username: string
+}
+
+export type ProviderJob = {
+  id: string
+  provider: string
+  execution_kind: string
+  status: string
+  total_items: number
+  completed_items: number
+  failed_items: number
+  error_code: string | null
+  error_message: string | null
+  submitted_at: string
+  last_polled_at: string | null
+  completed_at: string | null
+}
+
 export type RunPlotArtifact = {
   name: string
   path: string
@@ -102,19 +190,37 @@ async function request<T>(path: string, init?: RequestInit, parse: 'json' | 'tex
   
   if (!res.ok) {
     const body = await res.text()
-    throw new Error(body || res.statusText)
+    let message = body || res.statusText
+    try {
+      const payload = JSON.parse(body) as { detail?: unknown }
+      if (typeof payload.detail === 'string') message = payload.detail
+    } catch {
+      // Keep non-JSON response text as the error message.
+    }
+    throw new Error(message)
   }
   if (parse === 'text') {
     return res.text() as unknown as T
   }
+  if (res.status === 204) {
+    return undefined as T
+  }
   return res.json() as Promise<T>
 }
 
-export async function createRun(prompt: string, max_iterations?: number, batch_size?: number, note?: string): Promise<RunInfo> {
+export async function createRun(
+  input: CreateRunRequest | string,
+  max_iterations?: number,
+  batch_size?: number,
+  note?: string
+): Promise<RunInfo> {
+  const payload = typeof input === 'string'
+    ? { prompt: input, max_iterations, batch_size, note }
+    : input
   return request<RunInfo>('/runs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, max_iterations, batch_size, note }),
+    body: JSON.stringify(payload),
   })
 }
 
@@ -125,6 +231,80 @@ export async function listRuns(): Promise<RunInfo[]> {
 
 export async function getRun(id: string): Promise<RunInfo> {
   return request<RunInfo>(`/runs/${id}`)
+}
+
+export async function listRunProviderJobs(id: string): Promise<ProviderJob[]> {
+  return request<ProviderJob[]>(`/runs/${id}/provider-jobs`)
+}
+
+// ==================== Provider Credentials ====================
+
+export async function listProviderCredentials(): Promise<ProviderCredential[]> {
+  return request<ProviderCredential[]>('/provider-credentials')
+}
+
+export async function createProviderCredential(
+  payload: ProviderCredentialCreate
+): Promise<ProviderCredential> {
+  return request<ProviderCredential>('/provider-credentials', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function updateProviderCredential(
+  id: string,
+  payload: ProviderCredentialUpdate
+): Promise<ProviderCredential> {
+  return request<ProviderCredential>(`/provider-credentials/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function validateProviderCredential(id: string): Promise<ProviderCredential> {
+  return request<ProviderCredential>(`/provider-credentials/${id}/validate`, {
+    method: 'POST',
+  })
+}
+
+export async function deleteProviderCredential(id: string): Promise<void> {
+  await request(`/provider-credentials/${id}`, { method: 'DELETE' })
+}
+
+// ==================== Boltz Account Settings ====================
+
+export async function getBoltzSettings(): Promise<BoltzSettings> {
+  return request<BoltzSettings>('/auth/boltz-settings')
+}
+
+export async function requestSelfHostedBoltzAccess(): Promise<BoltzSettings> {
+  return request<BoltzSettings>('/auth/boltz-access-request', { method: 'POST' })
+}
+
+export async function updateBoltzSettings(payload: BoltzSettingsUpdate): Promise<BoltzSettings> {
+  return request<BoltzSettings>('/auth/boltz-settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function listAdminBoltzUsers(): Promise<AdminBoltzUser[]> {
+  return request<AdminBoltzUser[]>('/admin/users/boltz-access')
+}
+
+export async function reviewBoltzAccess(
+  userId: string,
+  status: 'approved' | 'denied'
+): Promise<AdminBoltzUser> {
+  return request<AdminBoltzUser>(`/admin/users/${userId}/boltz-access`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  })
 }
 
 // ==================== Admin Run Inspection ====================
@@ -143,6 +323,14 @@ export async function getAdminRun(id: string): Promise<RunInfo> {
 
 export async function getCheckpoints(id: string): Promise<string[]> {
   return request<string[]>(`/runs/${id}/checkpoints`)
+}
+
+export async function getCheckpointText(id: string, filename: string): Promise<string> {
+  return request<string>(
+    `/runs/${id}/checkpoints/${encodeURIComponent(filename)}`,
+    undefined,
+    'text'
+  )
 }
 
 export async function getRunResults(id: string): Promise<RunResults | null> {
@@ -178,7 +366,7 @@ export function getRunPlotUrl(id: string, plotPath: string): string {
     .map((part) => encodeURIComponent(part))
     .join('/')
 
-  const url = new URL(`${base}/runs/${id}/artifacts/plots/${encodedPath}`)
+  const url = new URL(`${base}/runs/${id}/artifacts/plots/${encodedPath}`, window.location.origin)
   const token = getAccessToken()
   if (token) {
     url.searchParams.set('access_token', token)
@@ -203,7 +391,7 @@ export async function getRunLogs(id: string, limit = 500): Promise<RunEvent[]> {
 
 export function openEventStream(id: string, onEvent: (evt: RunEvent) => void): () => void {
   const base = API_BASE.replace(/\/$/, '')
-  const url = new URL(`${base}/runs/${id}/events`)
+  const url = new URL(`${base}/runs/${id}/events`, window.location.origin)
   const token = getAccessToken()
   if (token) {
     url.searchParams.set('access_token', token)

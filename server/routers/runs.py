@@ -2,11 +2,10 @@
 
 import json
 import os
-import shutil
 import queue
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, Callable, Deque
+from typing import Dict, Any, Callable, Deque, List
 from collections import deque
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -24,14 +23,19 @@ from server.storage import (
     run_dir,
     checkpoint_path,
     list_run_checkpoints,
+    sync_run,
+    delete_run_data,
 )
 from server.services.run_service import run_service
 from server.services.cache_service import cache_service
 from server.experiment_logger import experiment_logger
 from server.audit import audit_logger, AuditEventType, AuditSeverity
 from server.models.session import Session as SessionModel
+from server.models.provider_job import ProviderJob
+from server.schemas.provider_job import ProviderJobResponse
 from server.services.run_events import run_event_hub
 from server.services.run_scheduler import run_scheduler
+from server.services.boltz_access_service import boltz_access_service
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -181,6 +185,12 @@ async def create_run(
 
     Requires authentication.
     """
+    characterization = boltz_access_service.resolve_run_configuration(
+        db,
+        current_user,
+        req.characterization,
+    )
+
     # Include microseconds to avoid collisions
     run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
     paths = ensure_run_dirs(run_id)
@@ -188,6 +198,7 @@ async def create_run(
     note = req.note.strip() if req.note else None
     if note:
         (Path(paths["inputs"]) / "note.txt").write_text(note)
+    sync_run(run_id)
 
     # Create run in database
     session = db.query(SessionModel).filter(
@@ -215,6 +226,7 @@ async def create_run(
         "paths": paths,
         "max_iterations": req.max_iterations,
         "batch_size": req.batch_size,
+        "characterization": characterization.model_dump(mode="json"),
     }
 
     run_model = run_service.create_run(
@@ -335,6 +347,19 @@ def get_run(
     return info
 
 
+@router.get("/{run_id}/provider-jobs", response_model=List[ProviderJobResponse])
+def list_run_provider_jobs(
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+    db: DBSession = Depends(get_db),
+):
+    """List sanitized provider jobs for an authorized run."""
+    check_run_authorization(run_id, current_user, db)
+    return db.query(ProviderJob).filter(
+        ProviderJob.run_id == run_id,
+    ).order_by(ProviderJob.submitted_at.desc()).all()
+
+
 @router.get("/{run_id}/events")
 def sse_events(
     run_id: str,
@@ -394,10 +419,7 @@ def delete_run(
     cache_service.invalidate_run(run_id)
     cache_service.invalidate_user_runs_list(str(current_user.id))
 
-    # Delete files
-    base = run_dir(run_id)
-    if base.exists():
-        shutil.rmtree(base)
+    delete_run_data(run_id)
 
     return {"deleted": True}
 
@@ -546,6 +568,7 @@ def generate_plots(
     except Exception as exc:
         raise HTTPException(500, f"Failed to generate plots: {exc}") from exc
 
+    sync_run(run_id)
     plots = _iter_plot_files(run_id)
     return {
         "generated": True,

@@ -13,6 +13,8 @@ from schemas.errors import NodeError, ToolError
 from schemas.tool_registry import ToolKind, ToolRunRecord, ToolSpec
 from schemas.tool_schemas import BORecommendationRequest, BORecommendationResult
 from utils.telemetry import emit_event
+from schemas.characterization import normalize_property_name
+from tools.boltz import protein_scope_id
 from tools.registry import ToolRegistry, get_tool_registry
 
 def bo_iteration_node(state: WorkflowState) -> Dict[str, Any]:
@@ -194,8 +196,42 @@ def _optimizer_strategy(state: WorkflowState) -> str:
 
 
 def _measurement_data_from_state(state: WorkflowState) -> List[Dict[str, Any]]:
+    optimization_targeted = any(
+        normalize_property_name(target.name) == "boltz_optimization_score"
+        for target in state.targets
+    )
+    active_scope_id = protein_scope_id([
+        protein.model_dump(exclude_none=True)
+        for protein in state.protein_targets
+    ]) if optimization_targeted and state.protein_targets else None
+
+    if optimization_targeted and active_scope_id is None:
+        raise NodeError(
+            "Boltz optimization scores require an active protein target",
+            node="bo_iteration",
+            code="BOLTZ_OPTIMIZATION_SCOPE_MISSING",
+        )
+
     measurement_data: List[Dict[str, Any]] = []
     for result in state.experimental_results:
+        optimization_properties = [
+            name for name in result.properties
+            if normalize_property_name(name) == "boltz_optimization_score"
+        ]
+        if optimization_targeted and optimization_properties:
+            result_scope_id = (result.metadata.get("boltz") or {}).get("protein_scope_id")
+            if result_scope_id != active_scope_id:
+                raise NodeError(
+                    "Boltz optimization scores cannot be combined across protein targets",
+                    node="bo_iteration",
+                    code="BOLTZ_OPTIMIZATION_SCOPE_MISMATCH",
+                    details={
+                        "molecule_id": result.molecule_id,
+                        "expected_scope_id": active_scope_id,
+                        "result_scope_id": result_scope_id,
+                    },
+                )
+
         mol_id = None
         for mid, smiles in state.search_space.items():
             if smiles == result.smiles:

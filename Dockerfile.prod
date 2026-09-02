@@ -25,7 +25,7 @@ WORKDIR /app
 USER root
 
 RUN micromamba run -n sable python -m pip install --upgrade pip \
- && micromamba run -n sable python -m pip install --no-cache \
+ && micromamba run -n sable python -m pip install --no-cache-dir \
     torch==2.8.0 \
     --index-url https://download.pytorch.org/whl/cpu
 
@@ -33,6 +33,7 @@ COPY requirements.txt ./
 COPY constraints-cpu.txt ./
 RUN grep -viE '^(rdkit\b)' requirements.txt > /tmp/requirements.base.txt || true \
  && micromamba run -n sable python -m pip install --no-cache-dir -r /tmp/requirements.base.txt --constraint constraints-cpu.txt \
+ && micromamba run -n sable python -m pip install --no-cache-dir 'baybe[chem]==0.14.1' \
  && rm -f /tmp/requirements.base.txt
 
 

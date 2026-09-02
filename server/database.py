@@ -138,7 +138,7 @@ def init_db():
     Initialize database by creating all tables.
     This is for development only - use Alembic migrations in production.
     """
-    from server.models import user, session as session_model, run, experiment, conversation, audit
+    from server.models import user, session as session_model, run, experiment, conversation, audit, provider_credential, provider_job
     Base.metadata.create_all(bind=engine)
 
 
@@ -147,7 +147,7 @@ async def init_db_async():
     Initialize database asynchronously.
     This is for development only - use Alembic migrations in production.
     """
-    from server.models import user, session as session_model, run, experiment, conversation, audit
+    from server.models import user, session as session_model, run, experiment, conversation, audit, provider_credential, provider_job
     async with async_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

@@ -18,6 +18,7 @@ from server.routers.auth import router as auth_router
 from server.routers.conversations import router as conversations_router
 from server.routers.runs import router as runs_router
 from server.routers.admin import router as admin_router
+from server.routers.provider_credentials import router as provider_credentials_router
 
 
 app = FastAPI(
@@ -55,6 +56,7 @@ app.include_router(auth_router)
 app.include_router(conversations_router)
 app.include_router(runs_router)
 app.include_router(admin_router)
+app.include_router(provider_credentials_router)
 
 
 # ==================== Experiment Logging Endpoints ====================

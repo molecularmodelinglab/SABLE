@@ -213,13 +213,13 @@ class HybridArgumentExtractor:
         targets = []
         for prop, keywords in property_keywords.items():
             if any(kw in prompt_lower for kw in keywords):
-                mode = OptimizationMode.MAXIMIZE
+                spec = self.PROPERTY_CATALOG.get(prop)
+                mode = OptimizationMode(spec.default_mode) if spec else OptimizationMode.MAXIMIZE
                 if prop == 'toxicity' and any(word in prompt_lower for word in ['reduce', 'minimize', 'lower', 'decrease']):
                     mode = OptimizationMode.MINIMIZE
                 elif prop == 'molecular_weight' and any(word in prompt_lower for word in ['reduce', 'minimize', 'lower', 'small']):
                     mode = OptimizationMode.MINIMIZE
 
-                spec = self.PROPERTY_CATALOG.get(prop)
                 if mode == OptimizationMode.MATCH:
                     transformation = "TRIANGULAR"
                 elif mode in [OptimizationMode.MAXIMIZE, OptimizationMode.MINIMIZE]:
@@ -848,25 +848,14 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
     state.protein_targets = validated_proteins
     final_result['proteins'] = serialized_proteins
     
-    # Convert target properties to TargetProperty objects
-    target_dicts = final_result.get('target_properties', []) or []
-
-    if state.protein_targets:
-        has_affinity = any(
-            tp.get('property_name', '').lower() == 'binding_affinity'
-            for tp in target_dicts
-        )
-        if not has_affinity:
-            target_dicts.append({
-                'property_name': 'binding_affinity',
-                'optimization_mode': OptimizationMode.MAXIMIZE.value,
-                'bounds': get_property_catalog().bounds_for('binding_affinity'),
-                'transformation': 'LINEAR',
-                'weight': 0.0,
-                'source': 'auto_boltz'
-            })
-            final_result['target_properties'] = target_dicts
-            final_result.setdefault('auto_added_targets', []).append('binding_affinity')
+    # Resolve semantic binding intent against the configured runtime backend.
+    target_dicts, auto_added_boltz_target = _resolve_boltz_objective_targets(
+        final_result.get('target_properties', []) or [],
+        state,
+        ensure_primary=bool(state.protein_targets),
+    )
+    if auto_added_boltz_target:
+        final_result.setdefault('auto_added_targets', []).append(auto_added_boltz_target)
 
     if target_dicts:
         equal_weight = 1.0 / len(target_dicts)
@@ -937,3 +926,55 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
     })
     
     return state
+
+
+def _resolve_boltz_objective_targets(
+    targets: List[Dict[str, Any]],
+    state: WorkflowState,
+    *,
+    ensure_primary: bool,
+) -> tuple[List[Dict[str, Any]], Optional[str]]:
+    """Map binding intent to the objective emitted by the configured Boltz backend."""
+    boltz_config = state.characterization_config.get('boltz', {}) or {}
+    provider = str(boltz_config.get('provider', 'self_hosted')).strip().lower()
+    if provider == 'platform':
+        property_name = 'boltz_optimization_score'
+        mode = OptimizationMode.MAXIMIZE
+    else:
+        property_name = 'binding_affinity'
+        mode = OptimizationMode.MINIMIZE
+
+    catalog = get_property_catalog()
+    primary_names = {'binding_affinity', 'boltz_optimization_score'}
+    resolved: List[Dict[str, Any]] = []
+    primary_found = False
+
+    for target in targets:
+        normalized_name = catalog.normalize(target.get('property_name', ''))
+        if normalized_name not in primary_names:
+            resolved.append(target)
+            continue
+        if primary_found:
+            continue
+        resolved.append({
+            **target,
+            'property_name': property_name,
+            'optimization_mode': mode.value,
+            'bounds': catalog.bounds_for(property_name),
+            'transformation': 'LINEAR',
+        })
+        primary_found = True
+
+    auto_added = None
+    if ensure_primary and not primary_found:
+        resolved.append({
+            'property_name': property_name,
+            'optimization_mode': mode.value,
+            'bounds': catalog.bounds_for(property_name),
+            'transformation': 'LINEAR',
+            'weight': 0.0,
+            'source': 'auto_boltz',
+        })
+        auto_added = property_name
+
+    return resolved, auto_added

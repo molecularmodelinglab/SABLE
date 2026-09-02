@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { registerUser, login } from '../api'
-import '../index.css'
+import { CircleAlert, LoaderCircle } from 'lucide-react'
 
 export function RegisterPage() {
   const navigate = useNavigate()
@@ -37,7 +37,7 @@ export function RegisterPage() {
 
       // Automatically sign in after successful registration
       await login({ email: email.trim(), password })
-      navigate('/', { replace: true })
+      navigate('/dashboard', { replace: true })
     } catch (err) {
       const message = (err as Error).message
       setError(message || 'Registration failed')
@@ -47,7 +47,7 @@ export function RegisterPage() {
   }
 
   return (
-    <div style={{
+    <div className="auth-page" style={{
       minHeight: '100vh',
       display: 'flex',
       alignItems: 'center',
@@ -55,7 +55,7 @@ export function RegisterPage() {
       backgroundColor: '#f5f5f5',
       padding: '1rem'
     }}>
-      <div style={{
+      <div className="auth-card" style={{
         maxWidth: '500px',
         width: '100%',
         padding: '3rem 2rem',
@@ -64,23 +64,20 @@ export function RegisterPage() {
         boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
       }}>
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <h1 style={{
+          <h1 className="auth-title" style={{
             fontSize: '2.5rem',
             fontWeight: 'bold',
             marginBottom: '0.5rem',
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            backgroundClip: 'text'
+            color: '#13294B'
           }}>
-            🦎 Create an account
+            Create an account
           </h1>
           <p style={{ color: '#666', fontSize: '0.95rem' }}>
             Register to launch and monitor molecular optimization campaigns.
           </p>
         </div>
 
-        <form onSubmit={handleSubmit}>
+        <form className="auth-form" onSubmit={handleSubmit}>
           <div style={{ marginBottom: '1.5rem' }}>
             <label style={{
               display: 'block',
@@ -107,7 +104,7 @@ export function RegisterPage() {
                 transition: 'border-color 0.2s',
                 outline: 'none'
               }}
-              onFocus={(e) => e.target.style.borderColor = '#667eea'}
+              onFocus={(e) => e.target.style.borderColor = '#4B9CD3'}
               onBlur={(e) => e.target.style.borderColor = '#e0e0e0'}
             />
           </div>
@@ -137,7 +134,7 @@ export function RegisterPage() {
                 transition: 'border-color 0.2s',
                 outline: 'none'
               }}
-              onFocus={(e) => e.target.style.borderColor = '#667eea'}
+              onFocus={(e) => e.target.style.borderColor = '#4B9CD3'}
               onBlur={(e) => e.target.style.borderColor = '#e0e0e0'}
             />
           </div>
@@ -167,7 +164,7 @@ export function RegisterPage() {
                 transition: 'border-color 0.2s',
                 outline: 'none'
               }}
-              onFocus={(e) => e.target.style.borderColor = '#667eea'}
+              onFocus={(e) => e.target.style.borderColor = '#4B9CD3'}
               onBlur={(e) => e.target.style.borderColor = '#e0e0e0'}
             />
             <p style={{
@@ -204,13 +201,13 @@ export function RegisterPage() {
                 transition: 'border-color 0.2s',
                 outline: 'none'
               }}
-              onFocus={(e) => e.target.style.borderColor = '#667eea'}
+              onFocus={(e) => e.target.style.borderColor = '#4B9CD3'}
               onBlur={(e) => e.target.style.borderColor = '#e0e0e0'}
             />
           </div>
 
           {error && (
-            <div style={{
+            <div className="auth-error" style={{
               padding: '0.75rem 1rem',
               marginBottom: '1.5rem',
               backgroundColor: '#fee',
@@ -222,18 +219,19 @@ export function RegisterPage() {
               alignItems: 'center',
               gap: '0.5rem'
             }}>
-              <span>⚠️</span>
+              <CircleAlert size={18} aria-hidden="true" />
               <span>{error}</span>
             </div>
           )}
 
           <button
+            className="auth-submit"
             type="submit"
             disabled={loading}
             style={{
               width: '100%',
               padding: '0.875rem',
-              backgroundColor: loading ? '#999' : '#667eea',
+              backgroundColor: loading ? 'rgba(19, 41, 75, 0.45)' : '#4B9CD3',
               color: 'white',
               border: 'none',
               borderRadius: '8px',
@@ -241,26 +239,22 @@ export function RegisterPage() {
               fontWeight: 600,
               cursor: loading ? 'not-allowed' : 'pointer',
               transition: 'all 0.2s',
-              boxShadow: loading ? 'none' : '0 2px 4px rgba(102, 126, 234, 0.4)',
+              boxShadow: 'none',
             }}
             onMouseOver={(e) => {
               if (!loading) {
-                e.currentTarget.style.backgroundColor = '#5568d3'
-                e.currentTarget.style.transform = 'translateY(-1px)'
-                e.currentTarget.style.boxShadow = '0 4px 8px rgba(102, 126, 234, 0.5)'
+                e.currentTarget.style.backgroundColor = '#13294B'
               }
             }}
             onMouseOut={(e) => {
               if (!loading) {
-                e.currentTarget.style.backgroundColor = '#667eea'
-                e.currentTarget.style.transform = 'translateY(0)'
-                e.currentTarget.style.boxShadow = '0 2px 4px rgba(102, 126, 234, 0.4)'
+                e.currentTarget.style.backgroundColor = '#4B9CD3'
               }
             }}
           >
             {loading ? (
               <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-                <span style={{ animation: 'spin 1s linear infinite' }}>⏳</span>
+                <LoaderCircle size={18} style={{ animation: 'spin 1s linear infinite' }} aria-hidden="true" />
                 Creating account...
               </span>
             ) : (
@@ -269,7 +263,7 @@ export function RegisterPage() {
           </button>
         </form>
 
-        <div style={{
+        <div className="auth-footer" style={{
           marginTop: '2rem',
           padding: '1rem',
           backgroundColor: '#f8f9fa',

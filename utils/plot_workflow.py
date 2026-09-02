@@ -277,14 +277,21 @@ def rdkit_descriptors(smiles: str) -> Dict[str, float]:
 
 def get_opt_directions(raw: dict) -> dict[str, str]:
     """
-    Returns {prop_name_normalized: 'min'|'max'} from raw['parsed_arguments']['target_properties'].
-    Assumes rawp['parsed_arguments']['target_properties'] entries contain fields: 'property_name' 
-    and 'optimization_mode' (MIN/MAX).
+    Return resolved optimization targets, falling back to extracted arguments.
     """
     d = {}
-    for t in raw["parsed_arguments"]["target_properties"]:
-        name = _norm_key(t["property_name"])
-        mode = str(t["optimization_mode"]).strip().lower()  # "min" or "max" (or "MIN"/"MAX")
+    targets = raw.get("targets") or []
+    if targets:
+        target_fields = ((target["name"], target["mode"]) for target in targets)
+    else:
+        target_fields = (
+            (target["property_name"], target["optimization_mode"])
+            for target in raw["parsed_arguments"]["target_properties"]
+        )
+
+    for target_name, target_mode in target_fields:
+        name = _norm_key(target_name)
+        mode = str(target_mode).strip().lower()
         d[name] = "min" if "min" in mode else "max"
     return d
 

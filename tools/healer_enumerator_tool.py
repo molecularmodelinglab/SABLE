@@ -52,6 +52,14 @@ class HealerEnumeratorTool(BaseTool):
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
     STOCK: ClassVar[str] = "US_stock"
+    IN_PROGRESS_API_STATUSES: ClassVar[frozenset[str]] = frozenset({
+        "pending",
+        "received",
+        "started",
+        "progress",
+        "retry",
+    })
+
     def __init__(
         self,
         healer_mode: str = "MoleculeHEALER",
@@ -288,7 +296,7 @@ class HealerEnumeratorTool(BaseTool):
         output_dir = Path(self.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         safe_job_id = "".join(character for character in str(job_id) if character.isalnum() or character in {"-", "_"})
-        csv_path = output_dir / f"healer_{safe_job_id}.csv"
+        csv_path = output_dir / f"molecular_enumerations_{safe_job_id}.csv"
         results_df.to_csv(csv_path, index=False)
 
         products = results_df["Product"].dropna().astype(str).drop_duplicates().tolist()
@@ -327,10 +335,10 @@ class HealerEnumeratorTool(BaseTool):
             status = str(response.get("status", "")).strip().lower()
             if status == "success":
                 return response
-            if status == "failure":
+            if status in {"failure", "revoked"}:
                 message = response.get("error") or "HEALER API job failed"
                 raise ToolError(str(message), tool="healer", code="API_JOB_FAILED", details={"job_id": job_id})
-            if status != "progress":
+            if status not in self.IN_PROGRESS_API_STATUSES:
                 raise ToolError(
                     f"HEALER API returned unknown job status {response.get('status')!r}",
                     tool="healer",

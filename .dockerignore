@@ -13,6 +13,8 @@ __pycache__/
 
 # Environments
 .env
+.env.*
+!.env.example
 .sable_auth_token.json
 .venv/
 .conda/
@@ -27,6 +29,7 @@ results.json
 # Logs
 *.log
 logs/
+secrets/
 
 # OS
 .DS_Store
@@ -38,6 +41,9 @@ legacy/
 site/
 dist/
 build/
+ui/dist/
+ui/node_modules/
+**/node_modules/
 
 # Healer large data (if any)
 # healer/data/

@@ -4,6 +4,7 @@ Characterize molecules using the selected tool(s).
 
 from typing import Dict, Any, List
 import asyncio
+import hashlib
 import time
 import sys
 import os
@@ -21,7 +22,54 @@ from schemas.characterization import (
     normalize_property_name,
     select_characterization_tool_ids,
 )
+from tools.boltz import (
+    BoltzExecutionKind,
+    BoltzJobStatus,
+    BoltzMolecule,
+    BoltzPlatformAdapter,
+    BoltzPlatformError,
+    BoltzProvider,
+    BoltzRequest,
+    canonical_properties,
+    normalize_self_hosted_results,
+    protein_scope_id,
+)
 from tools.registry import get_tool_registry
+
+
+def _map_target_properties(
+    targets: List[Any],
+    result_properties: Dict[str, Any],
+) -> Dict[str, float]:
+    mapped_properties: Dict[str, float] = {}
+    for target in targets:
+        target_name_lower = normalize_property_name(target.name)
+
+        found = False
+        for result_key, result_value in result_properties.items():
+            result_key_lower = normalize_property_name(result_key)
+
+            if result_key_lower == target_name_lower:
+                mapped_properties[target.name] = float(result_value)
+                found = True
+                break
+
+            if target_name_lower in PROPERTY_MAPPINGS:
+                rdkit_name, stoplight_name = PROPERTY_MAPPINGS[target_name_lower]
+                if (rdkit_name and normalize_property_name(rdkit_name) == result_key_lower) or \
+                   (stoplight_name and normalize_property_name(stoplight_name) == result_key_lower):
+                    mapped_properties[target.name] = float(result_value)
+                    found = True
+                    break
+
+        if not found:
+            for result_key, result_value in result_properties.items():
+                result_key_lower = normalize_property_name(result_key)
+                if target_name_lower in result_key_lower or result_key_lower in target_name_lower:
+                    mapped_properties[target.name] = float(result_value)
+                    break
+
+    return mapped_properties
 
 
 def _protein_target_to_polymer(protein: ProteinTarget) -> Dict[str, Any]:
@@ -158,8 +206,11 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                 continue
 
             tool_started_at = time.perf_counter()
-            tool = _create_characterization_tool(registry, spec, request)
-            result = _run_characterization_tool(spec, tool, request)
+            if tool_id == "boltz" and _boltz_provider(state) == "platform":
+                result = _run_boltz_platform_characterization(state, request)
+            else:
+                tool = _create_characterization_tool(registry, spec, request)
+                result = _run_characterization_tool(spec, tool, request)
             _merge_characterization_result(results, boltz_metadata, result)
             tools_executed.append(tool_id)
 
@@ -241,40 +292,7 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
     for mol_id in result_molecule_ids:
         smiles = characterization_smiles_map.get(mol_id) or state.search_space.get(mol_id)
         if smiles and mol_id in results:
-            
-            # Map properties to target names
-            mapped_properties = {}
-            for target in state.targets:
-                target_name_lower = normalize_property_name(target.name)
-                
-                # Try to find the property in results
-                found = False
-                for result_key, result_value in results[mol_id].items():
-                    result_key_lower = normalize_property_name(result_key)
-                    
-                    # Direct match
-                    if result_key_lower == target_name_lower:
-                        mapped_properties[target.name] = float(result_value)
-                        found = True
-                        break
-                    
-                    # Check mappings
-                    if target_name_lower in PROPERTY_MAPPINGS:
-                        rdkit_name, stoplight_name = PROPERTY_MAPPINGS[target_name_lower]
-                        if (rdkit_name and normalize_property_name(rdkit_name) == result_key_lower) or \
-                           (stoplight_name and normalize_property_name(stoplight_name) == result_key_lower):
-                            mapped_properties[target.name] = float(result_value)
-                            found = True
-                            break
-                
-                # If not found, try to get any similar property
-                if not found:
-                    # Look for partial matches
-                    for result_key, result_value in results[mol_id].items():
-                        if target_name_lower in normalize_property_name(result_key) or \
-                           normalize_property_name(result_key) in target_name_lower:
-                            mapped_properties[target.name] = float(result_value)
-                            break
+            mapped_properties = _map_target_properties(state.targets, results[mol_id])
             
             # Create ExperimentResult
             if mapped_properties:
@@ -360,7 +378,8 @@ def _build_characterization_request(
                 code="BOLTZ_MISSING_PROTEINS",
             )
         proteins_payload = [_protein_target_to_polymer(protein) for protein in proteins]
-        tool_options = _boltz_tool_options(state)
+        if _boltz_provider(state) != "platform":
+            tool_options = _boltz_tool_options(state)
 
     smiles_by_id = {
         mol_id: characterization_search_space.get(mol_id) or characterization_smiles_map.get(mol_id)
@@ -491,6 +510,225 @@ def _boltz_tool_options(state: WorkflowState) -> Dict[str, Any]:
     }
 
 
+def _boltz_provider(state: WorkflowState) -> str:
+    config = state.characterization_config.get("boltz", {}) or {}
+    return str(config.get("provider", "self_hosted"))
+
+
+def _run_boltz_platform_characterization(
+    state: WorkflowState,
+    request: CharacterizationRequest,
+) -> CharacterizationResult:
+    from server.database import get_db_context
+    from server.services.credential_service import credential_service
+    from server.services.provider_job_service import provider_job_service
+
+    config = state.characterization_config.get("boltz", {}) or {}
+    execution = state.extensions.get("execution", {}) or {}
+    run_id = execution.get("run_id")
+    user_id = execution.get("user_id")
+    credential_id = config.get("credential_id")
+    if not run_id or not user_id or not credential_id:
+        raise NodeError(
+            "Boltz Platform execution context is incomplete",
+            node="characterize_molecules",
+            code="BOLTZ_PLATFORM_CONTEXT_MISSING",
+        )
+
+    preference = config.get("execution_preference", "auto")
+    if preference == "prediction":
+        raise NodeError(
+            "Boltz Platform prediction execution is not supported yet",
+            node="characterize_molecules",
+            code="BOLTZ_PLATFORM_EXECUTION_UNSUPPORTED",
+        )
+
+    scope_id = protein_scope_id(request.proteins)
+    platform_request = BoltzRequest(
+        provider=BoltzProvider.PLATFORM,
+        execution_kind=BoltzExecutionKind.LIBRARY_SCREEN,
+        molecules=[
+            BoltzMolecule(id=molecule_id, smiles=smiles)
+            for molecule_id, smiles in request.search_space.items()
+        ],
+        proteins=request.proteins,
+        protein_scope_id=scope_id,
+    )
+    idempotency_payload = json.dumps(
+        {
+            "run_id": run_id,
+            "molecules": [molecule.model_dump(mode="json") for molecule in platform_request.molecules],
+            "protein_scope_id": scope_id,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    platform_request = platform_request.model_copy(update={
+        "options": {
+            "idempotency_key": f"sable-{hashlib.sha256(idempotency_payload).hexdigest()}"
+        }
+    })
+
+    result_rows = None
+    with get_db_context() as db:
+        existing_job = provider_job_service.find_for_request(
+            db,
+            run_id=run_id,
+            request=platform_request,
+        )
+        if (
+            existing_job is not None
+            and existing_job.status == BoltzJobStatus.SUCCEEDED.value
+            and existing_job.completed_items + existing_job.failed_items >= existing_job.total_items
+        ):
+            result_rows = provider_job_service.load_results(existing_job)
+
+        credential = credential_service.get_owned(db, credential_id, user_id)
+        if result_rows is None and (credential is None or credential.status != "active"):
+            raise NodeError(
+                "An active owned Boltz Platform credential is required",
+                node="characterize_molecules",
+                code="BOLTZ_PLATFORM_CREDENTIAL_INVALID",
+            )
+        api_key = (
+            credential_service.decrypt(credential.encrypted_secret)
+            if result_rows is None
+            else None
+        )
+        submission = (
+            provider_job_service.submission_for(existing_job, platform_request)
+            if existing_job is not None
+            else None
+        )
+        provider_job_id = existing_job.id if existing_job is not None else None
+
+    if result_rows is None:
+        artifacts_dir = (state.run_paths or {}).get("artifacts")
+        artifact_root = Path(artifacts_dir) / "boltz_platform" if artifacts_dir else None
+        adapter = BoltzPlatformAdapter(api_key, artifact_root=artifact_root)
+        result_rows = asyncio.run(_execute_boltz_platform_job(
+            adapter=adapter,
+            request=platform_request,
+            submission=submission,
+            run_id=run_id,
+            user_id=user_id,
+            credential_id=credential_id,
+            provider_job_id=provider_job_id,
+        ))
+
+    results: Dict[str, Dict[str, Any]] = {}
+    per_molecule_metadata: Dict[str, Dict[str, Any]] = {}
+    failed_molecules: List[str] = []
+    for row in result_rows:
+        if row.status == BoltzJobStatus.SUCCEEDED:
+            results[row.molecule_id] = canonical_properties(row.metrics)
+        else:
+            failed_molecules.append(row.molecule_id)
+        per_molecule_metadata[row.molecule_id] = {
+            "protein_scope_id": scope_id,
+            "provider": BoltzProvider.PLATFORM.value,
+            "provider_result_id": row.provider_result_id,
+            "job_id": row.provider_result_id,
+            "warnings": list(row.warnings),
+            "reliability_weighted": False,
+            "structure_path": row.structure_path,
+            "cif_file": row.structure_path,
+        }
+
+    missing = set(request.molecule_ids) - set(results) - set(failed_molecules)
+    failed_molecules.extend(sorted(missing))
+    return CharacterizationResult(
+        results=results,
+        failed_molecules=failed_molecules,
+        metadata={
+            "provider": BoltzProvider.PLATFORM.value,
+            "protein_scope_id": scope_id,
+            "per_molecule_metadata": per_molecule_metadata,
+            "per_ligand": per_molecule_metadata,
+        },
+    )
+
+
+async def _execute_boltz_platform_job(
+    *,
+    adapter: BoltzPlatformAdapter,
+    request: BoltzRequest,
+    submission: Any,
+    run_id: str,
+    user_id: str,
+    credential_id: str,
+    provider_job_id: Any,
+) -> List[Any]:
+    from server.database import get_db_context
+    from server.models.provider_job import ProviderJob
+    from server.services.provider_job_service import provider_job_service
+
+    if submission is None:
+        submission = await adapter.submit(request)
+        with get_db_context() as db:
+            job = provider_job_service.create(
+                db,
+                run_id=run_id,
+                user_id=user_id,
+                credential_id=credential_id,
+                request=request,
+                submission=submission,
+            )
+            provider_job_id = job.id
+            db.commit()
+
+    poll_interval = max(float(os.getenv("BOLTZ_PLATFORM_POLL_INTERVAL", "5")), 0.0)
+    while submission.status not in {
+        BoltzJobStatus.SUCCEEDED,
+        BoltzJobStatus.FAILED,
+        BoltzJobStatus.STOPPED,
+    }:
+        status = await adapter.poll(submission)
+        submission = submission.model_copy(update={"status": status})
+        persisted_status = (
+            BoltzJobStatus.RUNNING.value
+            if status == BoltzJobStatus.SUCCEEDED
+            else status.value
+        )
+        with get_db_context() as db:
+            job = db.query(ProviderJob).filter(ProviderJob.id == provider_job_id).one()
+            provider_job_service.update_status(db, job, persisted_status)
+            db.commit()
+
+        if status == BoltzJobStatus.RUNNING:
+            try:
+                partial_results = await adapter.collect_results(submission)
+            except BoltzPlatformError:
+                partial_results = []
+            if partial_results:
+                with get_db_context() as db:
+                    job = db.query(ProviderJob).filter(ProviderJob.id == provider_job_id).one()
+                    provider_job_service.store_results(db, job, partial_results)
+                    db.commit()
+
+        if status not in {
+            BoltzJobStatus.SUCCEEDED,
+            BoltzJobStatus.FAILED,
+            BoltzJobStatus.STOPPED,
+        }:
+            await asyncio.sleep(poll_interval)
+
+    if submission.status != BoltzJobStatus.SUCCEEDED:
+        raise NodeError(
+            f"Boltz Platform job ended with status {submission.status.value}",
+            node="characterize_molecules",
+            code="BOLTZ_PLATFORM_JOB_FAILED",
+        )
+
+    results = await adapter.collect_results(submission)
+    with get_db_context() as db:
+        job = db.query(ProviderJob).filter(ProviderJob.id == provider_job_id).one()
+        provider_job_service.store_results(db, job, results)
+        provider_job_service.update_status(db, job, BoltzJobStatus.SUCCEEDED.value)
+        db.commit()
+    return results
+
+
 def _create_characterization_tool(registry: Any, spec: ToolSpec, request: CharacterizationRequest) -> Any:
     if spec.id == "boltz":
         tool_config = {
@@ -561,34 +799,23 @@ def _run_boltz_characterization_tool(tool: Any, request: CharacterizationRequest
         response_data = response
 
     per_ligand = response_data.get('per_ligand', {}) if isinstance(response_data, dict) else {}
+    scope_id = protein_scope_id(request.proteins)
+    normalized_results = normalize_self_hosted_results(per_ligand, scope_id)
     results: Dict[str, Dict[str, Any]] = {}
     per_molecule_metadata: Dict[str, Dict[str, Any]] = {}
 
-    for ligand_id, info in per_ligand.items():
-        affinity = info.get('affinity') if isinstance(info, dict) else None
-        if affinity is None:
+    for normalized in normalized_results:
+        if normalized.status != BoltzJobStatus.SUCCEEDED:
             continue
-
-        if isinstance(affinity, dict):
-            affinity_value = affinity.get('affinity_pred_value')
-            if affinity_value is None:
-                for value in affinity.values():
-                    if isinstance(value, (int, float)):
-                        affinity_value = value
-                        break
-            if affinity_value is None:
-                continue
-        else:
-            affinity_value = affinity
-
-        results.setdefault(ligand_id, {})
-        results[ligand_id]['binding_affinity'] = float(affinity_value)
-        per_molecule_metadata[ligand_id] = {
-            **info,
+        results[normalized.molecule_id] = canonical_properties(normalized.metrics)
+        raw_info = per_ligand.get(normalized.molecule_id, {})
+        per_molecule_metadata[normalized.molecule_id] = {
+            **(raw_info if isinstance(raw_info, dict) else {}),
+            'protein_scope_id': scope_id,
             'reliability_weighted': False,
         }
 
-    missing_affinity = set(request.search_space.keys()) - set(per_ligand.keys())
+    missing_affinity = set(request.search_space.keys()) - set(results.keys())
     if missing_affinity:
         raise NodeError(
             "Boltz did not return affinity for all requested ligands",
@@ -603,6 +830,7 @@ def _run_boltz_characterization_tool(tool: Any, request: CharacterizationRequest
         metadata={
             "per_ligand": per_ligand,
             "per_molecule_metadata": per_molecule_metadata,
+            "protein_scope_id": scope_id,
         },
     )
 

@@ -1,7 +1,9 @@
 import { FormEvent, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { createRun } from '../api'
+import {
+  createRun,
+} from '../api'
 
 const EXAMPLE_PROMPTS = [
   {
@@ -9,12 +11,8 @@ const EXAMPLE_PROMPTS = [
     prompt: 'Starting from [ligand] design a selective small-molecule inhibitor for [target] with oral drug-like properties.',
   },
   {
-    title: 'Analog exploration',
-    prompt: 'Find purchasable building blocks suitable for synthesizing analogs of [compound or scaffold].',
-  },
-  {
     title: 'Candidate prioritization',
-    prompt: 'Evaluate candidate compounds against [protein target] and optimize for binding, ADMET, and synthetic accessibility.',
+    prompt: "I'm working on a compound [ligand]. Use this as seed to evaluate candidate compounds against [protein target] and optimize for binding, ADMET, and synthetic accessibility.",
   },
 ]
 
@@ -36,12 +34,13 @@ export function NewRunPage() {
     event.preventDefault()
     const trimmedPrompt = prompt.trim()
     if (!trimmedPrompt || isSubmitting) return
-
     setIsSubmitting(true)
     setError(null)
 
     try {
-      const run = await createRun(trimmedPrompt)
+      const run = await createRun({
+        prompt: trimmedPrompt,
+      })
       await queryClient.invalidateQueries({ queryKey: ['runs'] })
       navigate(`/runs/${run.id}`)
     } catch (submissionError) {

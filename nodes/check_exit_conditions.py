@@ -6,6 +6,7 @@ from typing import Dict, Any
 import time
 from schemas.state import WorkflowState, WorkflowStatus
 from utils.telemetry import emit_event
+from utils.objective_ranking import build_optimization_report
 
 
 def _record_iteration_timing(state: WorkflowState) -> None:
@@ -55,26 +56,41 @@ def check_exit_conditions_node(state: WorkflowState) -> Dict[str, Any]:
         state.log("check_exit_conditions_max_iterations")
         return state
     
-    # Check convergence based on best molecule scores
-    if len(state.best_molecules) >= 5:
-        # Check if top molecules haven't changed significantly
-        recent_scores = [score for _, score in state.best_molecules[:5]]
-        if len(set(recent_scores)) == 1:  # All same score
-            _record_iteration_timing(state)
-            state.exit_reason = "Convergence detected - top molecules have identical scores"
-            state.status = WorkflowStatus.COMPLETED
-            state.log("check_exit_conditions_converged")
-            return state
-        
-        # Check if improvement is minimal
-        if len(state.bo_rounds) >= 3:
-            score_improvement = max(recent_scores) - min(recent_scores)
-            if score_improvement < 0.01:  # Less than 1% improvement
+    report = build_optimization_report(state)
+    ranking_history = state.profiling.setdefault("ranking_history", [])
+    best = next((item for item in report["rankings"] if item["rank"] == 1), None)
+    snapshot = {
+        "iteration": state.current_iteration,
+        "strategy": report["strategy"],
+        "best_metric": _best_scalar_metric(state, report, best),
+        "pareto_front": sorted(
+            item["molecule_id"]
+            for item in report["rankings"]
+            if item["pareto_front"] == 1
+        ),
+    }
+    if ranking_history and ranking_history[-1].get("iteration") == state.current_iteration:
+        ranking_history[-1] = snapshot
+    else:
+        ranking_history.append(snapshot)
+
+    if report["strategy"] != "pareto" and len(ranking_history) >= 3:
+        recent = ranking_history[-3:]
+        metrics = [item.get("best_metric") for item in recent]
+        if all(metric is not None for metric in metrics):
+            threshold = state.bo_config.convergence_threshold if state.bo_config else 1e-6
+            improvement = float(metrics[-1]) - float(metrics[0])
+            if improvement <= float(threshold):
                 _record_iteration_timing(state)
-                state.exit_reason = "Convergence detected - minimal improvement in recent iterations"
+                state.exit_reason = (
+                    "Convergence detected - best objective improvement "
+                    f"{improvement:.6g} did not exceed {float(threshold):.6g} over 3 iterations"
+                )
                 state.status = WorkflowStatus.COMPLETED
                 state.log("check_exit_conditions_minimal_improvement", {
-                    "score_improvement": score_improvement
+                    "score_improvement": improvement,
+                    "threshold": float(threshold),
+                    "ranking_strategy": report["strategy"],
                 })
                 return state
 
@@ -117,5 +133,26 @@ def check_exit_conditions_node(state: WorkflowState) -> Dict[str, Any]:
         "molecules_tested": len(tested_smiles),
         "molecules_remaining": len(remaining)
     })
-    
     return state
+
+
+def _best_scalar_metric(
+    state: WorkflowState,
+    report: Dict[str, Any],
+    best: Dict[str, Any] | None,
+) -> float | None:
+    if best is None or not state.targets:
+        return None
+    if report["strategy"] != "single":
+        return best["aggregate_score"]
+
+    target = state.targets[0]
+    value = best["objective_values"].get(target.name)
+    if value is None:
+        return None
+    mode = target.mode.value if hasattr(target.mode, "value") else str(target.mode)
+    if mode == "MIN":
+        return -float(value)
+    if mode == "MATCH":
+        return best["aggregate_score"]
+    return float(value)

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { login, getAccessToken } from '../api'
-import '../index.css'
+import { CircleAlert, Info, LoaderCircle } from 'lucide-react'
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -14,7 +14,7 @@ export function LoginPage() {
   useEffect(() => {
     const token = getAccessToken()
     if (token) {
-      navigate('/', { replace: true })
+      navigate('/dashboard', { replace: true })
     }
   }, [navigate])
 
@@ -41,7 +41,7 @@ export function LoginPage() {
       })
       
       // Redirect to dashboard
-      navigate('/', { replace: true })
+      navigate('/dashboard', { replace: true })
     } catch (err) {
       setError((err as Error).message || 'Login failed')
     } finally {
@@ -50,7 +50,7 @@ export function LoginPage() {
   }
 
   return (
-    <div style={{
+    <div className="auth-page" style={{
       minHeight: '100vh',
       display: 'flex',
       alignItems: 'center',
@@ -58,7 +58,7 @@ export function LoginPage() {
       backgroundColor: '#f5f5f5',
       padding: '1rem'
     }}>
-      <div style={{
+      <div className="auth-card" style={{
         maxWidth: '450px',
         width: '100%',
         padding: '3rem 2rem',
@@ -67,23 +67,20 @@ export function LoginPage() {
         boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
       }}>
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <h1 style={{
+          <h1 className="auth-title" style={{
             fontSize: '2.5rem',
             fontWeight: 'bold',
             marginBottom: '0.5rem',
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            backgroundClip: 'text'
+            color: '#13294B'
           }}>
              SABLE
           </h1>
           <p style={{ color: '#666', fontSize: '0.95rem' }}>
-            LIgand optimiZation via Agentic Research and Discovery
+            Synthetically-accessible Agentic Bayesian Ligand Exploration
           </p>
         </div>
 
-        <form onSubmit={handleSubmit}>
+        <form className="auth-form" onSubmit={handleSubmit}>
           <div style={{ marginBottom: '1.5rem' }}>
             <label style={{
               display: 'block',
@@ -110,7 +107,7 @@ export function LoginPage() {
                 transition: 'border-color 0.2s',
                 outline: 'none'
               }}
-              onFocus={(e) => e.target.style.borderColor = '#667eea'}
+              onFocus={(e) => e.target.style.borderColor = '#4B9CD3'}
               onBlur={(e) => e.target.style.borderColor = '#e0e0e0'}
             />
           </div>
@@ -140,13 +137,13 @@ export function LoginPage() {
                 transition: 'border-color 0.2s',
                 outline: 'none'
               }}
-              onFocus={(e) => e.target.style.borderColor = '#667eea'}
+              onFocus={(e) => e.target.style.borderColor = '#4B9CD3'}
               onBlur={(e) => e.target.style.borderColor = '#e0e0e0'}
             />
           </div>
 
           {error && (
-            <div style={{
+            <div className="auth-error" style={{
               padding: '0.75rem 1rem',
               marginBottom: '1.5rem',
               backgroundColor: '#fee',
@@ -158,18 +155,19 @@ export function LoginPage() {
               alignItems: 'center',
               gap: '0.5rem'
             }}>
-              <span>⚠️</span>
+              <CircleAlert size={18} aria-hidden="true" />
               <span>{error}</span>
             </div>
           )}
 
           <button
+            className="auth-submit"
             type="submit"
             disabled={loading}
             style={{
               width: '100%',
               padding: '0.875rem',
-              backgroundColor: loading ? '#999' : '#667eea',
+              backgroundColor: loading ? 'rgba(19, 41, 75, 0.45)' : '#4B9CD3',
               color: 'white',
               border: 'none',
               borderRadius: '8px',
@@ -177,26 +175,22 @@ export function LoginPage() {
               fontWeight: 600,
               cursor: loading ? 'not-allowed' : 'pointer',
               transition: 'all 0.2s',
-              boxShadow: loading ? 'none' : '0 2px 4px rgba(102, 126, 234, 0.4)',
+              boxShadow: 'none',
             }}
             onMouseOver={(e) => {
               if (!loading) {
-                e.currentTarget.style.backgroundColor = '#5568d3'
-                e.currentTarget.style.transform = 'translateY(-1px)'
-                e.currentTarget.style.boxShadow = '0 4px 8px rgba(102, 126, 234, 0.5)'
+                e.currentTarget.style.backgroundColor = '#13294B'
               }
             }}
             onMouseOut={(e) => {
               if (!loading) {
-                e.currentTarget.style.backgroundColor = '#667eea'
-                e.currentTarget.style.transform = 'translateY(0)'
-                e.currentTarget.style.boxShadow = '0 2px 4px rgba(102, 126, 234, 0.4)'
+                e.currentTarget.style.backgroundColor = '#4B9CD3'
               }
             }}
           >
             {loading ? (
               <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-                <span style={{ animation: 'spin 1s linear infinite' }}>⏳</span>
+                <LoaderCircle size={18} style={{ animation: 'spin 1s linear infinite' }} aria-hidden="true" />
                 Logging in...
               </span>
             ) : (
@@ -205,7 +199,7 @@ export function LoginPage() {
           </button>
         </form>
 
-        <div style={{
+        <div className="auth-footer" style={{
           marginTop: '2rem',
           padding: '1rem',
           backgroundColor: '#f8f9fa',
@@ -214,7 +208,7 @@ export function LoginPage() {
           color: '#666'
         }}>
           <p style={{ margin: 0, marginBottom: '0.5rem', fontWeight: 600 }}>
-            ℹ️ Session Information:
+            <Info size={16} style={{ verticalAlign: 'text-bottom', marginRight: '0.35rem' }} aria-hidden="true" /> Session Information:
           </p>
           <ul style={{ margin: 0, paddingLeft: '1.5rem' }}>
             <li>Sessions expire after 24 hours of inactivity</li>

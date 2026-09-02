@@ -11,10 +11,18 @@ from server.schemas.auth import (
     PasswordChangeRequest,
 )
 from server.schemas.run import (
+    BoltzRunConfiguration,
+    CharacterizationRunConfiguration,
     RunCreateRequest,
     RunInfo,
     RunList,
 )
+from server.schemas.provider_credential import (
+    ProviderCredentialCreate,
+    ProviderCredentialResponse,
+    ProviderCredentialUpdate,
+)
+from server.schemas.provider_job import ProviderJobResponse
 from server.schemas.admin import (
     AdminAnalyticsSummary,
     AuditEventCount,
@@ -47,8 +55,14 @@ __all__ = [
     "SessionResponse",
     "PasswordChangeRequest",
     "RunCreateRequest",
+    "BoltzRunConfiguration",
+    "CharacterizationRunConfiguration",
     "RunInfo",
     "RunList",
+    "ProviderCredentialCreate",
+    "ProviderCredentialResponse",
+    "ProviderCredentialUpdate",
+    "ProviderJobResponse",
     "AdminAnalyticsSummary",
     "AuditEventCount",
     "AuditMetrics",

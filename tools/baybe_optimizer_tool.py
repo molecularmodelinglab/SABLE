@@ -91,11 +91,11 @@ class BayBEOptimizerTool(BaseTool):
                 objective = SingleTargetObjective(target=baybe_targets[0])
             else:
                 weights = [_target_value(t, "weight", 1.0) for t in targets]
-                if os.getenv("MULTI_OPT_TYPE", "desirability").lower() == "pareto":
+                if os.getenv("MULTI_OPT_TYPE", "pareto").lower() == "pareto":
                     objective = ParetoObjective(targets=baybe_targets)
                 else:
                     objective = DesirabilityObjective(targets=baybe_targets, weights=weights, require_normalization=False)
-                print(f"Using multi-objective optimization with type: {os.getenv('MULTI_OPT_TYPE', 'desirability').lower()}")
+                print(f"Using multi-objective optimization with type: {os.getenv('MULTI_OPT_TYPE', 'pareto').lower()}")
             campaign = Campaign(searchspace=searchspace, objective=objective)#, acquisition_function=qUpperConfidenceBound(beta=0.1))
 
             if measurement_data:

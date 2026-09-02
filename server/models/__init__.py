@@ -7,6 +7,8 @@ from server.models.experiment import Experiment, ExperimentLog
 from server.models.conversation import Conversation, ConversationMessage
 from server.models.audit import AuditEvent
 from server.models.password_reset import PasswordResetToken
+from server.models.provider_credential import ProviderCredential
+from server.models.provider_job import ProviderJob, ProviderJobResult
 
 __all__ = [
     "User",
@@ -20,4 +22,7 @@ __all__ = [
     "ConversationMessage",
     "AuditEvent",
     "PasswordResetToken",
+    "ProviderCredential",
+    "ProviderJob",
+    "ProviderJobResult",
 ]

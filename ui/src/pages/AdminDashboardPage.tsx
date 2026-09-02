@@ -1,13 +1,16 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery, keepPreviousData } from '@tanstack/react-query'
-import { getAdminAnalyticsSummary, listAdminRuns, type RunInfo } from '../api'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
+import { Check, LoaderCircle, TriangleAlert, X } from 'lucide-react'
+import { getAdminAnalyticsSummary, listAdminBoltzUsers, listAdminRuns, reviewBoltzAccess, type RunInfo } from '../api'
 import { RunStatusBadge } from '../components/RunStatusBadge'
 import type { AdminAnalyticsSummary, DailyCount } from '../types/admin'
 
 export function AdminDashboardPage() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [runSearch, setRunSearch] = useState('')
+  const [reviewingUserId, setReviewingUserId] = useState<string | null>(null)
 
   const {
     data,
@@ -49,10 +52,28 @@ export function AdminDashboardPage() {
     })
   }, [allRuns, runSearch])
 
+  const { data: boltzUsers = [], isLoading: accessLoading } = useQuery({
+    queryKey: ['admin', 'boltz-access'],
+    queryFn: listAdminBoltzUsers,
+    refetchInterval: 30_000,
+  })
+
+  const pendingAccess = boltzUsers.filter((user) => user.access_status === 'pending')
+
+  const handleReview = async (userId: string, status: 'approved' | 'denied') => {
+    setReviewingUserId(userId)
+    try {
+      await reviewBoltzAccess(userId, status)
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'boltz-access'] })
+    } finally {
+      setReviewingUserId(null)
+    }
+  }
+
   if (isLoading) {
     return (
       <div className="admin-dashboard__empty">
-        <div className="admin-dashboard__emoji" aria-hidden>🛠️</div>
+        <LoaderCircle className="spin" size={36} aria-hidden="true" />
         <p>Loading administrator analytics…</p>
       </div>
     )
@@ -61,7 +82,7 @@ export function AdminDashboardPage() {
   if (isError || !data) {
     return (
       <div className="admin-dashboard__empty">
-        <div className="admin-dashboard__emoji" aria-hidden>⚠️</div>
+        <TriangleAlert size={36} aria-hidden="true" />
         <p>We couldn&apos;t load the administrative summary.</p>
         <button className="primary" onClick={() => refetch()} disabled={isFetching}>
           Try again
@@ -99,6 +120,37 @@ export function AdminDashboardPage() {
           <StatCard label="Verified" value={data.users.verified} accent="var(--status-completed)" />
           <StatCard label="Admins" value={data.users.admins} accent="var(--status-failed)" />
           <StatCard label="Active (30 days)" value={data.users.recently_active} accent="var(--status-running)" />
+        </div>
+      </section>
+
+      <section className="admin-section">
+        <div className="admin-section__heading">
+          <h2>Hosted Boltz Access</h2>
+          <span>{pendingAccess.length} pending</span>
+        </div>
+        <div className="admin-access-table">
+          {accessLoading ? (
+            <p className="admin-empty">Loading access requests...</p>
+          ) : pendingAccess.length === 0 ? (
+            <p className="admin-empty">No access requests are awaiting review.</p>
+          ) : (
+            <table>
+              <thead><tr><th>User</th><th>Email</th><th>Requested</th><th>Decision</th></tr></thead>
+              <tbody>
+                {pendingAccess.map((user) => (
+                  <tr key={user.user_id}>
+                    <td>{user.username}</td>
+                    <td>{user.email}</td>
+                    <td>{user.requested_at ? new Date(user.requested_at).toLocaleString() : 'Unknown'}</td>
+                    <td className="admin-access-table__actions">
+                      <button className="icon-button icon-button--approve" title="Approve hosted access" onClick={() => handleReview(user.user_id, 'approved')} disabled={reviewingUserId !== null}><Check size={17} /></button>
+                      <button className="icon-button icon-button--danger" title="Deny hosted access" onClick={() => handleReview(user.user_id, 'denied')} disabled={reviewingUserId !== null}><X size={17} /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </section>
 

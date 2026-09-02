@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { listRuns, type RunInfo } from '../api'
+import { ArrowRight, KeyRound } from 'lucide-react'
+import { getBoltzSettings, listRuns, type RunInfo } from '../api'
 import { RunStatusBadge } from '../components/RunStatusBadge'
 
 const STATUS_OPTIONS = ['all', 'running', 'completed', 'failed', 'halted', 'queued']
@@ -13,6 +14,7 @@ export function DashboardPage() {
     queryFn: () => listRuns(),
     refetchInterval: 8000,
   })
+  const { data: boltzSettings } = useQuery({ queryKey: ['boltz-settings'], queryFn: getBoltzSettings })
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [search, setSearch] = useState('')
 
@@ -37,6 +39,17 @@ export function DashboardPage() {
         </div>
         <button className="primary" onClick={() => navigate('/runs/new')}>New Optimization</button>
       </div>
+
+      <section className="dashboard__setup" aria-label="Boltz configuration">
+        <div className="dashboard__setup-icon"><KeyRound size={20} aria-hidden="true" /></div>
+        <div>
+          <strong>{getBoltzSetupTitle(boltzSettings?.provider, boltzSettings?.credential_id)}</strong>
+          <p>{getBoltzSetupDescription(boltzSettings?.provider, boltzSettings?.credential_id)}</p>
+        </div>
+        <button className="secondary" onClick={() => navigate('/account')}>
+          Configure settings <ArrowRight size={17} aria-hidden="true" />
+        </button>
+      </section>
 
       <div className="dashboard__metrics">
         <MetricCard label="Active Runs" value={runningCount} trendLabel="Monitoring" trendColor="var(--status-running)" />
@@ -99,6 +112,20 @@ export function DashboardPage() {
       </div>
     </div>
   )
+}
+
+function getBoltzSetupTitle(provider?: string | null, credentialId?: string | null) {
+  if (provider === 'platform' && credentialId) return 'Your Boltz API is connected'
+  if (provider === 'platform') return 'Finish connecting your Boltz API'
+  if (provider === 'self_hosted') return 'Using SABLE-hosted Boltz'
+  return 'Choose how SABLE runs Boltz'
+}
+
+function getBoltzSetupDescription(provider?: string | null, credentialId?: string | null) {
+  if (provider === 'platform' && credentialId) return 'New runs use your saved Boltz Platform credential and selected metrics.'
+  if (provider === 'platform') return 'Add and validate a Boltz Platform API key before launching your next run.'
+  if (provider === 'self_hosted') return 'You can switch to your own Boltz Platform API key at any time in Settings.'
+  return 'Open Settings to select hosted compute or securely add your Boltz Platform API key.'
 }
 
 function MetricCard({ label, value, trendLabel, trendColor }: { label: string; value: number | string; trendLabel: string; trendColor: string }) {

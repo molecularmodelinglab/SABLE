@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from threading import RLock
 from typing import Dict, Iterable, Optional
 
 
@@ -24,6 +25,10 @@ class StorageConfig:
     bucket: Optional[str] = None
     bucket_prefix: str = "runs/"
     kms_key_id: Optional[str] = None
+    azure_account_url: Optional[str] = None
+    azure_container: Optional[str] = None
+    azure_connection_string: Optional[str] = None
+    azure_prefix: str = "runs/"
 
     @classmethod
     def from_env(cls) -> "StorageConfig":
@@ -38,6 +43,10 @@ class StorageConfig:
             bucket=bucket or None,
             bucket_prefix=prefix,
             kms_key_id=kms_key_id or None,
+            azure_account_url=os.getenv("AZURE_STORAGE_ACCOUNT_URL") or None,
+            azure_container=os.getenv("AZURE_STORAGE_CONTAINER") or None,
+            azure_connection_string=os.getenv("AZURE_STORAGE_CONNECTION_STRING") or None,
+            azure_prefix=os.getenv("SABLE_STORAGE_AZURE_PREFIX", "runs/"),
         )
 
 
@@ -102,6 +111,17 @@ class StorageBackend(ABC):
         """Generate a signed download URL when supported by the backend."""
         return None
 
+    def sync_run(self, run_id: str) -> None:
+        """Persist the current local state of a run when required."""
+
+    def delete_run(self, run_id: str) -> None:
+        """Delete a run from storage."""
+        base = self.run_dir(run_id)
+        if base.exists():
+            import shutil
+
+            shutil.rmtree(base)
+
 
 class LocalStorageBackend(StorageBackend):
     """Local filesystem backend for development and testing."""
@@ -142,13 +162,15 @@ class LocalStorageBackend(StorageBackend):
         base = (run_base / "checkpoints").resolve()
         target = (base / filename).resolve()
         
-        # if not found in checkpoints, check boltz_cifs
+        # If not found in checkpoints, check provider-specific Boltz artifacts.
         if not (target.exists() and target.is_file()):
-            boltz_dir = (run_base / "artifacts" / "boltz_cifs").resolve()
-            boltz_target = (boltz_dir / filename).resolve()
-            if boltz_target.exists() and boltz_target.is_file():
-                target = boltz_target
-                base = boltz_dir
+            for directory_name in ("boltz_cifs", "boltz_platform"):
+                boltz_dir = (run_base / "artifacts" / directory_name).resolve()
+                boltz_target = (boltz_dir / filename).resolve()
+                if boltz_target.exists() and boltz_target.is_file():
+                    target = boltz_target
+                    base = boltz_dir
+                    break
 
         try:
             target.relative_to(base)
@@ -168,12 +190,134 @@ class LocalStorageBackend(StorageBackend):
         if base.exists():
             checkpoints.extend(sorted(p.name for p in base.iterdir() if p.is_file()))
             
-        # Boltz CIFs
-        boltz_dir = self.run_dir(run_id) / "artifacts" / "boltz_cifs"
-        if boltz_dir.exists():
-            checkpoints.extend(sorted(p.name for p in boltz_dir.iterdir() if p.is_file() and p.suffix == '.cif'))
+        # Boltz structures from self-hosted and Platform providers.
+        for directory_name in ("boltz_cifs", "boltz_platform"):
+            boltz_dir = self.run_dir(run_id) / "artifacts" / directory_name
+            if boltz_dir.exists():
+                checkpoints.extend(sorted(
+                    p.name for p in boltz_dir.iterdir()
+                    if p.is_file() and p.suffix.lower() in {'.cif', '.pdb'}
+                ))
             
         return checkpoints
+
+
+class AzureBlobStorageBackend(LocalStorageBackend):
+    """Azure Blob durable storage backed by a disposable local working cache."""
+
+    def __init__(self, config: StorageConfig, container_client=None):
+        if not config.azure_container:
+            raise ValueError("Azure container must be configured via AZURE_STORAGE_CONTAINER")
+        super().__init__(config)
+        self._prefix = config.azure_prefix.strip("/")
+        self._hydrated_runs: set[str] = set()
+        self._hydration_lock = RLock()
+        self._container_client = container_client or self._create_container_client(config)
+
+    @staticmethod
+    def _create_container_client(config: StorageConfig):
+        from azure.storage.blob import BlobServiceClient
+
+        if config.azure_connection_string:
+            service = BlobServiceClient.from_connection_string(config.azure_connection_string)
+        elif config.azure_account_url:
+            from azure.identity import DefaultAzureCredential
+
+            service = BlobServiceClient(
+                account_url=config.azure_account_url,
+                credential=DefaultAzureCredential(),
+            )
+        else:
+            raise ValueError(
+                "Configure AZURE_STORAGE_ACCOUNT_URL for managed identity or "
+                "AZURE_STORAGE_CONNECTION_STRING"
+            )
+        return service.get_container_client(config.azure_container)
+
+    def _blob_prefix(self, run_id: str) -> str:
+        parts = [part for part in (self._prefix, run_id) if part]
+        return "/".join(parts) + "/"
+
+    @staticmethod
+    def _is_directory_blob(blob) -> bool:
+        metadata = getattr(blob, "metadata", None) or {}
+        return str(metadata.get("hdi_isfolder", "")).lower() == "true"
+
+    def _list_run_blobs(self, prefix: str):
+        return self._container_client.list_blobs(
+            name_starts_with=prefix,
+            include=["metadata"],
+        )
+
+    def _hydrate_run(self, run_id: str) -> None:
+        with self._hydration_lock:
+            if run_id in self._hydrated_runs:
+                return
+
+            base = super().run_dir(run_id)
+            prefix = self._blob_prefix(run_id)
+            for blob in self._list_run_blobs(prefix):
+                if self._is_directory_blob(blob):
+                    continue
+                relative_name = blob.name[len(prefix):]
+                if not relative_name:
+                    continue
+                target = (base / relative_name).resolve()
+                try:
+                    target.relative_to(base)
+                except ValueError as exc:
+                    raise ValueError(f"Invalid blob path: {blob.name}") from exc
+                if target.exists():
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with target.open("wb") as data:
+                    self._container_client.download_blob(blob.name).readinto(data)
+
+            self._hydrated_runs.add(run_id)
+
+    def run_dir(self, run_id: str) -> Path:
+        self._hydrate_run(run_id)
+        return super().run_dir(run_id)
+
+    def sync_run(self, run_id: str) -> None:
+        base = super().run_dir(run_id)
+        prefix = self._blob_prefix(run_id)
+        local_blobs: set[str] = set()
+
+        if base.exists():
+            for path in base.rglob("*"):
+                if not path.is_file():
+                    continue
+                blob_name = prefix + path.relative_to(base).as_posix()
+                local_blobs.add(blob_name)
+                with path.open("rb") as data:
+                    self._container_client.upload_blob(blob_name, data, overwrite=True)
+
+        remote_blobs = {
+            blob.name
+            for blob in self._list_run_blobs(prefix)
+            if not self._is_directory_blob(blob)
+        }
+        for blob_name in remote_blobs - local_blobs:
+            self._container_client.delete_blob(blob_name)
+
+        self._hydrated_runs.add(run_id)
+
+    def delete_run(self, run_id: str) -> None:
+        base = super().run_dir(run_id)
+        if base.exists():
+            import shutil
+
+            shutil.rmtree(base)
+        prefix = self._blob_prefix(run_id)
+        blobs = sorted(
+            self._list_run_blobs(prefix),
+            key=lambda blob: blob.name.count("/"),
+            reverse=True,
+        )
+        for blob in blobs:
+            self._container_client.delete_blob(blob.name)
+        self._hydrated_runs.discard(run_id)
 
 
 class S3StorageBackend(StorageBackend):
@@ -235,12 +379,20 @@ class StorageService:
     def generate_download_url(self, run_id: str, category: str, filename: str, *, expires_in: int = 300) -> Optional[str]:
         return self._backend.generate_download_url(run_id, category, filename, expires_in=expires_in)
 
+    def sync_run(self, run_id: str) -> None:
+        self._backend.sync_run(run_id)
+
+    def delete_run(self, run_id: str) -> None:
+        self._backend.delete_run(run_id)
+
 
 def _create_backend(config: StorageConfig) -> StorageBackend:
     if config.backend == "local":
         return LocalStorageBackend(config)
     if config.backend == "s3":
         return S3StorageBackend(config)
+    if config.backend in {"azure", "azure_blob"}:
+        return AzureBlobStorageBackend(config)
     raise ValueError(f"Unsupported storage backend: {config.backend}")
 
 
@@ -286,3 +438,11 @@ def checkpoint_path(run_id: str, filename: str, *, ensure_exists: bool = True) -
 
 def list_run_checkpoints(run_id: str) -> list[str]:
     return list(get_storage_service().list_checkpoints(run_id))
+
+
+def sync_run(run_id: str) -> None:
+    get_storage_service().sync_run(run_id)
+
+
+def delete_run_data(run_id: str) -> None:
+    get_storage_service().delete_run(run_id)

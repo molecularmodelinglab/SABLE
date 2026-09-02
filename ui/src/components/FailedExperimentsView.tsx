@@ -48,7 +48,7 @@ export function FailedExperimentsView() {
           backgroundColor: '#f8f9fa',
           borderRadius: '8px'
         }}>
-          <p style={{ margin: 0, color: '#666' }}>No failed experiments found 🎉</p>
+          <p style={{ margin: 0, color: '#666' }}>No failed experiments found.</p>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>

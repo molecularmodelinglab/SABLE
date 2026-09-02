@@ -131,7 +131,9 @@ class WorkflowRunner:
             checkpoint_path: Optional[str] = None,
             save_checkpoints: bool = True,
             event_callback: Optional[callable] = None,
-            run_paths: Optional[dict[str, str]] = None) -> WorkflowState:
+            run_paths: Optional[dict[str, str]] = None,
+            characterization_config: Optional[dict[str, Any]] = None,
+            extensions: Optional[dict[str, Any]] = None) -> WorkflowState:
         """
         Run the molecular optimization workflow.
         
@@ -166,6 +168,12 @@ class WorkflowRunner:
                 state.run_paths.update(run_paths)
             except Exception:
                 state.run_paths = dict(run_paths)
+
+        if characterization_config:
+            state.characterization_config.update(characterization_config)
+
+        if extensions:
+            state.extensions.update(extensions)
 
         # Set event callback for streaming logs to UI
         if event_callback:
@@ -299,7 +307,31 @@ class WorkflowRunner:
             state: Final workflow state
             output_file: Output file path
         """
+        from utils.objective_ranking import build_optimization_report
+
+        optimization_report = build_optimization_report(state)
+        latest_properties = {}
+        for result in state.experimental_results:
+            if result.metadata.get("is_starting_molecule_baseline", False):
+                continue
+            previous = latest_properties.get(result.smiles)
+            if previous is None or (result.iteration, result.timestamp) >= (
+                previous.iteration,
+                previous.timestamp,
+            ):
+                latest_properties[result.smiles] = result
+
+        exported_rankings = [
+            {
+                **item,
+                "score": item["aggregate_score"],
+                "properties": latest_properties[item["smiles"]].properties,
+            }
+            for item in optimization_report["rankings"]
+            if item["rank"] is not None
+        ][:10]
         results = {
+            "schema_version": 2,
             "workflow_id": state.workflow_id,
             "user_prompt": state.user_prompt,
             "status": state.status,
@@ -312,21 +344,13 @@ class WorkflowRunner:
                 "bo_config": state.bo_config.model_dump() if state.bo_config else None,
             },
             "results": {
-                "total_iterations": state.current_iteration,
-                "molecules_tested": len(state.experimental_results),
-                "best_molecules": [
-                    {
-                        "smiles": smiles,
-                        "score": score,
-                        "properties": next(
-                            (r.properties for r in state.experimental_results if r.smiles == smiles),
-                            {},
-                        ),
-                    }
-                    for smiles, score in state.best_molecules[:10]
-                ],
+                "total_iterations": len(state.bo_rounds),
+                "molecules_tested": optimization_report["counts"]["evaluated_candidates"],
+                "best_molecules": exported_rankings,
             },
+            "optimization_report": optimization_report,
             "experimental_data": [r.model_dump() for r in state.experimental_results],
+            "bo_rounds": state.bo_rounds,
             "logs": state.logs,
         }
 

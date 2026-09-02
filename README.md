@@ -158,13 +158,71 @@ To extend the optimization pipeline, add or update a tool in `tools/`, connect i
 
 ## Production
 
-Build and start the production API, worker, and Nginx frontend with:
+Copy the production environment template and replace the required secrets:
 
 ```bash
-docker compose --profile prod up --build api celery_worker frontend
+cp .env.production.example .env.production
 ```
 
-The frontend is served at http://localhost:8080. Review all secrets, authentication, storage, CORS, and infrastructure settings in `.env` before deploying outside a local environment.
+Build and start the production stack with:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+```
+
+Nginx serves the frontend and proxies `/api` to FastAPI. PostgreSQL, Redis, and the API are available only on the internal Compose network.
+
+### HTTPS with Let's Encrypt
+
+Point the domain's DNS records to the server, allow inbound TCP ports 80 and 443, and set these values in `.env.production`:
+
+```dotenv
+HTTP_PORT=80
+HTTPS_PORT=443
+SSL_DOMAIN=sable.example.com
+LETSENCRYPT_EMAIL=admin@example.com
+```
+
+Start the application in HTTP bootstrap mode, request the certificate, and restart Nginx to enable HTTPS:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+docker compose --env-file .env.production -f docker-compose.prod.yml run --rm certbot
+docker compose --env-file .env.production -f docker-compose.prod.yml restart frontend
+docker compose --env-file .env.production -f docker-compose.prod.yml --profile ssl up -d certbot_renew
+```
+
+Set `LETSENCRYPT_STAGING=1` for the first test issuance. Before requesting the production certificate, remove the staging certificate and change `LETSENCRYPT_STAGING` to `0`:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml run --rm \
+   --entrypoint certbot certbot delete --cert-name sable.example.com --non-interactive
+```
+
+Replace `sable.example.com` with `SSL_DOMAIN`, run the certificate and frontend restart commands again, then start `certbot_renew`. Certbot checks for renewal every 12 hours; Nginx reloads renewed certificates automatically.
+
+Check service status and logs with:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml ps
+docker compose --env-file .env.production -f docker-compose.prod.yml logs -f
+```
+
+## Citation
+
+If SABLE supports your research, please cite our [paper](https://arxiv.org/abs/2608.11483):
+
+```bibtex
+@misc{idanwekhai2026modularagenticframeworksynthetically,
+   title={A Modular Agentic Framework for Synthetically Constrained Multi-Objective Hit-to-Lead Optimization},
+   author={Kelvin P. Idanwekhai and Enes Kelestemur and Benjamin Strickland and Matthew Hart and Steini Davidsson and Angelos Angelopoulos and Ron Alterovitz and Marcello DeLuca and Alexander Tropsha},
+   year={2026},
+   eprint={2608.11483},
+   archivePrefix={arXiv},
+   primaryClass={cs.AI},
+   url={https://arxiv.org/abs/2608.11483},
+}
+```
 
 ## License
 
