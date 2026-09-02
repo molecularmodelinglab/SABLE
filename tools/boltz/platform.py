@@ -59,7 +59,13 @@ class BoltzPlatformAdapter:
             if key in request.options:
                 target[key] = request.options[key]
 
-        kwargs: Dict[str, Any] = {"molecules": molecules, "target": target}
+        kwargs: Dict[str, Any] = {
+            "molecules": molecules,
+            "target": target,
+            "molecule_filters": {
+                "boltz_smarts_catalog_filter_level": "disabled",
+            },
+        }
         for key in ("molecule_filters", "workspace_id", "idempotency_key"):
             if key in request.options:
                 kwargs[key] = request.options[key]

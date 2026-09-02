@@ -106,6 +106,9 @@ async def test_platform_adapter_maps_request_and_lifecycle():
         "type": "no_template",
     }
     assert start_call[1]["workspace_id"] == "workspace-1"
+    assert start_call[1]["molecule_filters"] == {
+        "boltz_smarts_catalog_filter_level": "disabled"
+    }
     assert submission.provider_job_id == "job-1"
     assert status == BoltzJobStatus.SUCCEEDED
     assert results[0].molecule_id == "mol-1"
@@ -122,6 +125,21 @@ async def test_platform_adapter_maps_request_and_lifecycle():
     }
     assert results[0].warnings == ["low alignment depth"]
     assert resource.calls[-1] == ("stop", "job-1")
+
+
+@pytest.mark.asyncio
+async def test_platform_adapter_preserves_explicit_molecule_filters():
+    resource = FakeLibraryScreen()
+    adapter = BoltzPlatformAdapter(
+        "secret",
+        client_factory=lambda **kwargs: FakeClient(resource),
+    )
+    filters = {"boltz_smarts_catalog_filter_level": "recommended"}
+    request = platform_request().model_copy(update={"options": {"molecule_filters": filters}})
+
+    await adapter.submit(request)
+
+    assert resource.calls[0][1]["molecule_filters"] == filters
 
 
 @pytest.mark.asyncio
