@@ -124,6 +124,9 @@ Configuration is loaded from environment variables. Copy `.env.example` to `.env
 | `MOLECULAR_FP` | Molecular fingerprint or descriptor strategy |
 | `MULTI_OPT_TYPE` | Multi-objective optimization strategy |
 | `SABLE_DATA_ROOT` | Root directory for run artifacts |
+| `SABLE_STORAGE_BACKEND` | Run storage backend: `local` or `azure` |
+| `AZURE_STORAGE_ACCOUNT_URL` | Azure Blob service URL used with managed identity |
+| `AZURE_STORAGE_CONTAINER` | Azure Blob container for durable run data |
 | `BOLTZ_BASE_URL` | Base URL of a user-managed Boltz2 API deployment |
 | `BOLTZ_API_TOKEN` | Authentication token for the Boltz2 API |
 
@@ -171,6 +174,22 @@ docker compose --env-file .env.production -f docker-compose.prod.yml up -d --bui
 ```
 
 Nginx serves the frontend and proxies `/api` to FastAPI. PostgreSQL, Redis, and the API are available only on the internal Compose network.
+
+### Azure Blob Storage
+
+Production defaults to Azure Blob Storage for durable run inputs, logs, checkpoints, results, and artifacts. The shared `artifacts_data` volume is still required as a disposable working cache because workflow tools operate on filesystem paths; Blob Storage remains the durable source of truth and hydrates that cache when needed.
+
+Create a private container, enable a managed identity on the Azure VM, and grant that identity the `Storage Blob Data Contributor` role scoped to the storage account or container. Then configure:
+
+```dotenv
+SABLE_STORAGE_BACKEND=azure
+AZURE_STORAGE_ACCOUNT_URL=https://your-storage-account.blob.core.windows.net
+AZURE_STORAGE_CONTAINER=sable-artifacts
+SABLE_STORAGE_AZURE_PREFIX=runs/
+AZURE_STORAGE_CONNECTION_STRING=
+```
+
+For local deployments without managed identity, leave `AZURE_STORAGE_ACCOUNT_URL` empty and set `AZURE_STORAGE_CONNECTION_STRING`. Keep the container private; SABLE reads authorized artifacts through its API.
 
 ### HTTPS with Let's Encrypt
 
