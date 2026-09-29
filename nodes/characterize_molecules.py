@@ -35,6 +35,7 @@ from tools.boltz import (
     protein_scope_id,
 )
 from tools.registry import get_tool_registry
+from tools.openfe_tool import OpenFEError, OpenFETool
 
 
 def _map_target_properties(
@@ -210,7 +211,10 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                 result = _run_boltz_platform_characterization(state, request)
             else:
                 tool = _create_characterization_tool(registry, spec, request)
-                result = _run_characterization_tool(spec, tool, request)
+                if tool_id == "openfe" and request.tool_options.get("structure_source") == "boltz":
+                    result = _run_openfe_with_boltz(state, request, registry, tool)
+                else:
+                    result = _run_characterization_tool(spec, tool, request)
             _merge_characterization_result(results, boltz_metadata, result)
             tools_executed.append(tool_id)
 
@@ -258,6 +262,12 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                 severity="error",
                 data={"error": str(exc)},
             )
+            if tool_id == "openfe":
+                raise NodeError(
+                    f"OpenFE execution failed: {str(exc)}",
+                    node="characterize_molecules",
+                    code="OPENFE_TOOL_ERROR",
+                ) from exc
             if tool_id == "boltz":
                 error_code = "BOLTZ_TOOL_ERROR" if type(exc).__name__ == "ToolException" else "BOLTZ_EXCEPTION"
                 raise NodeError(
@@ -354,6 +364,15 @@ def _build_characterization_request(
     proteins_payload: List[Dict[str, Any]] = []
     tool_options: Dict[str, Any] = {}
 
+    if tool_id == "openfe":
+        tool_options = dict(state.characterization_config.get("openfe") or {})
+        if "complexes" not in tool_options and "structure_source" not in tool_options:
+            tool_options["structure_source"] = "boltz"
+        if tool_options.get("structure_source") == "boltz":
+            proteins_payload = [
+                _protein_target_to_polymer(protein) for protein in state.protein_targets
+            ]
+
     if tool_id == "boltz":
         ids_to_process = _boltz_ids_to_process(
             state=state,
@@ -410,6 +429,60 @@ def _build_characterization_request(
         precision=2,
         tool_options=tool_options,
     )
+
+
+def _run_openfe_with_boltz(
+    state: WorkflowState,
+    request: CharacterizationRequest,
+    registry: Any,
+    tool: OpenFETool,
+) -> CharacterizationResult:
+    options = dict(request.tool_options)
+    if options.get("complexes"):
+        raise OpenFEError("Choose explicit OpenFE complexes or structure_source='boltz', not both.")
+    repeats = options.get("execution", {}).get("repeats", 3)
+    if isinstance(repeats, bool) or not isinstance(repeats, int) or repeats < 1:
+        raise OpenFEError("OpenFE repeats must be a positive integer.")
+    for molecule_id in request.molecule_ids:
+        tool._campaign_path(molecule_id)
+        if not request.search_space.get(molecule_id):
+            raise OpenFEError(f"Missing SMILES for '{molecule_id}'.")
+    if options.get("campaign_name"):
+        tool._campaign_path(options["campaign_name"])
+    if options.get("resume"):
+        options["complexes"] = {
+            molecule_id: {"name": molecule_id, "ligand": {"smiles": request.search_space[molecule_id]}}
+            for molecule_id in request.molecule_ids
+        }
+        return tool.characterize(request.model_copy(update={"tool_options": options}))
+    if not request.molecule_ids or len(request.molecule_ids) > 100:
+        raise OpenFEError("Automatic OpenFE uploads require between 1 and 100 molecules per batch.")
+    if not request.proteins:
+        raise OpenFEError("Boltz-generated OpenFE structures require protein targets.")
+    if options.get("upload_inputs") is False:
+        raise OpenFEError("Boltz-generated OpenFE structures require upload_inputs=True.")
+    tool.ensure_upload_support()
+    boltz_options = {} if _boltz_provider(state) == "platform" else _boltz_tool_options(state)
+    boltz_options = {**boltz_options, "fetch_cif": True}
+    boltz_request = request.model_copy(update={"tool_options": boltz_options})
+    if _boltz_provider(state) == "platform":
+        poses = _run_boltz_platform_characterization(state, boltz_request)
+    else:
+        spec = registry.get("boltz")
+        boltz_tool = _create_characterization_tool(registry, spec, boltz_request)
+        poses = _run_characterization_tool(spec, boltz_tool, boltz_request)
+    options["complexes"] = tool.complexes_from_boltz(request, poses)
+    options["upload_inputs"] = True
+    state.record_tool_run(ToolRunRecord(
+        tool_id="boltz", stage=ToolKind.CHARACTERIZER, status="completed",
+        inputs=_characterization_run_inputs(boltz_request),
+        outputs={"molecule_count": len(options["complexes"])},
+        metadata={"purpose": "openfe_structures", "result_metadata": poses.metadata},
+    ))
+    result = tool.characterize(request.model_copy(update={"tool_options": options}))
+    result.metadata["structure_source"] = "boltz"
+    result.metadata["boltz"] = poses.metadata
+    return result
 
 
 def _boltz_ids_to_process(
@@ -905,7 +978,7 @@ def _resolve_characterization_tool_ids(state: WorkflowState, normalized_target_n
 def _tool_ids_from_legacy_label(value: Any) -> List[str]:
     label = value.value if hasattr(value, "value") else value
     label = str(label or "").strip().lower()
-    if label in {"rdkit", "stoplight", "boltz"}:
+    if label in {"rdkit", "stoplight", "boltz", "openfe"}:
         return [label]
     if label == "combined":
         return ["rdkit", "stoplight"]
@@ -913,6 +986,8 @@ def _tool_ids_from_legacy_label(value: Any) -> List[str]:
 
 
 def _legacy_tool_label(tool_ids: List[str]) -> str:
+    if tool_ids == ["openfe"]:
+        return "openfe"
     if tool_ids == ["rdkit"]:
         return "rdkit"
     if tool_ids == ["stoplight"]:

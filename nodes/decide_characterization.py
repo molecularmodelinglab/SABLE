@@ -54,6 +54,8 @@ def decide_characterization_node(state: WorkflowState) -> Dict[str, Any]:
         )
     
     boltz_config = state.characterization_config.get('boltz')
+    boltz_tool_config = state.characterization_config.get('boltz_config')
+    openfe_config = state.characterization_config.get('openfe')
     state.characterization_config = {
         'tool': _legacy_tool_label(tool_ids),
         'tool_ids': tool_ids,
@@ -65,6 +67,10 @@ def decide_characterization_node(state: WorkflowState) -> Dict[str, Any]:
     }
     if boltz_config is not None:
         state.characterization_config['boltz'] = boltz_config
+    if boltz_tool_config is not None:
+        state.characterization_config['boltz_config'] = boltz_tool_config
+    if openfe_config is not None:
+        state.characterization_config['openfe'] = openfe_config
     
     state.log("decide_characterization_completed", {
         "tool_selected": state.characterization_config['tool'],
@@ -81,6 +87,8 @@ def decide_characterization_node(state: WorkflowState) -> Dict[str, Any]:
 def _legacy_tool_label(tool_ids: list[str]) -> str:
     """Keep existing UI/log semantics while storing concrete tool IDs."""
 
+    if tool_ids == ["openfe"]:
+        return "openfe"
     if tool_ids == ["rdkit"]:
         return "rdkit"
     if tool_ids == ["stoplight"]:
