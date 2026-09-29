@@ -147,6 +147,20 @@ tools:
       local: false
       cost: high
 
+  - id: openfe
+    kind: characterizer
+    class_path: tools.openfe_tool:OpenFETool
+    enabled: true
+    priority: 60
+    capability:
+      provides:
+        - openfe_binding_free_energy
+      requires:
+        - openfe_complexes
+      batch: true
+      local: false
+      cost: high
+
   - id: default_summarizer
     kind: summarizer
     class_path: nodes.summarize_results:summarize_results_node

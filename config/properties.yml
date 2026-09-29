@@ -112,6 +112,14 @@ properties:
     tool_names:
       boltz: binding_affinity
 
+  openfe_binding_free_energy:
+    label: OpenFE Binding Free Energy (kcal/mol)
+    parser_keywords: [openfe, abfe, binding free energy]
+    default_bounds: [-30.0, 10.0]
+    default_mode: MIN
+    tool_names:
+      openfe: openfe_binding_free_energy
+
   boltz_binding_confidence:
     label: Boltz Binding Confidence
     parser_keywords: [boltz binding confidence, binding confidence]
