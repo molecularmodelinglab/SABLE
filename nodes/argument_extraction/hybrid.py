@@ -512,6 +512,30 @@ class HybridArgumentExtractor:
             merged['proteins'] = llm_proteins
         else:
             merged['proteins'] = []
+
+        free_energy_requested = re.search(r"\bfree[\s-]+energ(?:y|ies)\b", original_prompt, re.IGNORECASE)
+        separate_affinity_requested = re.search(r"\b(?:affinity|ic50|ki|kd)\b", original_prompt, re.IGNORECASE)
+        relative_energy_requested = re.search(
+            r"\brbfe\b|\brelative\b.{0,40}\bfree[\s-]+energ(?:y|ies)\b",
+            original_prompt, re.IGNORECASE,
+        )
+        if free_energy_requested and merged['proteins'] and not separate_affinity_requested and not relative_energy_requested:
+            targets = [dict(target) for target in merged.get('target_properties', [])]
+            has_openfe = any(target.get('property_name') == 'openfe_binding_free_energy' for target in targets)
+            corrected_targets = []
+            for target in targets:
+                if self.PROPERTY_CATALOG.normalize(target.get('property_name', '')) == 'binding_affinity':
+                    if has_openfe:
+                        continue
+                    target.update(
+                        property_name='openfe_binding_free_energy', optimization_mode='MIN',
+                        bounds=self.PROPERTY_CATALOG.bounds_for('openfe_binding_free_energy'),
+                        transformation='LINEAR',
+                    )
+                    has_openfe = True
+                    supplements.append("binding free-energy intent corrected to OpenFE")
+                corrected_targets.append(target)
+            merged['target_properties'] = corrected_targets
         
         # Cross-validate and supplement target properties
         if not merged.get('target_properties') and rule_result.get('target_properties'):
