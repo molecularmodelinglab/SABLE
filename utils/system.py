@@ -15,9 +15,17 @@ Extract the following information and respond with a JSON object:
 
 Available properties: qed, logp, tpsa, molecular_weight, h_bond_donors, h_bond_acceptors, 
 rotatable_bonds, ring_count, heavy_atom_count, solubility, fsp3, cns_activity, toxicity, 
-binding_affinity, permeability
+binding_affinity, permeability, openfe_binding_free_energy
 
 Note for binding_affinity: Extract the user's scientific intent as binding_affinity with MIN optimization and bounds [-3, 6]. Only calculate this if a protein target or UNIPROT ID is provided. Do not infer the Boltz backend from the prompt; the workflow maps this semantic target to the configured backend's native metric before optimization.
+
+Note for openfe_binding_free_energy: For requests for OpenFE, absolute binding free energy, ABFE, or better/more favorable free energy against a protein target,
+extract openfe_binding_free_energy with MIN optimization and bounds [-30, 10].
+For example, "optimize this molecule for a better free energy to P21453" requests openfe_binding_free_energy, not binding_affinity.
+Values are in kcal/mol; more negative values indicate stronger binding.
+Keep generic binding affinity requests mapped to binding_affinity.
+Do not treat these two properties as interchangeable.
+Relative binding free energy (RBFE) is not supported by this absolute binding free-energy workflow; do not relabel it as ABFE.
 
 For healer_mode, if the user requests enumeration or analogs/derivatives, choose an appropriate HEALER mode based on context:
 - If the user mentions fragments or provides a SMILES with multiple fragments ('.'), use FragmentHEALER. If you have fragments, then the starting smiles should be joined with '.'. This will make the starting_molecules SMILES_A.SMILES_B...
