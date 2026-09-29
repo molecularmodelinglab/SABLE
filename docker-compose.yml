@@ -90,6 +90,10 @@ services:
       - HEALER_JOB_TIMEOUT_SECONDS=${HEALER_JOB_TIMEOUT_SECONDS:-900}
       - HEALER_HTTP_TIMEOUT_SECONDS=${HEALER_HTTP_TIMEOUT_SECONDS:-30}
       - HEALER_OUTPUT_DIR=${HEALER_OUTPUT_DIR:-data/healer_outputs}
+      - OPENFE_BASE_URL=${OPENFE_BASE_URL:-}
+      - OPENFE_API_TOKEN=${OPENFE_API_TOKEN:-}
+      - OPENFE_POLL_INTERVAL=${OPENFE_POLL_INTERVAL:-10}
+      - OPENFE_WAIT_TIMEOUT=${OPENFE_WAIT_TIMEOUT:-3600}
     volumes:
       - ./data:/app/data  # For large artifacts (checkpoints, results)
       - ./logs:/app/logs
@@ -142,6 +146,10 @@ services:
       - HEALER_JOB_TIMEOUT_SECONDS=${HEALER_JOB_TIMEOUT_SECONDS:-900}
       - HEALER_HTTP_TIMEOUT_SECONDS=${HEALER_HTTP_TIMEOUT_SECONDS:-30}
       - HEALER_OUTPUT_DIR=${HEALER_OUTPUT_DIR:-data/healer_outputs}
+      - OPENFE_BASE_URL=${OPENFE_BASE_URL:-}
+      - OPENFE_API_TOKEN=${OPENFE_API_TOKEN:-}
+      - OPENFE_POLL_INTERVAL=${OPENFE_POLL_INTERVAL:-10}
+      - OPENFE_WAIT_TIMEOUT=${OPENFE_WAIT_TIMEOUT:-3600}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
