@@ -81,11 +81,14 @@ def select_characterization_tool_ids(
         if non_boltz_single:
             selected.append(non_boltz_single[0].id)
         else:
-            for tool_id in ("rdkit", "stoplight"):
-                spec = registry.get(tool_id)
+            uncovered = set(remaining_props)
+            for spec in registry.list(kind=ToolKind.CHARACTERIZER):
+                if spec.id == "boltz":
+                    continue
                 coverage = {PROPERTY_CATALOG.normalize(prop) for prop in spec.provides}
-                if remaining_props & coverage:
-                    selected.append(tool_id)
+                if uncovered & coverage:
+                    selected.append(spec.id)
+                    uncovered -= coverage
 
     if requires_boltz:
         selected.append("boltz")

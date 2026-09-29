@@ -1,7 +1,7 @@
 """Run-related Pydantic schemas."""
 
 from datetime import datetime
-from typing import Literal, Optional, List, Dict, TypeAlias
+from typing import Any, Literal, Optional, List, Dict, TypeAlias
 from uuid import UUID
 from pydantic import BaseModel, Field, computed_field, model_validator
 
@@ -34,6 +34,10 @@ class BoltzRunConfiguration(BaseModel):
 
 class CharacterizationRunConfiguration(BaseModel):
     boltz: BoltzRunConfiguration = Field(default_factory=BoltzRunConfiguration)
+    openfe: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="OpenFE complexes keyed by molecule ID, settings, execution, and campaign options.",
+    )
 
 
 class RunCreateRequest(BaseModel):
