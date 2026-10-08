@@ -143,6 +143,166 @@ BOLTZ_API_TOKEN=your_api_token
 
 SABLE does not deploy or host the Boltz2 service. The configured endpoint must be reachable from the SABLE API and Celery worker containers.
 
+### OpenFE Binding Free Energy
+
+The `openfe` characterizer calls a separately hosted OpenFE campaign API. No local
+OpenFE, OpenMM, or GPU installation is needed in SABLE. Configure the endpoint in
+`.env`, then recreate the API and worker containers to load changed environment values:
+
+```dotenv
+OPENFE_BASE_URL=http://your-openfe-host:8000
+OPENFE_API_TOKEN=
+OPENFE_POLL_INTERVAL=10
+OPENFE_WAIT_TIMEOUT=3600
+```
+
+The token is optional and is sent as a bearer token when supplied. Use HTTPS for an
+authenticated deployment. HTTP requests time out after 30 seconds; the wait timeout
+applies separately to preparation, planning, and simulation results. ABFE simulations
+can take days, so choose a suitable wait timeout or submit and retrieve separately.
+
+Select target `openfe_binding_free_energy` with mode `MIN`. Values are binding free
+energies in **kcal/mol**, not Boltz affinity values, pKd, or IC50. Existing
+`binding_affinity` targets continue to use Boltz. Uncertainty, repeats, quality checks,
+and campaign name are retained in the OpenFE tool-run metadata. Failed quality checks
+raise an error by default; unknown checks remain explicitly marked `unknown`.
+
+OpenFE needs bound coordinates, not just SMILES and protein sequences. By default input
+paths must exist on the **OpenFE host**. Set `upload_inputs: True` to upload files from
+the SABLE process instead (inside Docker, use paths visible in that container).
+This requires redeploying the reference service in `temp_code/` with its new
+`POST /campaigns/upload` endpoint; older hosted deployments do not support uploads.
+To provide existing structures, supply a specification
+for every characterized molecule, including starting-molecule baselines, under
+`characterization_config["openfe"]["complexes"]` in `WorkflowRunner.run()`, or under
+`characterization.openfe` in a SABLE run request. Existing run-access checks still apply.
+Keys must match SABLE molecule IDs and ligand SMILES must match the search space exactly.
+
+The same adapter can be called directly:
+
+```python
+from schemas.tool_schemas import CharacterizationRequest
+from tools.registry import get_tool_registry
+
+request = CharacterizationRequest(
+   smiles={"mol_1": "CCO"},
+   search_space={"mol_1": "CCO"},
+   molecule_ids=["mol_1"],
+   properties=["openfe_binding_free_energy"],
+   tool_options={
+      "complexes": {
+         "mol_1": {
+            "structure": "/data/bound_complex.cif",
+            "protein": {"chains": ["A"]},
+            "ligand": {"smiles": "CCO", "selector": {"chain": "B"}},
+            "extra_ligand_copies": "drop",
+         }
+      },
+      "execution": {"profile": "local", "repeats": 3},
+      "settings": {"preset": "default"},
+   },
+)
+result = get_tool_registry().create("openfe").characterize(request)
+```
+
+Replace this illustrative structure, chemistry, chain selection, and execution profile
+with valid hosted inputs. Split protein/ligand files and cofactors use the API's own
+complex specification. Ligand neutralization is never enabled by this adapter.
+
+For local coordinates, add `"upload_inputs": True` alongside `"complexes"` in the
+example and use a local structure path. Every referenced structure, protein, ligand,
+and cofactor file is uploaded; mixing local files and remote paths is not supported
+in upload mode. The client preserves SMILES/selectors, deduplicates shared files,
+and assigns unique upload filenames. The service accepts up to 100 coordinate files,
+with a default combined limit of 100 MiB, and refuses campaign overwrite.
+
+`OpenFETool.upload_campaign(campaign)` uploads and creates only, without starting
+simulations. `submit_campaign(campaign, upload_inputs=True)` also prepares, plans,
+and submits. Use an explicit campaign name so a network timeout can be investigated
+without accidentally creating duplicate work. Uploads are not automatically retried.
+
+For long jobs, `OpenFETool.submit_campaign(campaign)` creates, prepares, plans, and
+starts an API-format campaign. Keep its name and later call `status(name)` and
+`wait_for_results(name, {ligand_name: repeats})`. A timeout does not cancel remote work.
+To retrieve through `characterize`, supply the same complexes, a `campaign_name`, and
+`resume: True`; this only retrieves submitted work and does not restart failed stages.
+Never resubmit an existing campaign with overwrite enabled. Results are accepted only
+after all requested ligand repeats are available, not merely after Slurm submission.
+
+#### Generate bound poses with Boltz
+
+In a workflow run, an extracted `openfe_binding_free_energy` objective automatically
+uses Boltz to generate bound poses when neither `complexes` nor `structure_source`
+is explicitly configured. This works with prompt-only requests from the UI or API,
+using the existing Boltz provider settings. For example:
+
+> Optimize aspirin analogs for more favorable absolute binding free energy to P00519 using OpenFE. Enumerate 20 compounds, then run 2 optimization iterations with a batch size of 3.
+
+Generic binding-affinity requests still select Boltz affinity, not OpenFE. Explicit
+complexes and structure-source settings take precedence over the default. The
+protein target and configured services are still required; routing does not deploy
+services or grant provider access.
+
+To configure execution options explicitly, the characterization portion of a run
+request can be:
+
+```json
+{
+   "boltz": {"provider": "self_hosted"},
+   "openfe": {
+      "structure_source": "boltz",
+      "execution": {"profile": "local", "repeats": 3},
+      "settings": {"preset": "default"}
+   }
+}
+```
+
+Request the `openfe_binding_free_energy` target and supply protein targets in the
+workflow prompt (sequence or UniProt ID, as for existing Boltz runs). Use a valid
+OpenFE execution profile for your deployment. `WorkflowRunner.run()` accepts this
+same configuration through `characterization_config`. Automatic pose generation is
+workflow orchestration; direct `OpenFETool.characterize()` calls still need explicit
+complex specifications.
+
+Self-hosted Boltz uses the existing `BOLTZ_BASE_URL` / `BOLTZ_API_TOKEN` settings.
+For Boltz Platform, change `boltz` to
+`{"provider": "platform", "credential_id": "<owned-credential-uuid>"}`. Platform
+runs require the normal SABLE user/run context and artifact directory. Existing
+credential ownership and provider access checks remain in effect. Rebuild SABLE
+API/worker images for the new Gemmi coordinate parser dependency, and deploy the
+OpenFE upload endpoint before using this mode.
+
+The workflow checks upload support, runs the selected Boltz provider, downloads its
+structures, identifies protein chains and the single ligand from CIF/PDB contents,
+then uploads, prepares, plans, and submits OpenFE. SMILES are preserved exactly;
+the OpenFE preparation stage validates chemistry against the coordinates. Uploads
+are automatically enabled. Do not combine this mode with explicit `complexes` or
+`upload_inputs: false`. Failed/missing poses stop the batch before OpenFE submission.
+
+Automatic selection requires one model, protein polymers, and exactly one ligand
+residue on a separate chain. Use explicit complex specifications for cofactors,
+multiple ligand copies, or ambiguous structures. Batches are limited to 100 molecules.
+Boltz pose provenance is recorded separately from OpenFE free energies; a Boltz
+affinity score is never substituted for an OpenFE result. Selecting Boltz metrics
+as separate objectives may also invoke Boltz independently.
+
+Each newly submitted batch gets a unique campaign name, retained in tool-run metadata
+and timeout errors. To resume an already submitted batch, use the same molecule IDs,
+SMILES, repeat count, and `structure_source: "boltz"`, plus `campaign_name` and
+`resume: true`. This retrieves results without calling Boltz or uploading again and
+does not require the downloaded pose files. An explicit campaign name for a new
+submission must be unique per batch/iteration.
+
+Run the isolated client and workflow routing tests in Docker:
+
+```bash
+docker compose exec -T api micromamba run -n sable python -m pytest tests/unit/test_openfe_tool.py tests/unit/test_decide_characterization.py tests/unit/test_characterize_molecule_mapping.py --noconftest -o addopts= -q
+```
+
+The optional hosted smoke test runs only when `OPENFE_LIVE_TEST=1` and
+`OPENFE_BASE_URL` are set in the test container. It checks health and lists campaigns;
+it does not submit simulations or require authentication unless configured.
+
 ## Project Structure
 
 | Path | Description |
