@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections import Counter
 from datetime import timedelta
 from uuid import uuid4
 
@@ -134,7 +135,7 @@ class RunScheduler:
         self.reconcile()
 
     def reconcile(self) -> None:
-        """Recover leases and reserve FIFO capacity, then publish without DB locks."""
+        """Recover leases and reserve fair capacity, then publish without DB locks."""
         publications = []
         invalidations = []
         with get_db_context() as db, db.begin():
@@ -183,9 +184,11 @@ class RunScheduler:
                 RunDispatch.run_id.is_(None), Run.status.in_(["queued", "running"]),
             ).order_by(Run.created_at, Run.id).with_for_update(of=Run).all()
             legacy_running = 0
+            admitted_by_user = Counter()
             for run in legacy:
                 if run.status == "running":
                     legacy_running += 1
+                    admitted_by_user[run.user_id] += 1
                 else:
                     dispatch = RunDispatch(run_id=run.id, state="pending", next_attempt_at=now,
                                            publish_attempts=0)
@@ -194,13 +197,22 @@ class RunScheduler:
                     runs[run.id] = run
 
             active = legacy_running + sum(d.state in SLOT_STATES for d in dispatches)
+            for dispatch in dispatches:
+                if dispatch.state in SLOT_STATES and dispatch.run_id in runs:
+                    admitted_by_user[runs[dispatch.run_id].user_id] += 1
             available = max(0, state.max_concurrent - active)
-            pending = sorted(
-                (d for d in dispatches if d.state == "pending" and d.run_id in runs
-                 and runs[d.run_id].status == "queued" and d.next_attempt_at <= now),
-                key=lambda d: (runs[d.run_id].created_at, d.run_id),
-            )
-            for dispatch in pending[:available]:
+            pending = [
+                d for d in dispatches if d.state == "pending" and d.run_id in runs
+                and runs[d.run_id].status == "queued" and d.next_attempt_at <= now
+            ]
+            for _ in range(min(available, len(pending))):
+                dispatch = min(pending, key=lambda d: (
+                    admitted_by_user[runs[d.run_id].user_id],
+                    runs[d.run_id].created_at,
+                    d.run_id,
+                ))
+                pending.remove(dispatch)
+                admitted_by_user[runs[dispatch.run_id].user_id] += 1
                 dispatch.state = "reserved"
                 dispatch.dispatch_token = str(uuid4())
                 dispatch.reservation_deadline = now + timedelta(seconds=RESERVATION_SECONDS)
