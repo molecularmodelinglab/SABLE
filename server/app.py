@@ -19,12 +19,14 @@ from server.routers.conversations import router as conversations_router
 from server.routers.runs import router as runs_router
 from server.routers.admin import router as admin_router
 from server.routers.provider_credentials import router as provider_credentials_router
+from server.services.scheduler_lifecycle import scheduler_lifespan
 
 
 app = FastAPI(
     title="SABLE API",
     version="0.2.0",
-    description="Synthetically-accessible Agentic Bayesian Ligand Exploration"
+    description="Synthetically-accessible Agentic Bayesian Ligand Exploration",
+    lifespan=scheduler_lifespan,
 )
 
 # CORS configuration
