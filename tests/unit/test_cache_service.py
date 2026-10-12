@@ -65,8 +65,8 @@ class TestCacheService:
         """Test run status caching."""
         run_id = "test-run-123"
         status_data = {
-            "status": "running",
-            "progress": 50,
+            "status": "completed",
+            "progress": 100,
             "iteration": 5
         }
         

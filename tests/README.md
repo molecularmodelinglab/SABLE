@@ -66,34 +66,47 @@ The runner builds a small API-only image, creates a uniquely named Compose proje
 and removes its containers, network, and volumes in `finally`, including when tests
 fail. Docker must be able to fetch images and Python dependencies during setup;
 the test services themselves use an internal network with no published ports.
-PostgreSQL data is temporary, and Redis persistence is disabled. Only the server
-source and this test directory are mounted read-only; reports have a separate
+PostgreSQL data is temporary, and Redis persistence is disabled. Server source,
+migrations, and this test directory are mounted read-only; reports have a separate
 writable mount. No credentials, application data, or production configuration are mounted.
 
 ### Structure and boundaries
 
 - [conftest.py](concurrency/conftest.py): disposable database fixtures, two user
   identities, real FastAPI routers, a local HTTP server, and per-test measurements.
-- [test_api.py](concurrency/test_api.py): another user's run requests during slow
-  chat, including run submission and ownership checks for progress/artifacts.
+- [test_api.py](concurrency/test_api.py): legacy slow-chat regressions and shared
+  ownership checks for progress/artifacts. The current UI does not use conversations.
+- [test_submission.py](concurrency/test_submission.py): current single-prompt flow,
+  using real JWT/session authentication; slow storage, database, cache, broker, and
+  authentication operations; queued acceptance and capacity reservations, persisted
+  prompts and notes, cross-user ownership, and rejected requests that create/dispatch no run.
 - [test_events.py](concurrency/test_events.py): 44 idle stream iterators, request
-  thread capacity, fresh-process event delivery, and subscription isolation/cleanup.
+  thread capacity, fresh-process event delivery, per-run/logical-DB isolation,
+  live-only reconnects, heartbeats, bounded buffers, Redis failures, real HTTP
+  disconnect/ownership, DB release, send timeouts, and cancellation cleanup.
 - [test_scheduler.py](concurrency/test_scheduler.py): real PostgreSQL admission and
-  queue races across threads/processes, failed dispatch, and the existing global limit.
+  queue races across threads/processes, reserved capacity, and shared global limits.
+- [test_worker.py](concurrency/test_worker.py) and
+  [test_recovery.py](concurrency/test_recovery.py): duplicate/stale deliveries,
+  heartbeats and fenced completion, outbox recovery, startup failures, API lifespan
+  reconciliation, actual Celery-to-Redis publication, migration parity, and stale caches.
 - [test_storage.py](concurrency/test_storage.py): two-user artifact requests during
   slow Azure hydration, plus protection for concurrent readers of the same run.
 
-Only external execution boundaries are simulated: slow conversation processing,
-workflow/broker dispatch, blob downloads, and heavyweight provider imports. User
-identity is injected rather than obtained through login; real run ownership checks
-and per-request database sessions remain active. The SSE testing bypass is disabled.
+Workflow/broker dispatch, blob downloads, heavyweight provider imports, and legacy
+conversation processing are simulated. Submission responsiveness tests additionally
+pause one synchronous submission/authentication call, then invoke its real
+implementation (except broker dispatch). The original modules inject user identity;
+submission tests instead issue test JWTs backed by real database sessions and run
+the actual authentication dependencies. No login endpoint is used. Real ownership
+checks and per-request database sessions remain active. The SSE testing bypass is disabled.
 Scheduler processes use separate database connections. Event delivery is tested
 with a fresh producer interpreter, not an inherited subscriber registry.
 
 These are controlled regression tests, not production load tests or a full Celery
-worker deployment. Replay policy, fairness changes, and worker recovery belong to
-later phases. Event callbacks/stream iterators exercise the current interfaces;
-update those test adapters if a remediation intentionally changes their API.
+worker deployment. Phase 3 uses live-only events without replay. Worker recovery is
+covered by Phase 4 below; fairness remains separate. Streaming tests use asynchronous Redis
+subscriptions and real stream iterators; ownership checks also exercise HTTP routes.
 
 ### Results and expected baseline
 
@@ -112,6 +125,114 @@ cover ownership, same-process subscription isolation/cleanup, the existing globa
 five-run policy, and same-run hydration serialization. Exit code 1 is therefore
 expected until later remediation phases fix the failures; setup errors are not an
 acceptable baseline. The root pytest configuration excludes this opt-in directory.
+
+### Phase 2: single-prompt submission
+
+The current UI posts a single prompt directly to `/runs`; workflow execution stays
+in Celery through the existing scheduler. No separate chat queue was added. The
+19 new submission tests first produced 10 expected responsiveness failures and 9
+passing controls. After moving submission and its blocking authentication dependency
+off the event loop, **all 19 pass**, as does the original ownership control.
+
+Run this focused, passing acceptance set from the repository root:
+
+```powershell
+.\tests\concurrency\Run.ps1 -PytestArgs @('-k', 'test_submission or two_users_cannot')
+```
+
+Legacy slow-chat regressions remain unchanged and excluded from this selection;
+conversation endpoints have not been removed or repaired. SSE is addressed in
+Phase 3 below; scheduler and hydration failures remain separate. These two-user
+checks do not establish behavior at request-pool saturation or fix scheduling races.
+
+### Phase 3: live-only progress streaming
+
+**21 streaming tests pass**, plus **3 adjacent ownership and running/queued controls**
+in a separate focused run. The 44-idle-stream test reports zero borrowed AnyIO
+thread slots, a responsive unrelated request, and zero Redis subscriptions after
+cleanup. An independent interpreter publishes through Redis to the API subscriber.
+
+```powershell
+.\tests\concurrency\Run.ps1 -PytestArgs @('-k', 'test_events')
+```
+
+API and workflow processes must use the same `REDIS_URL`. Redis channels include
+the logical database number as well as the run ID. No replay or `Last-Event-ID`
+processing is provided; existing status/log polling remains unchanged. The stream
+sends 15-second idle heartbeat comments and a 3-second retry hint. Each client has
+a 256-event buffer and 15-second send timeout. Overflow or Redis loss ends the
+stream for browser reconnection, while NDJSON logging survives publish failures.
+Database connections are released before streaming; async Redis readers/connections
+are released on stream termination, including cancellation and stalled sends.
+
+Redis outages and stalled network sends are controlled boundary failures in these
+tests, not production failure-injection/load tests. Neither scheduler admission nor
+workflow execution semantics change in Phase 3.
+
+### Phase 4: durable scheduling and worker ownership
+
+**70 unique Phase 4/submission tests and 21 streaming regressions passed** across
+an initial selection and a focused follow-up. The initial selection also included
+the two known legacy slow-chat responsiveness failures; both remain unchanged.
+There were no setup errors. Both disposable Compose projects were removed.
+
+```powershell
+.\tests\concurrency\Run.ps1 -PytestArgs @('-k', 'test_scheduler or test_submission or test_worker or test_recovery')
+```
+
+Coverage includes real multi-process admission, duplicate worker claims, broker
+retry/crash recovery, stale-owner fencing, quiet heartbeats, heartbeat-start failure,
+expired leases after database lock waits, delayed renewal beyond the local deadline,
+setup failures, stale cache fills, real Celery/Redis token delivery, and isolated
+migration upgrade/downgrade/schema parity. Workflow execution/provider calls remain
+controlled substitutes rather than a full production Celery worker deployment.
+
+Submissions stay publicly `queued` while waiting for capacity or broker delivery.
+Only a worker holding the current dispatch token can mark a run `running`.
+Reservations, dispatched work, and running leases all consume the shared database
+capacity; the default remains five across all API and worker processes. There is
+no per-user fairness change.
+
+A transactional outbox records delivery intent before publishing. Publication and
+workflow claims are separate: uncertain broker acknowledgements may cause duplicate
+messages, but only one worker can claim a reservation. Expired unclaimed deliveries
+can be retried with a new token. Expired **running** leases instead mark the run
+`failed`; an operator/user must explicitly submit a new run after checking any
+external provider jobs. A worker that loses ownership cannot update the run's
+molecules or final status. Independent heartbeats protect quiet, long-running work.
+API lifespan reconciliation runs outside the request event loop and the Celery
+workflow pool, so recovery does not require a new submission or a free workflow worker.
+
+Default timings are 5-second reconciliation, 300-second unclaimed reservations,
+30-second publication claims, 15-second heartbeats, and 90-second worker leases.
+Failed publication backs off from 2 seconds to a maximum of 60 seconds. Broker
+connection/socket operations are bounded at 5 seconds with task publication retries
+disabled; durable retries belong to the outbox. Database connection/pool acquisition
+and lock waits are bounded, with a 10-second statement timeout. These are operation
+bounds, not a hard total deadline for a recovery pass or guarantees against a network
+blackhole. Local monotonic lease deadlines prevent a delayed heartbeat from granting
+indefinite ownership.
+
+Mutable run snapshots and lists containing them are not cached; legacy nonterminal
+cache entries are ignored. Terminal snapshots remain cacheable. This prevents a
+late queued/running cache fill from hiding a fenced terminal transition, at the cost
+of database reads while runs are active. It does not redesign list membership caching.
+
+**Rollout:** Stop new submissions and drain old workflows before upgrading. Stop
+old API/worker processes, apply the new Alembic migration using the normal deployment
+procedure, and deploy the matching API and worker code together. Do not mix old and
+new schedulers. Old one-argument Celery workflow messages are rejected; check/purge
+obsolete deliveries only after draining and reconciling their runs. Legacy `running`
+rows without a lease still consume capacity and are never automatically expired:
+verify their external jobs and resolve them explicitly before resuming submissions.
+The database stores the shared capacity; use `set_max_concurrent` for an intentional
+change rather than expecting different API-process environment values to override it.
+
+**Limits:** A lease cannot cancel an already-running provider call or forcibly stop
+Python workflow code. Token fencing protects database run state, not exactly-once
+external effects or atomic artifact writes. Investigate provider jobs and artifacts
+before explicitly retrying an abandoned run. These isolated regressions do not replace
+the later multi-worker deployment, worker-kill, and production load exercises.
 
 ## Test Types
 

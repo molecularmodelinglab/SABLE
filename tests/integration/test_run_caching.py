@@ -15,7 +15,7 @@ class TestRunCaching:
         run_id = "test-run-cache-123"
         run_data = {
             "id": run_id,
-            "status": "running",
+            "status": "completed",
             "user_id": "user-123",
             "prompt": "Test prompt"
         }
@@ -28,7 +28,7 @@ class TestRunCaching:
         cached = cache_service.get_cached_run(run_id)
         assert cached is not None
         assert cached["id"] == run_id
-        assert cached["status"] == "running"
+        assert cached["status"] == "completed"
     
     def test_get_cached_run_not_found(self):
         """Test getting non-existent cached run."""
@@ -39,7 +39,7 @@ class TestRunCaching:
     def test_invalidate_run(self):
         """Test invalidating a cached run."""
         run_id = "test-run-invalidate-123"
-        run_data = {"id": run_id, "status": "running"}
+        run_data = {"id": run_id, "status": "completed"}
         
         # Cache it
         cache_service.cache_run(run_id, run_data)
@@ -57,8 +57,8 @@ class TestRunCaching:
         user_id = "user-cache-test-123"
         runs_data = [
             {"id": "run-1", "status": "completed"},
-            {"id": "run-2", "status": "running"},
-            {"id": "run-3", "status": "pending"}
+            {"id": "run-2", "status": "failed"},
+            {"id": "run-3", "status": "stopped"}
         ]
         
         result = cache_service.cache_user_runs_list(user_id, runs_data)
