@@ -46,6 +46,8 @@ export function getAccessToken(): string | null {
 export type RunInfo = {
   id: string
   status: string
+  queue_reason?: 'waiting_for_admission' | 'dispatch_retry' | 'dispatching' | 'waiting_for_worker' | null
+  queue_retry_at?: string | null
   created_at: string
   updated_at: string
   prompt?: string | null
