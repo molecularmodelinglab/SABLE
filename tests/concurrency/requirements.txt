@@ -1,4 +1,6 @@
-# API-only dependencies; provider/chemistry execution is replaced at test boundaries.
+# Isolated API/task dependencies; chemistry execution is replaced at test boundaries.
+celery==5.6.0
+alembic==1.16.5
 anyio==4.10.0
 fastapi==0.115.5
 httpx==0.28.1

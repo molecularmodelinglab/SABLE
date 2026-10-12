@@ -29,7 +29,7 @@ def test_slow_chat_does_not_block_other_user(
         return SimpleNamespace(id="controlled-conversation", state="greeting", context={}), "Hello", []
 
     monkeypatch.setattr(conversations.conversation_service, "start_conversation", slow_conversation)
-    monkeypatch.setattr(run_scheduler, "start_run", lambda run_id: None)
+    monkeypatch.setattr(run_scheduler, "start_run", lambda run_id, token: None)
     with httpx.Client(base_url=live_api, timeout=8) as client, ThreadPoolExecutor(2) as pool:
         # Warm up the ordinary request path before introducing contention.
         assert client.get(f"/runs/{run.id}", headers=headers(bob)).status_code == 200

@@ -36,7 +36,7 @@ def test_slow_submission_does_not_block_other_user(
     run = make_run(bob)
     entered, release = threading.Event(), threading.Event()
     gate = threading.Lock()
-    monkeypatch.setattr(run_scheduler, "start_run", lambda run_id: None)
+    monkeypatch.setattr(run_scheduler, "start_run", lambda run_id, token: None)
     target, name = {
         "storage": (runs, "sync_run"),
         "database": (runs.run_service, "create_run"),
@@ -91,22 +91,23 @@ def test_slow_submission_does_not_block_other_user(
 
 
 @pytest.mark.parametrize("at_capacity", [False, True])
-def test_single_prompts_preserve_running_and_queued_responses(
+def test_single_prompts_remain_queued_until_worker_claim(
     live_api, authenticated_headers, two_users, make_run, monkeypatch, at_capacity,
 ):
     from server.database import SessionLocal
     from server.models.conversation import Conversation
     from server.models.run import Run
+    from server.models.run_dispatch import RunDispatch
     from server.services import run_scheduler
 
     alice, bob = two_users
-    monkeypatch.setattr(run_scheduler.run_scheduler, "_max_concurrent", 5)
+    run_scheduler.run_scheduler.set_max_concurrent(5)
     if at_capacity:
         for _ in range(5):
             make_run(alice, status="running")
     dispatched = []
-    monkeypatch.setattr(run_scheduler, "start_run", dispatched.append)
-    expected = "queued" if at_capacity else "running"
+    monkeypatch.setattr(run_scheduler, "start_run", lambda run_id, token: dispatched.append((run_id, token)))
+    expected = "queued"
 
     with httpx.Client(base_url=live_api, timeout=8) as client, ThreadPoolExecutor(2) as pool:
         pending = [pool.submit(client.post, "/runs", headers=authenticated_headers[str(user.id)],
@@ -125,18 +126,33 @@ def test_single_prompts_preserve_running_and_queued_responses(
             assert client.get(f"/runs/{data['id']}", headers=authenticated_headers[str(stranger.id)]).status_code in (403, 404)
 
     assert len(set(ids)) == 2
-    assert sorted(dispatched) == ([] if at_capacity else sorted(ids))
+    assert sorted(run_id for run_id, _ in dispatched) == ([] if at_capacity else sorted(ids))
     with SessionLocal() as db:
         assert db.query(Conversation).count() == 0
         for user, run_id in zip(two_users, ids):
             run = db.get(Run, run_id)
             assert run.user_id == user.id
             assert run.status == expected
+            dispatch = db.get(RunDispatch, run_id)
+            assert dispatch.state == ("pending" if at_capacity else "dispatched")
+            assert bool(dispatch.dispatch_token) is not at_capacity
             assert run.prompt == f"prompt from {user.username}"
             assert run.note == "run note"
             inputs = Path(run.extra_metadata["paths"]["inputs"])
             assert (inputs / "prompt.txt").read_text() == run.prompt
             assert (inputs / "note.txt").read_text() == "run note"
+
+    if not at_capacity:
+        from server.services.run_execution import claim_run
+        with httpx.Client(base_url=live_api, timeout=8) as client:
+            for run_id, token in dispatched:
+                lease = claim_run(run_id, token)
+                assert lease is not None
+                owner = next(user for user, candidate in zip(two_users, ids) if candidate == run_id)
+                response = client.get(f"/runs/{run_id}", headers=authenticated_headers[str(owner.id)])
+                assert response.status_code == 200
+                assert response.json()["status"] == "running"
+                assert lease.finish("completed")
 
 
 @pytest.mark.parametrize("rejection", ["missing-token", "invalid-token", "expired-session", "inactive-session", "inactive-user", "provider-denied", "invalid-body"])
@@ -178,7 +194,7 @@ def test_rejected_submission_does_not_create_or_dispatch_run(
         db.commit()
 
     dispatched = []
-    monkeypatch.setattr(run_scheduler, "start_run", dispatched.append)
+    monkeypatch.setattr(run_scheduler, "start_run", lambda run_id, token: dispatched.append((run_id, token)))
     with httpx.Client(base_url=live_api, timeout=8) as client:
         response = client.post("/runs", headers=request_headers, json=payload)
     assert response.status_code == expected, response.text

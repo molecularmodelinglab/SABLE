@@ -34,12 +34,14 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
-      SABLE_DATA_ROOT: /tmp/sable-concurrency
+      SABLE_DATA_ROOT: /suite/data
       SABLE_STORAGE_BACKEND: local
       SECRET_KEY: concurrency-tests-not-a-production-secret
       LLM_PROVIDER: disabled
     volumes:
       - ../../server:/suite/server:ro
+      - ../../migrations:/suite/migrations:ro
+      - ../../alembic.ini:/suite/alembic.ini:ro
       - .:/suite/tests/concurrency:ro
       - type: bind
         source: ${SABLE_CONCURRENCY_RESULTS:-./results}
