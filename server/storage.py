@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import os
+import shutil
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import lru_cache
+from hashlib import sha256
 from pathlib import Path
-from threading import RLock
 from typing import Dict, Iterable, Optional
+
+from .storage_lock import run_storage_lock
 
 
 def _resolve_data_root(path: Optional[str]) -> Path:
@@ -203,16 +207,24 @@ class LocalStorageBackend(StorageBackend):
 
 
 class AzureBlobStorageBackend(LocalStorageBackend):
-    """Azure Blob durable storage backed by a disposable local working cache."""
+    """Azure Blob storage with per-run coordination for a shared working cache.
+
+    Downloads publish complete files without overwriting local writes. Completion
+    records and recoverable staging live outside run artifacts; the next operation
+    on a run cleans up any staging left by a terminated process. Completion records
+    are valid only while their run directory and recorded files still exist.
+    """
 
     def __init__(self, config: StorageConfig, container_client=None):
         if not config.azure_container:
             raise ValueError("Azure container must be configured via AZURE_STORAGE_CONTAINER")
         super().__init__(config)
         self._prefix = config.azure_prefix.strip("/")
-        self._hydrated_runs: set[str] = set()
-        self._hydration_lock = RLock()
         self._container_client = container_client or self._create_container_client(config)
+        self._cache_source = sha256(json.dumps([
+            config.azure_account_url, config.azure_connection_string,
+            config.azure_container, self._prefix,
+        ]).encode("utf-8")).hexdigest()
 
     @staticmethod
     def _create_container_client(config: StorageConfig):
@@ -249,31 +261,86 @@ class AzureBlobStorageBackend(LocalStorageBackend):
             include=["metadata"],
         )
 
+    def _cache_identity(self, base: Path):
+        if not base.exists():
+            return None
+        stat = base.stat()
+        return [self._cache_source, stat.st_dev, stat.st_ino]
+
+    @staticmethod
+    def _clear_staging(state: Path) -> None:
+        staging = state / "staging"
+        if staging.exists():
+            shutil.rmtree(staging)
+
+    def _mark_hydrated(self, base: Path, state: Path, files: Iterable[str]) -> None:
+        identity = self._cache_identity(base)
+        if identity is not None:
+            staging = state / "staging"
+            staging.mkdir(exist_ok=True)
+            marker = staging / "hydrated"
+            marker.write_text(json.dumps({"identity": identity, "files": sorted(files)}),
+                              encoding="utf-8")
+            os.replace(marker, state / "hydrated")
+
     def _hydrate_run(self, run_id: str) -> None:
-        with self._hydration_lock:
-            if run_id in self._hydrated_runs:
+        base = super().run_dir(run_id)
+        with run_storage_lock(base) as state:
+            # A dead downloader leaves only private staging files, never artifacts.
+            self._clear_staging(state)
+            marker = state / "hydrated"
+            try:
+                cached = json.loads(marker.read_text(encoding="utf-8"))
+            except (FileNotFoundError, ValueError):
+                cached = None
+            if (isinstance(cached, dict)
+                    and cached.get("identity") is not None
+                    and cached["identity"] == self._cache_identity(base)
+                    and isinstance(cached.get("files"), list)
+                    and all(isinstance(name, str) and (base / name).is_file()
+                            for name in cached["files"])):
                 return
+            marker.unlink(missing_ok=True)
 
-            base = super().run_dir(run_id)
-            prefix = self._blob_prefix(run_id)
-            for blob in self._list_run_blobs(prefix):
-                if self._is_directory_blob(blob):
-                    continue
-                relative_name = blob.name[len(prefix):]
-                if not relative_name:
-                    continue
-                target = (base / relative_name).resolve()
-                try:
-                    target.relative_to(base)
-                except ValueError as exc:
-                    raise ValueError(f"Invalid blob path: {blob.name}") from exc
-                if target.exists():
-                    continue
-                target.parent.mkdir(parents=True, exist_ok=True)
-                with target.open("wb") as data:
-                    self._container_client.download_blob(blob.name).readinto(data)
+            staging = state / "staging"
+            staging.mkdir()
+            try:
+                prefix = self._blob_prefix(run_id)
+                files: list[str] = []
+                for blob in self._list_run_blobs(prefix):
+                    if self._is_directory_blob(blob):
+                        continue
+                    relative_name = blob.name[len(prefix):]
+                    if not relative_name:
+                        continue
+                    target = (base / relative_name).resolve()
+                    try:
+                        files.append(target.relative_to(base).as_posix())
+                    except ValueError as exc:
+                        raise ValueError(f"Invalid blob path: {blob.name}") from exc
+                    if target.exists():
+                        continue
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    download = staging / "download"
+                    with download.open("wb") as data:
+                        self._container_client.download_blob(blob.name).readinto(data)
+                        data.flush()
+                        os.fsync(data.fileno())
+                    try:
+                        # link is atomic and cannot replace a concurrent worker write.
+                        os.link(download, target)
+                    except FileExistsError:
+                        pass
+                    except OSError as exc:
+                        raise OSError(
+                            f"Cannot atomically publish {target}; the artifact cache requires "
+                            f"same-filesystem hard-link support: {exc}"
+                        ) from exc
+                    download.unlink()
 
-            self._hydrated_runs.add(run_id)
+                self._mark_hydrated(base, state, files)
+            finally:
+                self._clear_staging(state)
 
     def run_dir(self, run_id: str) -> Path:
         self._hydrate_run(run_id)
@@ -281,43 +348,50 @@ class AzureBlobStorageBackend(LocalStorageBackend):
 
     def sync_run(self, run_id: str) -> None:
         base = super().run_dir(run_id)
-        prefix = self._blob_prefix(run_id)
-        local_blobs: set[str] = set()
+        with run_storage_lock(base) as state:
+            self._clear_staging(state)
+            (state / "hydrated").unlink(missing_ok=True)
+            try:
+                prefix = self._blob_prefix(run_id)
+                local_blobs: set[str] = set()
 
-        if base.exists():
-            for path in base.rglob("*"):
-                if not path.is_file():
-                    continue
-                blob_name = prefix + path.relative_to(base).as_posix()
-                local_blobs.add(blob_name)
-                with path.open("rb") as data:
-                    self._container_client.upload_blob(blob_name, data, overwrite=True)
+                if base.exists():
+                    for path in base.rglob("*"):
+                        if not path.is_file():
+                            continue
+                        blob_name = prefix + path.relative_to(base).as_posix()
+                        local_blobs.add(blob_name)
+                        with path.open("rb") as data:
+                            self._container_client.upload_blob(blob_name, data, overwrite=True)
 
-        remote_blobs = {
-            blob.name
-            for blob in self._list_run_blobs(prefix)
-            if not self._is_directory_blob(blob)
-        }
-        for blob_name in remote_blobs - local_blobs:
-            self._container_client.delete_blob(blob_name)
+                remote_blobs = {
+                    blob.name
+                    for blob in self._list_run_blobs(prefix)
+                    if not self._is_directory_blob(blob)
+                }
+                for blob_name in remote_blobs - local_blobs:
+                    self._container_client.delete_blob(blob_name)
 
-        self._hydrated_runs.add(run_id)
+                self._mark_hydrated(base, state,
+                                    (name[len(prefix):] for name in local_blobs))
+            finally:
+                self._clear_staging(state)
 
     def delete_run(self, run_id: str) -> None:
         base = super().run_dir(run_id)
-        if base.exists():
-            import shutil
-
-            shutil.rmtree(base)
-        prefix = self._blob_prefix(run_id)
-        blobs = sorted(
-            self._list_run_blobs(prefix),
-            key=lambda blob: blob.name.count("/"),
-            reverse=True,
-        )
-        for blob in blobs:
-            self._container_client.delete_blob(blob.name)
-        self._hydrated_runs.discard(run_id)
+        with run_storage_lock(base) as state:
+            self._clear_staging(state)
+            (state / "hydrated").unlink(missing_ok=True)
+            if base.exists():
+                shutil.rmtree(base)
+            prefix = self._blob_prefix(run_id)
+            blobs = sorted(
+                self._list_run_blobs(prefix),
+                key=lambda blob: blob.name.count("/"),
+                reverse=True,
+            )
+            for blob in blobs:
+                self._container_client.delete_blob(blob.name)
 
 
 class S3StorageBackend(StorageBackend):
