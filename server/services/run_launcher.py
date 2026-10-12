@@ -25,12 +25,19 @@ from server.storage import results_json_path, summary_txt_path, run_dir, sync_ru
 from run_workflow import WorkflowRunner
 
 
-def start_run(run_id: str) -> None:
-    """Launch workflow execution as a background task."""
+def start_run(run_id: str, dispatch_token: str) -> None:
+    """Publish a durable reservation; the scheduler owns delivery retries."""
+    from server.tasks.celery_app import celery_app
     from server.tasks.workflow import run_workflow_task
-    
-    # Submit to Celery
-    run_workflow_task.delay(run_id)
+
+    with celery_app.connection_for_write(connect_timeout=5) as connection:
+        run_workflow_task.apply_async(
+            args=(run_id, dispatch_token),
+            task_id=dispatch_token,
+            connection=connection,
+            retry=False,
+            ignore_result=True,
+        )
 
 
 def get_environment_info() -> Dict[str, str]:
