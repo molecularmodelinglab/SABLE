@@ -1,8 +1,7 @@
+import logging
 import os
-import threading
 from datetime import datetime
-from typing import Any, Dict, Optional
-from pathlib import Path
+from typing import Any, Dict
 
 from celery import shared_task
 from sqlalchemy.orm.exc import DetachedInstanceError
@@ -11,23 +10,76 @@ from server.audit import AuditEventType, AuditSeverity, audit_logger
 from server.database import get_db_context
 from server.experiment_logger import ExperimentError, experiment_logger
 from server.models.user import User
-from server.services.cache_service import cache_service
 from server.services.run_events import run_event_hub
+from server.services.run_execution import LeaseLost, RunLease, claim_run
 from server.services.run_service import run_service
 from server.storage import results_json_path, summary_txt_path, run_dir, sync_run
 from run_workflow import WorkflowRunner
 
-@shared_task(bind=True, name="server.tasks.workflow.run_workflow")
-def run_workflow_task(self, run_id: str) -> None:
-    """Execute a workflow run as a Celery task."""
-    
-    # We can use the task ID as a correlation ID if needed
-    task_id = self.request.id
-    
+logger = logging.getLogger(__name__)
+
+
+@shared_task(
+    bind=True,
+    name="server.tasks.workflow.run_workflow",
+    acks_late=True,
+    reject_on_worker_lost=True,
+)
+def run_workflow_task(self, run_id: str, dispatch_token: str | None = None) -> None:
+    """Execute only the current reservation, with a renewable ownership lease."""
+    if not dispatch_token:
+        logger.warning("Ignoring workflow delivery without a reservation for run %s", run_id)
+        return
+    lease = claim_run(run_id, dispatch_token)
+    if lease is None:
+        return
+    try:
+        with lease:
+            try:
+                status, exit_reason, molecules = _execute_workflow(run_id, lease)
+                lease.check()
+                if not lease.finish(status, exit_reason, molecules):
+                    logger.warning("Workflow ownership lost before finalization for run %s", run_id)
+            except LeaseLost:
+                logger.warning("Stopping workflow after ownership loss for run %s", run_id)
+            except Exception as exc:
+                if lease.finish("failed", str(exc)):
+                    _record_setup_failure(run_id, exc)
+                raise
+    finally:
+        _notify_capacity_available(run_id)
+
+
+def _record_setup_failure(run_id: str, exc: Exception) -> None:
+    """Report failures outside the runner's own error handler after releasing capacity."""
+    try:
+        with get_db_context() as db:
+            run_model = run_service.get_run(db, run_id)
+            metadata = (run_model.extra_metadata or {}) if run_model else {}
+            experiment_id = metadata.get("experiment_id")
+        experiment = experiment_logger.get_experiment(experiment_id) if experiment_id else None
+        if experiment:
+            experiment.mark_failed(ExperimentError(
+                error_type=type(exc).__name__, message=str(exc), stack_trace=""
+            ))
+            experiment_logger.update_experiment(experiment)
+        run_event_hub.append_log(run_id, {
+            "timestamp": datetime.now().isoformat(),
+            "message": f"Workflow failed: {exc}",
+            "level": "ERROR",
+        })
+    except Exception:
+        logger.exception("Could not record workflow failure for run %s", run_id)
+
+
+def _execute_workflow(run_id: str, lease: RunLease) -> tuple:
+    task_id = run_workflow_task.request.id
+    lease.check()
+
     with get_db_context() as db:
         run_model = run_service.get_run(db, run_id)
         if not run_model:
-            return
+            raise LeaseLost("Run was removed before execution")
 
         metadata = run_model.extra_metadata or {}
         experiment_id = metadata.get("experiment_id")
@@ -71,16 +123,7 @@ def run_workflow_task(self, run_id: str) -> None:
     )
 
     if environment == "testing":
-        with get_db_context() as db:
-            run_service.update_run_status(db, run_id, "completed", "testing-shortcut")
-            run_model = run_service.get_run(db, run_id)
-
-        if run_model:
-            cached_info = run_service.run_to_info(run_model)
-            cache_service.cache_run(run_id, cached_info.model_dump())
-
-        cache_service.invalidate_user_runs_list(user_id)
-
+        lease.check()
         run_event_hub.append_log(run_id, {
             "timestamp": datetime.now().isoformat(),
             "message": "Workflow skipped in testing environment",
@@ -101,12 +144,11 @@ def run_workflow_task(self, run_id: str) -> None:
             details={"status": "success", "mode": "testing"},
         )
 
-        try:
-            sync_run(run_id)
-        finally:
-            _notify_capacity_available(run_id)
-        return
+        lease.check()
+        sync_run(run_id)
+        return "completed", "testing-shortcut", None
 
+    lease.check()
     runner = WorkflowRunner(checkpoint_dir=str(run_dir(run_id) / "checkpoints"))
 
     # Check for existing checkpoints to resume
@@ -127,6 +169,7 @@ def run_workflow_task(self, run_id: str) -> None:
         print(f"Error finding checkpoints: {e}")
 
     def emit(event: Dict[str, Any]) -> None:
+        lease.check()
         run_event_hub.append_log(run_id, event)
 
         if experiment:
@@ -151,13 +194,12 @@ def run_workflow_task(self, run_id: str) -> None:
             else:
                 normalized = [str(starting)]
 
-            with get_db_context() as db:
-                run_service.update_run_molecules(db, run_id, normalized)
+            if not lease.update_molecules(normalized):
+                raise LeaseLost("Workflow ownership lost while updating molecules")
 
-            cache_service.invalidate_run(run_id)
-            cache_service.invalidate_user_runs_list(user_id)
-
+    starting_molecules = None
     try:
+        lease.check()
         state = runner.run(
             user_prompt=prompt,
             checkpoint_path=checkpoint_path,
@@ -168,6 +210,7 @@ def run_workflow_task(self, run_id: str) -> None:
             extensions={"execution": {"run_id": run_id, "user_id": user_id}},
         )
 
+        lease.check()
         starting_molecules = list(state.starting_molecules or [])
         if experiment and starting_molecules:
             experiment.metadata["starting_molecules"] = starting_molecules
@@ -182,7 +225,9 @@ def run_workflow_task(self, run_id: str) -> None:
 
         results_path = results_json_path(run_id)
         results_path.parent.mkdir(parents=True, exist_ok=True)
+        lease.check()
         runner.export_results(state, str(results_path))
+        lease.check()
 
         if state.summary:
             summary_path = summary_txt_path(run_id)
@@ -190,14 +235,9 @@ def run_workflow_task(self, run_id: str) -> None:
             if experiment:
                 experiment.summary = state.summary
 
-        with get_db_context() as db:
-            run_service.update_run_status(db, run_id, str(state.status), state.exit_reason)
-            if starting_molecules:
-                run_service.update_run_molecules(db, run_id, starting_molecules)
-
-        cache_service.invalidate_run(run_id)
-        cache_service.invalidate_user_runs_list(user_id)
-
+        status = str(getattr(state.status, "value", state.status))
+        exit_reason = state.exit_reason
+        lease.check()
         run_event_hub.append_log(run_id, {
             "timestamp": datetime.now().isoformat(),
             "message": f"Workflow completed with status {state.status}",
@@ -221,7 +261,11 @@ def run_workflow_task(self, run_id: str) -> None:
             },
         )
 
+    except LeaseLost:
+        raise
     except Exception as exc:
+        lease.check()
+        status, exit_reason = "failed", str(exc)
         error = ExperimentError(
             error_type=type(exc).__name__,
             message=str(exc),
@@ -230,12 +274,6 @@ def run_workflow_task(self, run_id: str) -> None:
         if experiment:
             experiment.mark_failed(error)
             experiment_logger.update_experiment(experiment)
-
-        with get_db_context() as db:
-            run_service.update_run_status(db, run_id, "failed", str(exc))
-
-        cache_service.invalidate_run(run_id)
-        cache_service.invalidate_user_runs_list(user_id)
 
         run_event_hub.append_log(run_id, {
             "timestamp": datetime.now().isoformat(),
@@ -254,13 +292,13 @@ def run_workflow_task(self, run_id: str) -> None:
             details={"error": str(exc)},
         )
 
+    lease.check()
     if experiment:
         experiment_logger.update_experiment(experiment)
 
-    try:
-        sync_run(run_id)
-    finally:
-        _notify_capacity_available(run_id)
+    sync_run(run_id)
+    lease.check()
+    return status, exit_reason, starting_molecules
 
 
 def _notify_capacity_available(run_id: str) -> None:
