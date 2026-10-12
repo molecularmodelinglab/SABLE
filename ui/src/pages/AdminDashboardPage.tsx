@@ -290,7 +290,7 @@ export function AdminDashboardPage() {
                     </td>
                     <td>{run.username || '—'}</td>
                     <td>
-                      <RunStatusBadge status={run.status} />
+                      <RunStatusBadge status={run.status} queueReason={run.queue_reason} retryAt={run.queue_retry_at} />
                     </td>
                     <td>{new Date(run.created_at).toLocaleString()}</td>
                     <td>{new Date(run.updated_at).toLocaleString()}</td>

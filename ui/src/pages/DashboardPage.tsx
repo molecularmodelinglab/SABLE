@@ -98,7 +98,7 @@ export function DashboardPage() {
                   <td>
                     <div className="dashboard__run-id">{run.id}</div>
                   </td>
-                  <td><RunStatusBadge status={run.status} /></td>
+                  <td><RunStatusBadge status={run.status} queueReason={run.queue_reason} retryAt={run.queue_retry_at} /></td>
                   <td>{new Date(run.created_at).toLocaleString()}</td>
                   <td>{new Date(run.updated_at).toLocaleString()}</td>
                   <td>{run.exit_reason || '—'}</td>

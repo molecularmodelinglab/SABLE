@@ -263,7 +263,7 @@ export function RunDetailPage() {
           <p>Created {new Date(run.created_at).toLocaleString()} • Updated {new Date(run.updated_at).toLocaleString()}</p>
         </div>
         <div className="run-detail__header-actions">
-          <RunStatusBadge status={run.status} />
+          <RunStatusBadge status={run.status} queueReason={run.queue_reason} retryAt={run.queue_retry_at} />
           <button className="ghost" onClick={() => queryClient.invalidateQueries({ queryKey: ['run', id] })}>Refresh</button>
           <button
             className="ghost"
@@ -317,7 +317,7 @@ export function RunDetailPage() {
         <div className="run-detail__panel">
           <h2>Overview</h2>
           <div className="run-detail__grid">
-            <InfoCard label="Status" value={<RunStatusBadge status={run.status} />} />
+            <InfoCard label="Status" value={<RunStatusBadge status={run.status} queueReason={run.queue_reason} retryAt={run.queue_retry_at} />} />
             <InfoCard label="Exit reason" value={run.exit_reason || '—'} />
             <InfoCard label="Results" value={run.results_available ? 'Ready' : 'Not yet'} />
             <InfoCard label="Summary" value={run.summary_available ? 'Ready' : 'Not yet'} />
