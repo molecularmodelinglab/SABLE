@@ -125,20 +125,25 @@ def test_fairness_counts_each_admitted_state_by_user(
                 assert db.get(RunDispatch, run.id).state == state
 
 
+@pytest.mark.parametrize("owners,selected_indices", [
+    pytest.param([0, 0, 0, 0, 1, 1, 1, 1], [0, 1, 2, 4, 5], id="first-user-wins-fifth-slot"),
+    pytest.param([0, 1, 1, 1, 0, 0, 0, 1], [0, 1, 2, 3, 4], id="other-user-wins-fifth-slot"),
+])
 def test_fairness_oldest_prompt_then_run_id_breaks_equal_counts(
-    two_users, make_run, scheduler,
+    two_users, make_run, scheduler, owners, selected_indices,
 ):
     alice = _seed(make_run, two_users[0], 4, same_time=True)
     bob = _seed(make_run, two_users[1], 4, same_time=True)
-    all_runs = alice + bob
+    all_runs = sorted(alice + bob, key=lambda run: run.id)
     with get_db_context() as db, db.begin():
         timestamp = run_scheduler.database_now(db) - timedelta(days=1)
-        for run in all_runs:
-            db.get(Run, run.id).created_at = timestamp
-    first_user = min(all_runs, key=lambda run: run.id).user_id
-    expected = alice[:3] + bob[:2] if first_user == two_users[0].id else alice[:2] + bob[:3]
+        for run, owner in zip(all_runs, owners):
+            stored = db.get(Run, run.id)
+            stored.created_at = timestamp
+            stored.user_id = two_users[owner].id
+    # The fifth slot compares the users' next prompts, not their first prompts.
     scheduler.reconcile()
-    assert _admitted(all_runs) == {run.id for run in expected}
+    assert _admitted(all_runs) == {all_runs[index].id for index in selected_indices}
 
 
 def test_fairness_backoff_skips_oldest_then_rejoins_naturally(
