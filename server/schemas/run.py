@@ -6,6 +6,9 @@ from uuid import UUID
 from pydantic import BaseModel, Field, computed_field, model_validator
 
 
+RunQueueReason: TypeAlias = Literal[
+    "waiting_for_admission", "dispatch_retry", "dispatching", "waiting_for_worker"
+]
 BoltzExecutionPreference: TypeAlias = Literal["auto", "prediction", "library_screen"]
 BoltzMetric: TypeAlias = Literal[
     "binding_affinity",
@@ -53,6 +56,8 @@ class RunInfo(BaseModel):
     """Response schema for run information."""
     id: str
     status: str
+    queue_reason: Optional[RunQueueReason] = None
+    queue_retry_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
     prompt: Optional[str] = Field(default=None, description="Original optimization prompt provided by the user.")

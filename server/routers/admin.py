@@ -9,6 +9,7 @@ from server.schemas.admin import AdminAnalyticsSummary
 from server.schemas.boltz_access import AdminBoltzAccessReview, AdminBoltzUserResponse
 from server.schemas.run import RunInfo, RunList
 from server.services.run_service import run_service
+from server.services.run_queue import add_queue_details
 from server.services.cache_service import cache_service
 from server.services.admin_service import admin_service
 from server.models.user import User
@@ -88,6 +89,7 @@ def list_all_runs_for_admin(
             info.user_id = str(user.id)
         run_infos.append(info)
 
+    add_queue_details(db, run_infos)
     sorted_runs = sorted(run_infos, key=lambda r: r.created_at, reverse=True)
     return RunList(runs=sorted_runs)
 
@@ -110,5 +112,6 @@ def get_run_for_admin(
             info.username = user.username
             info.user_id = str(user.id)
 
+    add_queue_details(db, [info])
     cache_service.cache_run(run_id, info.model_dump())
     return info

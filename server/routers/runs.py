@@ -28,6 +28,7 @@ from server.storage import (
     delete_run_data,
 )
 from server.services.run_service import run_service
+from server.services.run_queue import add_queue_details
 from server.services.cache_service import cache_service
 from server.experiment_logger import experiment_logger
 from server.audit import audit_logger, AuditEventType, AuditSeverity
@@ -285,6 +286,7 @@ def create_run(
     paths = metadata.get("paths", {}) if isinstance(metadata, dict) else {}
     info = run_service.run_to_info(run_model, paths=paths)
     info.username = current_user.username
+    add_queue_details(db, [info])
 
     cache_service.cache_run(run_id, info.model_dump())
     cache_service.invalidate_user_runs_list(str(current_user.id))
@@ -327,6 +329,7 @@ def list_runs(
         info.username = current_user.username
         user_runs.append(info)
 
+    add_queue_details(db, user_runs)
     sorted_runs = sorted(user_runs, key=lambda r: r.created_at, reverse=True)
 
     # Cache the result for first page
@@ -347,6 +350,7 @@ def get_run(
 ):
     """Get detailed information about a specific run."""
     info = check_run_authorization(run_id, current_user, db)
+    add_queue_details(db, [info])
     return info
 
 
