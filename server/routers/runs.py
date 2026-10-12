@@ -1,15 +1,16 @@
 """Run management API endpoints."""
 
+import asyncio
 import json
 import os
-import queue
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, Callable, Deque, List
+from typing import Dict, Any, Deque, List
 from collections import deque
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse, StreamingResponse, Response
+from fastapi.responses import FileResponse, Response
+from redis.exceptions import RedisError
 from sqlalchemy.orm import Session as DBSession
 
 from server.database import get_db, get_db_context
@@ -34,6 +35,7 @@ from server.models.session import Session as SessionModel
 from server.models.provider_job import ProviderJob
 from server.schemas.provider_job import ProviderJobResponse
 from server.services.run_events import run_event_hub
+from server.services.sse import EventStreamResponse
 from server.services.run_scheduler import run_scheduler
 from server.services.boltz_access_service import boltz_access_service
 
@@ -367,30 +369,34 @@ def sse_events(
     current_user: User = Depends(get_current_user),
     db: DBSession = Depends(get_db)
 ):
-    """Server-Sent Events stream for run progress."""
+    """Authorized, live-only progress; reconnects do not replay missed events."""
     check_run_authorization(run_id, current_user, db)
+    # Streaming outlives request setup; do not retain its database connection.
+    db.close()
 
     if os.getenv("ENVIRONMENT") == "testing":
         return Response(status_code=200)
 
-    q: "queue.Queue[Dict[str, Any]]" = queue.Queue()
-
-    def push(evt: Dict[str, Any]) -> None:
-        q.put(evt)
-
-    run_event_hub.subscribe(run_id, push)
-
-    def stream():
+    async def stream():
         try:
-            # Send hello event
-            yield f"event: hello\ndata: {{\"run_id\": \"{run_id}\"}}\n\n"
-            while True:
-                evt = q.get()
-                yield f"data: {json.dumps(evt)}\n\n"
-        finally:
-            run_event_hub.unsubscribe(run_id, push)
+            async with run_event_hub.subscribe(run_id) as events:
+                yield f"retry: 3000\nevent: hello\ndata: {json.dumps({'run_id': run_id})}\n\n"
+                while True:
+                    try:
+                        event = await asyncio.wait_for(
+                            events.get(), timeout=run_event_hub.heartbeat_seconds,
+                        )
+                    except asyncio.TimeoutError:
+                        yield ": heartbeat\n\n"
+                        continue
+                    if event is None:
+                        break
+                    yield f"data: {json.dumps(event)}\n\n"
+        except (RedisError, OSError):
+            # EventSource retries; ordinary status/log polling remains available.
+            yield "retry: 3000\n\n"
 
-    return StreamingResponse(stream(), media_type="text/event-stream")
+    return EventStreamResponse(stream())
 
 
 @router.delete("/{run_id}")
