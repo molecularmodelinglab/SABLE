@@ -11,6 +11,9 @@ from redis import Redis
 from redis.exceptions import RedisError
 
 
+_CACHEABLE_RUN_STATUSES = {"completed", "failed", "cancelled", "canceled", "stopped"}
+
+
 class CacheService:
     """Service for managing Redis cache operations."""
 
@@ -206,7 +209,7 @@ class CacheService:
 
     def cache_run(self, run_id: str, run_data: Dict[str, Any], ttl_minutes: int = 10) -> bool:
         """
-        Cache complete run information.
+        Cache stable run information; active snapshots can race lease transitions.
 
         Args:
             run_id: Run identifier
@@ -216,6 +219,8 @@ class CacheService:
         Returns:
             True if cached successfully
         """
+        if run_data.get("status") not in _CACHEABLE_RUN_STATUSES:
+            return False
         if not self.is_connected():
             return False
 
@@ -246,7 +251,8 @@ class CacheService:
             key = f"run:{run_id}"
             value = self.redis.get(key)
             if value:
-                return json.loads(value)
+                data = json.loads(value)
+                return data if data.get("status") in _CACHEABLE_RUN_STATUSES else None
             return None
         except (RedisError, json.JSONDecodeError) as e:
             print(f"Error retrieving cached run: {e}")
@@ -275,7 +281,7 @@ class CacheService:
 
     def cache_user_runs_list(self, user_id: str, runs_data: List[Dict[str, Any]], ttl_minutes: int = 5) -> bool:
         """
-        Cache user's runs list.
+        Cache a user's runs list only when it contains no active snapshots.
 
         Args:
             user_id: User UUID
@@ -285,6 +291,8 @@ class CacheService:
         Returns:
             True if cached successfully
         """
+        if any(run.get("status") not in _CACHEABLE_RUN_STATUSES for run in runs_data):
+            return False
         if not self.is_connected():
             return False
 
@@ -315,7 +323,10 @@ class CacheService:
             key = f"user:{user_id}:runs"
             value = self.redis.get(key)
             if value:
-                return json.loads(value)
+                data = json.loads(value)
+                if any(run.get("status") not in _CACHEABLE_RUN_STATUSES for run in data):
+                    return None
+                return data
             return None
         except (RedisError, json.JSONDecodeError) as e:
             print(f"Error retrieving cached user runs list: {e}")
@@ -356,6 +367,8 @@ class CacheService:
         Returns:
             True if cached successfully
         """
+        if status_data.get("status") not in _CACHEABLE_RUN_STATUSES:
+            return False
         if not self.is_connected():
             return False
 
@@ -386,7 +399,8 @@ class CacheService:
             key = f"run:status:{run_id}"
             value = self.redis.get(key)
             if value:
-                return json.loads(value)
+                data = json.loads(value)
+                return data if data.get("status") in _CACHEABLE_RUN_STATUSES else None
             return None
         except (RedisError, json.JSONDecodeError) as e:
             print(f"Error retrieving cached run status: {e}")
