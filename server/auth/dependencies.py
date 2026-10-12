@@ -15,7 +15,7 @@ from server.services.cache_service import cache_service
 security = HTTPBearer(auto_error=False)
 
 
-async def get_current_user(
+def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db),
     access_token_query: str | None = Query(default=None, alias="access_token")
@@ -24,6 +24,7 @@ async def get_current_user(
     Get current authenticated user from JWT token.
 
     This dependency can be used in any endpoint that requires authentication.
+    It is synchronous so database and cache calls run in FastAPI's worker pool.
 
     Args:
         credentials: HTTP Bearer token from Authorization header

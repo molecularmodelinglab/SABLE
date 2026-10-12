@@ -174,15 +174,16 @@ def check_run_authorization(run_id: str, user: User, db: DBSession) -> RunInfo:
 # ==================== API Endpoints ====================
 
 @router.post("", response_model=RunInfo)
-async def create_run(
+def create_run(
     req: RunCreateRequest,
     request: Request,
     current_user: User = Depends(get_current_active_user),
     db: DBSession = Depends(get_db)
 ):
     """
-    Create and start a new optimization run.
+    Persist and schedule a single-prompt run; workflow execution stays in Celery.
 
+    Synchronous database, storage, and dispatch work runs in FastAPI's worker pool.
     Requires authentication.
     """
     characterization = boltz_access_service.resolve_run_configuration(
