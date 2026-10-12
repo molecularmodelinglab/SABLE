@@ -90,8 +90,12 @@ writable mount. No credentials, application data, or production configuration ar
   [test_recovery.py](concurrency/test_recovery.py): duplicate/stale deliveries,
   heartbeats and fenced completion, outbox recovery, startup failures, API lifespan
   reconciliation, actual Celery-to-Redis publication, migration parity, and stale caches.
-- [test_storage.py](concurrency/test_storage.py): two-user artifact requests during
-  slow Azure hydration, plus protection for concurrent readers of the same run.
+- [test_storage.py](concurrency/test_storage.py): unrelated-run responsiveness,
+  same-run thread/process deduplication, atomic publication, interrupted downloads,
+  killed downloader recovery, shared-root cache validation, and sync/delete coordination.
+- [test_fairness.py](concurrency/test_fairness.py): least-admitted-user ordering,
+  work-conserving capacity, batch recalculation, administrator parity, and authorized
+  queue explanations on real HTTP submission/detail/list endpoints.
 
 Workflow/broker dispatch, blob downloads, heavyweight provider imports, and legacy
 conversation processing are simulated. Submission responsiveness tests additionally
@@ -105,7 +109,7 @@ with a fresh producer interpreter, not an inherited subscriber registry.
 
 These are controlled regression tests, not production load tests or a full Celery
 worker deployment. Phase 3 uses live-only events without replay. Worker recovery is
-covered by Phase 4 below; fairness remains separate. Streaming tests use asynchronous Redis
+covered by Phase 4 below; storage isolation and fairness are covered by Phase 5. Streaming tests use asynchronous Redis
 subscriptions and real stream iterators; ownership checks also exercise HTTP routes.
 
 ### Results and expected baseline
@@ -190,8 +194,8 @@ controlled substitutes rather than a full production Celery worker deployment.
 Submissions stay publicly `queued` while waiting for capacity or broker delivery.
 Only a worker holding the current dispatch token can mark a run `running`.
 Reservations, dispatched work, and running leases all consume the shared database
-capacity; the default remains five across all API and worker processes. There is
-no per-user fairness change.
+capacity; the default remains five across all API and worker processes. Phase 5
+adds fair ordering without changing this ceiling.
 
 A transactional outbox records delivery intent before publishing. Publication and
 workflow claims are separate: uncertain broker acknowledgements may cause duplicate
@@ -233,6 +237,79 @@ Python workflow code. Token fencing protects database run state, not exactly-onc
 external effects or atomic artifact writes. Investigate provider jobs and artifacts
 before explicitly retrying an abandoned run. These isolated regressions do not replace
 the later multi-worker deployment, worker-kill, and production load exercises.
+
+### Phase 5: storage isolation and fair admission
+
+**127 tests passed:** 17 storage tests, 19 fairness/queue tests, and 91 adjacent
+scheduler/submission/worker/recovery/streaming tests. Reports are retained under
+[results](concurrency/results/) in `sable-concurrency-9c450e8ca970`,
+`sable-concurrency-44348243d886`, and `sable-concurrency-535945f6f056`; all three
+isolated projects were removed. Native Windows checks additionally passed same-run
+process deduplication, unrelated-run responsiveness, and killed-downloader recovery
+without exposing partial artifacts (`storage-windows-c07f017637c3/report.json`).
+
+```powershell
+.\tests\concurrency\Run.ps1 -PytestArgs @('-k', 'test_storage or test_fairness')
+.\tests\concurrency\Run.ps1 -PytestArgs @('-k', 'test_scheduler or test_submission or test_worker or test_recovery or test_events')
+```
+
+**Fairness policy:** For each available slot, choose the eligible prompt whose user
+has the fewest admitted runs, then the oldest creation time, then run ID. Count
+reserved, dispatched, running, and legacy running runs; increment the chosen user's
+count before assigning another slot. Broker retry backoff remains in force. There
+is no per-user hard cap, preemption, administrator priority, or administrator
+capacity bypass. One user may occupy all otherwise idle slots. A competing user is
+preferred when capacity next becomes available, not by interrupting existing work.
+The shared persisted capacity remains authoritative. No new migration is required.
+
+**Queue visibility:** Public status remains `queued` until a worker claims the run.
+Authorized create/detail/list responses, including admin views, add optional
+`queue_reason` and `queue_retry_at`. Queue metadata is read-only and batched per
+response; active results are not cached. The UI displays explanations using its
+existing polling, without promising queue positions or exposing dispatch tokens,
+owners, or other users' data.
+
+| Reason | Meaning |
+|---|---|
+| `waiting_for_admission` | Waiting for available capacity under the fair ordering policy. |
+| `dispatch_retry` | Broker delivery failed; `queue_retry_at` is the earliest retry eligibility, not a promised start time. |
+| `dispatching` | Capacity reserved; delivery is being arranged. |
+| `waiting_for_worker` | Delivery recorded; waiting for a worker to claim the run. |
+
+Running/terminal runs have null queue fields. A concurrent transition can briefly
+leave a queued snapshot without a reason; subsequent polling refreshes it. The UI
+build and browser smoke checks passed all four explanations, valid/invalid retry
+dates, status-only compatibility, and a 375px viewport without horizontal overflow.
+Default `tsc --noEmit` remains blocked by a pre-existing `replaceAll`/ES2020 library
+mismatch; `tsc --noEmit --lib ES2021,DOM` passes. Build warnings remain for existing
+3dmol `eval` use and chunk size. See `results/phase5-queue-ui.json`.
+
+**Storage coordination:** [Storage](../server/storage.py) and the small
+[lock helper](../server/storage_lock.py) share one canonical per-run lock across
+hydration, synchronization, and deletion. Unrelated runs do not share it. Download
+staging lives outside artifact directories; same-filesystem hard links publish
+complete files atomically without overwriting existing local files. Failures do
+not record completed hydration. A later caller cleans staging left by a dead process.
+
+For a canonical `data/runs/<id>` directory, coordination state lives under
+`data/.sable-storage/<hash>/`: a permanent `lock`, a `hydrated` manifest, and transient
+`staging`. **Do not remove lock files while processes may use this storage root.**
+All cooperating processes must resolve the same canonical paths and share reliable
+filesystem advisory locks and hard-link support (tested on Linux and Windows/NTFS).
+Unsupported publication fails closed; arbitrary NFS/SMB, power-loss durability, and
+forking while a lock is held are not validated. A live stalled holder can still block
+same-run callers until it releases the lock.
+
+Completion manifests check directory identity, a SHA-256 source fingerprint, and
+recorded file existence. They contain no raw Azure credentials. Missing files or
+invalid manifests cause another hydration attempt; existing local files remain
+untouched. Newly added remote blobs and changed local file contents do not themselves
+invalidate the cache. Sync/delete invalidate completion before mutation. Atomicity
+is **per downloaded file**, not an entire directory snapshot; raw workflow writes
+and reads after returning a local path are not protected by the storage lock.
+
+Full multi-worker/load/worker-termination rollout exercises remain Phase 6. The two
+legacy slow-conversation regressions remain outside the single-prompt acceptance set.
 
 ## Test Types
 
