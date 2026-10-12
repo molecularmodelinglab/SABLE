@@ -47,6 +47,72 @@ pytest --cov=server --cov-report=html
 open htmlcov/index.html
 ```
 
+## Isolated Concurrency Acceptance Tests (Phase 1)
+
+The opt-in [concurrency suite](concurrency/) asserts the behavior required by the
+[remediation plan](../CONCURRENCY_PLAN.md). It is separate from the ordinary test
+suite and does not load the parent fixtures, application `.env`, or production services.
+
+From the repository root, with Docker Desktop running Linux containers:
+
+```powershell
+.\tests\concurrency\Run.ps1
+
+# Select one area; the same isolation and cleanup still apply.
+.\tests\concurrency\Run.ps1 -PytestArgs @('-k', 'scheduler')
+```
+
+The runner builds a small API-only image, creates a uniquely named Compose project,
+and removes its containers, network, and volumes in `finally`, including when tests
+fail. Docker must be able to fetch images and Python dependencies during setup;
+the test services themselves use an internal network with no published ports.
+PostgreSQL data is temporary, and Redis persistence is disabled. Only the server
+source and this test directory are mounted read-only; reports have a separate
+writable mount. No credentials, application data, or production configuration are mounted.
+
+### Structure and boundaries
+
+- [conftest.py](concurrency/conftest.py): disposable database fixtures, two user
+  identities, real FastAPI routers, a local HTTP server, and per-test measurements.
+- [test_api.py](concurrency/test_api.py): another user's run requests during slow
+  chat, including run submission and ownership checks for progress/artifacts.
+- [test_events.py](concurrency/test_events.py): 44 idle stream iterators, request
+  thread capacity, fresh-process event delivery, and subscription isolation/cleanup.
+- [test_scheduler.py](concurrency/test_scheduler.py): real PostgreSQL admission and
+  queue races across threads/processes, failed dispatch, and the existing global limit.
+- [test_storage.py](concurrency/test_storage.py): two-user artifact requests during
+  slow Azure hydration, plus protection for concurrent readers of the same run.
+
+Only external execution boundaries are simulated: slow conversation processing,
+workflow/broker dispatch, blob downloads, and heavyweight provider imports. User
+identity is injected rather than obtained through login; real run ownership checks
+and per-request database sessions remain active. The SSE testing bypass is disabled.
+Scheduler processes use separate database connections. Event delivery is tested
+with a fresh producer interpreter, not an inherited subscriber registry.
+
+These are controlled regression tests, not production load tests or a full Celery
+worker deployment. Replay policy, fairness changes, and worker recovery belong to
+later phases. Event callbacks/stream iterators exercise the current interfaces;
+update those test adapters if a remediation intentionally changes their API.
+
+### Results and expected baseline
+
+Each invocation writes `junit.xml` and `metrics.jsonl` under
+`tests/concurrency/results/<unique-project>/`, printed by the runner and ignored
+by Git. Measurements include request latency, occupied thread slots, queue age,
+dispatch counts, and duplicate dispatches. Queue age uses the persisted creation
+time of fixture runs placed directly into the queue. One-second observation windows
+check whether unrelated requests finish **before** a controlled slow operation is
+released; they are regression-test bounds, not agreed production latency targets.
+
+The Phase 1 baseline was verified twice on 2026-10-12: **14 tests, 10 failures,
+4 passes, zero errors**. Failures assert desired behavior and deliberately remain
+ordinary failures, not `xfail` or inverted bug assertions. The passing controls
+cover ownership, same-process subscription isolation/cleanup, the existing global
+five-run policy, and same-run hydration serialization. Exit code 1 is therefore
+expected until later remediation phases fix the failures; setup errors are not an
+acceptable baseline. The root pytest configuration excludes this opt-in directory.
+
 ## Test Types
 
 ### Unit Tests (53 tests)

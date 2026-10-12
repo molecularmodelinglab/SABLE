@@ -1,0 +1,18 @@
+# API-only dependencies; provider/chemistry execution is replaced at test boundaries.
+anyio==4.10.0
+fastapi==0.115.5
+httpx==0.28.1
+pydantic==2.11.7
+SQLAlchemy==2.0.43
+psycopg2-binary==2.9.11
+asyncpg==0.30.0
+redis==7.1.0
+python-jose[cryptography]==3.5.0
+passlib==1.7.4
+bcrypt==3.2.2
+python-multipart==0.0.20
+email-validator==2.3.0
+cryptography==50.0.1
+pytest==8.3.4
+pytest-timeout==2.3.1
+uvicorn==0.32.1

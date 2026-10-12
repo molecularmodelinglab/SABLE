@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: concurrency
+      POSTGRES_PASSWORD: disposable-test-only
+      POSTGRES_DB: sable_concurrency
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U concurrency -d sable_concurrency"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:7-alpine
+    command: [redis-server, --save, "", --appendonly, "no"]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+  tests:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SABLE_CONCURRENCY_ISOLATED: "1"
+      ENVIRONMENT: concurrency
+      DATABASE_URL: postgresql://concurrency:disposable-test-only@postgres:5432/sable_concurrency
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      SABLE_DATA_ROOT: /tmp/sable-concurrency
+      SABLE_STORAGE_BACKEND: local
+      SECRET_KEY: concurrency-tests-not-a-production-secret
+      LLM_PROVIDER: disabled
+    volumes:
+      - ../../server:/suite/server:ro
+      - .:/suite/tests/concurrency:ro
+      - type: bind
+        source: ${SABLE_CONCURRENCY_RESULTS:-./results}
+        target: /results
+    command: ["/suite/tests/concurrency", "--junitxml=/results/junit.xml"]
+networks:
+  default:
+    internal: true
