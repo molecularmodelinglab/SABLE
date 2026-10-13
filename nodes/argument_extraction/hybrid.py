@@ -16,6 +16,7 @@ from schemas.state import (
 )
 from schemas.errors import NodeError
 from schemas.properties import get_property_catalog
+from schemas.openfe import OPENFE_PROPERTIES, prompt_protocol, route_openfe_targets
 from schemas.tool_registry import ToolKind, ToolRunRecord, ToolSpec
 from schemas.tool_schemas import ArgumentExtractionRequest, ArgumentExtractionResult
 from tools.registry import ToolRegistry, get_tool_registry
@@ -74,7 +75,7 @@ class HybridArgumentExtractor:
 
     def extract_dict(self, prompt: str) -> Dict[str, Any]:
         llm_result = self.extract_with_llm(prompt)
-        rule_result = {} #self.extract_with_rules(prompt)
+        rule_result = self.extract_with_rules(prompt) if not llm_result or llm_result.get('confidence_score', 0) < 0.3 else {}
         if self.merger:
             return self.merger.merge(llm_result, rule_result, prompt)
         return self.validate_and_merge(llm_result, rule_result, prompt)
@@ -233,6 +234,7 @@ class HybridArgumentExtractor:
                     'transformation': transformation
                 })
         
+        targets = route_openfe_targets(targets, prompt)
         # Assign equal weights to all targets
         if targets:
             equal_weight = 1.0 / len(targets)
@@ -521,15 +523,15 @@ class HybridArgumentExtractor:
         )
         if free_energy_requested and merged['proteins'] and not separate_affinity_requested and not relative_energy_requested:
             targets = [dict(target) for target in merged.get('target_properties', [])]
-            has_openfe = any(target.get('property_name') == 'openfe_binding_free_energy' for target in targets)
+            has_openfe = any(target.get('property_name') == 'openfe_absolute_binding_free_energy' for target in targets)
             corrected_targets = []
             for target in targets:
                 if self.PROPERTY_CATALOG.normalize(target.get('property_name', '')) == 'binding_affinity':
                     if has_openfe:
                         continue
                     target.update(
-                        property_name='openfe_binding_free_energy', optimization_mode='MIN',
-                        bounds=self.PROPERTY_CATALOG.bounds_for('openfe_binding_free_energy'),
+                        property_name='openfe_absolute_binding_free_energy', optimization_mode='MIN',
+                        bounds=self.PROPERTY_CATALOG.bounds_for('openfe_absolute_binding_free_energy'),
                         transformation='LINEAR',
                     )
                     has_openfe = True
@@ -537,6 +539,7 @@ class HybridArgumentExtractor:
                 corrected_targets.append(target)
             merged['target_properties'] = corrected_targets
         
+        merged['target_properties'] = route_openfe_targets(merged.get('target_properties', []), original_prompt)
         # Cross-validate and supplement target properties
         if not merged.get('target_properties') and rule_result.get('target_properties'):
             merged['target_properties'] = rule_result['target_properties']
@@ -872,6 +875,21 @@ def extract_arguments_node(state: WorkflowState) -> Dict[str, Any]:
     state.protein_targets = validated_proteins
     final_result['proteins'] = serialized_proteins
     
+    final_result['target_properties'] = route_openfe_targets(final_result.get('target_properties', []) or [], state.user_prompt)
+    configured_protocol = (state.characterization_config.get('openfe') or {}).get('protocol')
+    if configured_protocol is not None:
+        if configured_protocol not in OPENFE_PROPERTIES:
+            raise ValueError("OpenFE protocol must be abfe, rbfe, or septop.")
+        explicit_protocol = prompt_protocol(state.user_prompt, infer_relative=False)
+        if explicit_protocol and explicit_protocol != configured_protocol:
+            raise ValueError("The prompt and configured OpenFE protocol must agree.")
+        targets = final_result.get('target_properties', []) or []
+        if any(target.get('property_name') in OPENFE_PROPERTIES.values() for target in targets):
+            for target in targets:
+                if target.get('property_name') in OPENFE_PROPERTIES.values():
+                    target.update(property_name=OPENFE_PROPERTIES[configured_protocol], optimization_mode='MIN',
+                                  bounds=get_property_catalog().bounds_for(OPENFE_PROPERTIES[configured_protocol]))
+
     # Resolve semantic binding intent against the configured runtime backend.
     target_dicts, auto_added_boltz_target = _resolve_boltz_objective_targets(
         final_result.get('target_properties', []) or [],
@@ -990,7 +1008,8 @@ def _resolve_boltz_objective_targets(
         primary_found = True
 
     auto_added = None
-    if ensure_primary and not primary_found:
+    has_openfe = any(catalog.normalize(target.get('property_name', '')) in OPENFE_PROPERTIES.values() for target in resolved)
+    if ensure_primary and not primary_found and not has_openfe:
         resolved.append({
             'property_name': property_name,
             'optimization_mode': mode.value,
