@@ -39,7 +39,10 @@ class CharacterizationRunConfiguration(BaseModel):
     boltz: BoltzRunConfiguration = Field(default_factory=BoltzRunConfiguration)
     openfe: Optional[Dict[str, Any]] = Field(
         default=None,
-        description="OpenFE complexes keyed by molecule ID, settings, execution, and campaign options.",
+        description=(
+            "OpenFE protocol (abfe/rbfe/septop), ABFE complexes keyed by molecule ID or "
+            "network ligands/reference/protein, structure_source, settings, execution, and campaign options."
+        ),
     )
 
 
