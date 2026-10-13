@@ -112,13 +112,33 @@ properties:
     tool_names:
       boltz: binding_affinity
 
-  openfe_binding_free_energy:
-    label: OpenFE Binding Free Energy (kcal/mol)
-    parser_keywords: [openfe, abfe, binding free energy]
+  openfe_absolute_binding_free_energy:
+    label: OpenFE Absolute Binding Free Energy (kcal/mol)
+    aliases: [openfe_abfe]
+    parser_keywords: [openfe, abfe, absolute binding free energy]
     default_bounds: [-30.0, 10.0]
     default_mode: MIN
+    units: kcal/mol
     tool_names:
-      openfe: openfe_binding_free_energy
+      openfe: openfe_absolute_binding_free_energy
+
+  openfe_relative_binding_free_energy:
+    label: OpenFE RBFE Relative to Reference (kcal/mol)
+    parser_keywords: [rbfe, relative binding free energy]
+    default_bounds: [-20.0, 20.0]
+    default_mode: MIN
+    units: kcal/mol
+    tool_names:
+      openfe: openfe_relative_binding_free_energy
+
+  openfe_septop:
+    label: OpenFE SepTop Relative to Reference (kcal/mol)
+    parser_keywords: [septop, sep-top, separated topologies]
+    default_bounds: [-20.0, 20.0]
+    default_mode: MIN
+    units: kcal/mol
+    tool_names:
+      openfe: openfe_septop
 
   boltz_binding_confidence:
     label: Boltz Binding Confidence

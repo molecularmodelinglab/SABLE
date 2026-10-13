@@ -154,9 +154,11 @@ tools:
     priority: 60
     capability:
       provides:
-        - openfe_binding_free_energy
+        - openfe_absolute_binding_free_energy
+        - openfe_relative_binding_free_energy
+        - openfe_septop
       requires:
-        - openfe_complexes
+        - openfe_bound_coordinates
       batch: true
       local: false
       cost: high
