@@ -16,6 +16,7 @@ from uuid import uuid4
 import requests
 
 from schemas.tool_schemas import CharacterizationRequest, CharacterizationResult
+from schemas.openfe import OPENFE_PROPERTIES
 
 
 class OpenFEError(RuntimeError):
@@ -27,7 +28,32 @@ class OpenFETimeout(OpenFEError):
 
 
 class OpenFETool:
-    """Submit staged ABFE campaigns and retrieve their binding free energies."""
+    """Submit free-energy campaigns and preserve absolute or network result semantics."""
+
+    @staticmethod
+    def protocol_for(request: CharacterizationRequest) -> str:
+        requested = {key for key, value in OPENFE_PROPERTIES.items() if value in request.properties}
+        configured = request.tool_options.get("protocol")
+        if configured is not None and configured not in OPENFE_PROPERTIES:
+            raise OpenFEError("OpenFE protocol must be abfe, rbfe, or septop.")
+        if len(requested) > 1 or (configured and requested and configured not in requested):
+            raise OpenFEError("Select one OpenFE protocol per run; the objective and protocol must agree.")
+        protocol = configured or next(iter(requested), "abfe")
+        incompatible = {"rbfe": {"screening", "neutralize_ligands"},
+                        "septop": {"similarity", "charges", "neutralize_ligands"}}.get(protocol, set())
+        if incompatible.intersection(request.tool_options):
+            raise OpenFEError(f"Unsupported {protocol} options: {', '.join(sorted(incompatible.intersection(request.tool_options)))}.")
+        return protocol
+
+    @staticmethod
+    def validate_series_options(options: dict[str, Any], names: list[str]) -> None:
+        network = options.get("network") or {}
+        central = network.get("central_ligand")
+        if central is not None and central not in names:
+            raise OpenFEError("OpenFE network central_ligand must be in the current batch plus reference.")
+        for edge in network.get("edges") or []:
+            if not isinstance(edge, (list, tuple)) or len(edge) != 2 or edge[0] == edge[1] or any(name not in names for name in edge):
+                raise OpenFEError("OpenFE explicit edges must join two distinct ligands in the current batch plus reference.")
 
     def __init__(
         self,
@@ -86,10 +112,13 @@ class OpenFETool:
     def list_campaigns(self) -> list[str]:
         return self._request("GET", "/campaigns")
 
-    def ensure_upload_support(self) -> None:
+    def ensure_upload_support(self, *, protocol: str = "abfe") -> None:
         schema = self._request("GET", "/openapi.json")
-        if "post" not in schema.get("paths", {}).get("/campaigns/upload", {}):
+        paths = schema.get("paths", {})
+        if "post" not in paths.get("/campaigns/upload", {}):
             raise OpenFEError("The OpenFE service must be redeployed with /campaigns/upload before generating Boltz poses.")
+        if protocol in {"rbfe", "septop"} and "get" not in paths.get("/campaigns/{name}/network", {}):
+            raise OpenFEError("The OpenFE service must support /campaigns/{name}/network for RBFE/SepTop.")
 
     @staticmethod
     def complexes_from_boltz(
@@ -148,6 +177,9 @@ class OpenFETool:
         return complexes
 
     def characterize(self, request: CharacterizationRequest) -> CharacterizationResult:
+        protocol = self.protocol_for(request)
+        if protocol != "abfe":
+            return self._characterize_series(request, protocol)
         options = request.tool_options
         configured = options.get("complexes", {})
         molecule_ids = request.molecule_ids or list(request.search_space)
@@ -192,6 +224,8 @@ class OpenFETool:
                 "execution": execution,
                 "neutralize_ligands": False,
             }
+            if "relax" in options:
+                campaign["relax"] = deepcopy(options["relax"])
             if options.get("upload_inputs", False):
                 self.submit_campaign(campaign, upload_inputs=True)
             else:
@@ -207,12 +241,175 @@ class OpenFETool:
             uncertainty = float(prediction["uncertainty"])
             if not math.isfinite(energy) or not math.isfinite(uncertainty) or uncertainty < 0:
                 raise OpenFEError(f"OpenFE returned invalid energy or uncertainty for '{molecule_id}'.")
-            results[molecule_id] = {"openfe_binding_free_energy": energy}
+            results[molecule_id] = {"openfe_absolute_binding_free_energy": energy}
             details[molecule_id] = {**prediction, "units": "kcal/mol", "campaign_name": name}
         return CharacterizationResult(
             results=results,
             metadata={"tool_id": "openfe", "campaign_name": name, "openfe": details},
         )
+
+    def _characterize_series(
+        self, request: CharacterizationRequest, protocol: str,
+    ) -> CharacterizationResult:
+        options = request.tool_options
+        if options.get("complexes"):
+            raise OpenFEError("RBFE and SepTop use ligands, protein, and reference, not complexes.")
+        ligands = deepcopy(options.get("ligands", []))
+        if not isinstance(ligands, list) or not ligands:
+            raise OpenFEError("OpenFE network campaigns require at least two ligands.")
+        by_name = {}
+        for ligand in ligands:
+            name = ligand.get("name", "")
+            self._campaign_path(name)
+            if name in by_name:
+                raise OpenFEError("OpenFE ligand names must be unique.")
+            by_name[name] = ligand
+        self.validate_series_options(options, list(by_name))
+        reference = options.get("reference")
+        if reference not in by_name:
+            raise OpenFEError("Set reference to a ligand name in the OpenFE series.")
+        molecule_ids = request.molecule_ids or list(request.search_space)
+        if not molecule_ids:
+            raise OpenFEError("OpenFE requires molecule IDs.")
+        for molecule_id in molecule_ids:
+            ligand = by_name.get(molecule_id, {})
+            if not request.search_space.get(molecule_id) or ligand.get("smiles") != request.search_space[molecule_id]:
+                raise OpenFEError(f"OpenFE ligand SMILES must match molecule '{molecule_id}'.")
+        repeats = options.get("execution", {}).get("repeats", 3)
+        if isinstance(repeats, bool) or not isinstance(repeats, int) or repeats < 1:
+            raise OpenFEError("OpenFE repeats must be a positive integer.")
+        if len(ligands) == 1 and not options.get("resume"):
+            return CharacterizationResult(
+                results={name: {OPENFE_PROPERTIES[protocol]: 0.0} for name in [reference, *options.get("reference_aliases", [])]},
+                metadata={"tool_id": "openfe", "protocol": protocol, "reference": reference,
+                          "reference_only": True, "reference_aliases": options.get("reference_aliases", []),
+                          "units": "kcal/mol"},
+            )
+        name = options.get("campaign_name") or f"sable_{uuid4().hex}"
+        if options.get("resume"):
+            if not options.get("campaign_name"):
+                raise OpenFEError("Resuming OpenFE requires campaign_name.")
+        else:
+            reference_ligand = by_name[reference]
+            if not (reference_ligand.get("path") or reference_ligand.get("structure")):
+                raise OpenFEError("The OpenFE reference ligand must supply bound coordinates.")
+            if not (reference_ligand.get("structure") or options.get("protein", {}).get("path")):
+                raise OpenFEError("OpenFE needs a protein path or a reference complex structure.")
+            campaign = {
+                "name": name, "protocol": protocol, "reference": reference,
+                "ligands": ligands,
+            }
+            fields = ("protein", "cofactors", "alignment", "network", "settings", "execution", "relax")
+            fields += ("similarity", "charges") if protocol == "rbfe" else ("screening",)
+            for field in fields:
+                if field in options:
+                    campaign[field] = deepcopy(options[field])
+            campaign.setdefault("network", {"method": "radial", "central_ligand": reference})
+            self.submit_campaign(campaign, upload_inputs=options.get("upload_inputs", False))
+        network = self.wait_for_network(name, protocol=protocol, expected_repeats=repeats)
+        if not options.get("allow_failed_quality", False):
+            if any(edge.get("quality") == "fail" for edge in network["edges"]) or any(
+                check.get("status") == "fail" for check in network["checks"]
+            ):
+                raise OpenFEError(f"OpenFE network quality checks failed in '{name}'.")
+        fitted = {row["ligand"]: row for row in network["ligands"]}
+        required = set(molecule_ids) | {reference}
+        reachable = {reference}
+        while True:
+            expanded = reachable | {
+                endpoint for edge in network["edges"]
+                if edge["ligand_a"] in reachable or edge["ligand_b"] in reachable
+                for endpoint in (edge["ligand_a"], edge["ligand_b"])
+            }
+            if expanded == reachable:
+                break
+            reachable = expanded
+        missing = required - (set(fitted) & reachable)
+        missing.update(required & set(network["unreachable"]))
+        if missing:
+            raise OpenFEError(
+                f"OpenFE ligands missing or disconnected from reference '{reference}': {', '.join(sorted(missing))}. "
+                "Check screening and network planning; no partial batch was accepted."
+            )
+        offset = fitted[reference]["dg_relative"]
+        results = {
+            molecule_id: {OPENFE_PROPERTIES[protocol]: fitted[molecule_id]["dg_relative"] - offset}
+            for molecule_id in molecule_ids
+        }
+        details = {
+            molecule_id: {
+                **fitted[molecule_id], "reference": reference, "protocol": protocol,
+                "dg_reference_relative": results[molecule_id][OPENFE_PROPERTIES[protocol]],
+                "uncertainty_scope": "network_mean_fit_not_reference_difference",
+                "units": "kcal/mol", "campaign_name": name,
+            }
+            for molecule_id in molecule_ids
+        }
+        results.update({alias: {OPENFE_PROPERTIES[protocol]: 0.0} for alias in options.get("reference_aliases", [])})
+        return CharacterizationResult(results=results, metadata={
+            "tool_id": "openfe", "campaign_name": name, "protocol": protocol,
+            "reference": reference, "openfe": details, "network": network,
+            "reference_aliases": options.get("reference_aliases", []),
+        })
+
+    def network(self, name: str) -> dict[str, Any]:
+        payload = self._request("GET", f"{self._campaign_path(name)}/network")
+        if not isinstance(payload, dict) or any(
+            not isinstance(payload.get(key), list)
+            for key in ("edges", "ligands", "cycles", "unreachable", "checks")
+        ):
+            raise OpenFEError("OpenFE network response must contain edges, ligands, cycles, unreachable, and checks.")
+        return payload
+
+    @staticmethod
+    def _validate_network_values(network: dict[str, Any]) -> None:
+        for collection, identity, energy in (("edges", "edge", "ddg"), ("ligands", "ligand", "dg_relative")):
+            seen = set()
+            for row in network[collection]:
+                name = row.get(identity)
+                if not isinstance(name, str) or not name or name in seen:
+                    raise OpenFEError(f"OpenFE returned missing or duplicate {identity} names.")
+                seen.add(name)
+                for field in (energy, "uncertainty"):
+                    value = row.get(field)
+                    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                        raise OpenFEError(f"OpenFE returned invalid {field} for '{name}'.")
+                if row["uncertainty"] < 0:
+                    raise OpenFEError(f"OpenFE returned negative uncertainty for '{name}'.")
+                if collection == "edges" and (
+                    not isinstance(row.get("ligand_a"), str) or not isinstance(row.get("ligand_b"), str)
+                    or row["ligand_a"] == row["ligand_b"]
+                ):
+                    raise OpenFEError(f"OpenFE returned invalid endpoints for '{name}'.")
+
+    def wait_for_network(
+        self, name: str, *, protocol: str, expected_repeats: int = 3,
+    ) -> dict[str, Any]:
+        if protocol not in {"rbfe", "septop"} or isinstance(expected_repeats, bool) or not isinstance(expected_repeats, int) or expected_repeats < 1:
+            raise ValueError("A network protocol and positive repeat count are required.")
+        deadline = time.monotonic() + self.wait_timeout
+        while True:
+            summary = self.status(name)
+            self._check_failure(summary)
+            if summary.get("protocol") != protocol:
+                raise OpenFEError("The remote OpenFE campaign protocol does not match the requested protocol.")
+            operation = summary.get("last_operation") or {}
+            if operation.get("operation") == "submit" and operation.get("status") == "done":
+                # Gathering updates Slurm run states; fitted values alone can contain partial repeats.
+                network = self.network(name)
+                gathered = self.status(name)
+                self._check_failure(gathered)
+                runs = gathered.get("runs", [])
+                if not runs:
+                    raise OpenFEError("OpenFE planned no network edges.")
+                if all(run.get("state") == "done" for run in runs):
+                    if any(run.get("repeats", 0) < expected_repeats for run in runs):
+                        raise OpenFEError("The OpenFE campaign has fewer repeats than requested.")
+                    if {run["name"] for run in runs} != {edge.get("edge") for edge in network["edges"]}:
+                        raise OpenFEError("OpenFE network results do not cover every planned edge.")
+                    self._validate_network_values(network)
+                    return network
+            self._pause(name, deadline)
 
     def create_campaign(self, campaign: dict[str, Any]) -> dict[str, Any]:
         self._campaign_path(campaign.get("name", ""))
@@ -223,22 +420,26 @@ class OpenFETool:
         self._campaign_path(campaign.get("name", ""))
         payload = deepcopy(campaign)
         sources: dict[Path, str] = {}
+        references = [(payload.get("protein", {}), "path")]
+        references.extend((cofactor, "path") for cofactor in payload.get("cofactors", []))
+        for ligand in payload.get("ligands", []):
+            references.extend(((ligand, "structure"), (ligand, "path")))
         for spec in payload.get("complexes", []):
-            references = [(spec, "structure")]
+            references.append((spec, "structure"))
             references.extend((spec.get(key, {}), "path") for key in ("protein", "ligand"))
             references.extend((cofactor, "path") for cofactor in spec.get("cofactors", []))
-            for component, key in references:
-                if component.get(key) is None:
-                    continue
-                source = Path(component[key]).resolve()
-                if not source.is_file() or source.stat().st_size == 0:
-                    raise OpenFEError(f"OpenFE upload requires a nonempty local file: {source}")
-                suffix = source.suffix.lower()
-                if suffix not in {".cif", ".mmcif", ".pdb", ".sdf", ".mol"}:
-                    raise OpenFEError(f"Unsupported OpenFE coordinate extension: {suffix}")
-                if source not in sources:
-                    sources[source] = f"input_{len(sources) + 1}{suffix}"
-                component[key] = sources[source]
+        for component, key in references:
+            if component.get(key) is None:
+                continue
+            source = Path(component[key]).resolve()
+            if not source.is_file() or source.stat().st_size == 0:
+                raise OpenFEError(f"OpenFE upload requires a nonempty local file: {source}")
+            suffix = source.suffix.lower()
+            if suffix not in {".cif", ".mmcif", ".pdb", ".sdf", ".mol", ".mol2"}:
+                raise OpenFEError(f"Unsupported OpenFE coordinate extension: {suffix}")
+            if source not in sources:
+                sources[source] = f"input_{len(sources) + 1}{suffix}"
+            component[key] = sources[source]
         if not sources or len(sources) > 100:
             raise OpenFEError("OpenFE uploads require between 1 and 100 coordinate files.")
         with ExitStack() as stack:
@@ -280,7 +481,7 @@ class OpenFETool:
         if remaining <= 0:
             raise OpenFETimeout(
                 f"Timed out waiting for OpenFE campaign '{name}'. Remote work was not cancelled; "
-                "use status() and wait_for_results() to resume without resubmitting."
+                "use status() and protocol-appropriate result retrieval to resume without resubmitting."
             )
         time.sleep(min(self.poll_interval, remaining))
 
