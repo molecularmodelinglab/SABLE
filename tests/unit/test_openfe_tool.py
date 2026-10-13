@@ -166,7 +166,7 @@ def test_self_hosted_boltz_to_openfe_lifecycle(tmp_path, default_source):
         "base_url": "https://boltz.example", "api_token": "test", "fetch_cif": False,
     }})
     if default_source:
-        state.targets = [TargetProperty(name="openfe_binding_free_energy")]
+        state.targets = [TargetProperty(name="openfe_absolute_binding_free_energy")]
         state.protein_targets = [ProteinTarget(chain_id="A", sequence="MAAA")]
         state.characterization_config["openfe"] = {
             "campaign_name": "generated", "execution": {"repeats": 1},
@@ -181,7 +181,7 @@ def test_self_hosted_boltz_to_openfe_lifecycle(tmp_path, default_source):
         result = _run_openfe_with_boltz(state, request, get_tool_registry(), tool)
     assert generate.call_args.args[2].tool_options["fetch_cif"] is True
     assert generate.call_args.args[2].proteins[0]["sequence"] == "MAAA"
-    assert result.results == {"mol_1": {"openfe_binding_free_energy": -8.2}}
+    assert result.results == {"mol_1": {"openfe_absolute_binding_free_energy": -8.2}}
     assert result.metadata["structure_source"] == "boltz"
     assert result.metadata["campaign_name"] == "generated"
     assert tool.session.request.call_count == 9
@@ -339,7 +339,7 @@ def test_campaign_names_cannot_change_endpoint(name):
 def characterization_request(**options):
     return CharacterizationRequest(
         smiles={"mol_1": "CCO"}, search_space={"mol_1": "CCO"}, molecule_ids=["mol_1"],
-        properties=["openfe_binding_free_energy"],
+        properties=["openfe_absolute_binding_free_energy"],
         tool_options={
             "complexes": {"mol_1": {
                 "name": "complex_1", "structure": "/data/complex.cif",
@@ -362,7 +362,7 @@ def test_characterize_maps_ligands_preserves_units_and_quality():
     tool.wait_for_results = Mock(return_value=[prediction()])
     request = characterization_request(campaign_name="test")
     result = tool.characterize(request)
-    assert result.results == {"mol_1": {"openfe_binding_free_energy": -8.2}}
+    assert result.results == {"mol_1": {"openfe_absolute_binding_free_energy": -8.2}}
     assert result.metadata["openfe"]["mol_1"]["uncertainty"] == 0.3
     assert result.metadata["openfe"]["mol_1"]["quality"] == "unknown"
     assert result.metadata["openfe"]["mol_1"]["units"] == "kcal/mol"
@@ -410,7 +410,7 @@ def test_run_request_preserves_openfe_configuration():
 
     options = characterization_request().tool_options
     payload = RunCreateRequest.model_validate({
-        "prompt": "minimize openfe_binding_free_energy",
+        "prompt": "minimize openfe_absolute_binding_free_energy",
         "characterization": {"openfe": options},
     })
     assert payload.model_dump()["characterization"]["openfe"] == options

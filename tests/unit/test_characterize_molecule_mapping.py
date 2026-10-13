@@ -40,16 +40,16 @@ def test_openfe_request_and_registry_dispatch():
     assert request.proteins == []
     tool = Mock()
     tool.characterize.return_value = CharacterizationResult(
-        results={"mol_1": {"openfe_binding_free_energy": -8.2}},
+        results={"mol_1": {"openfe_absolute_binding_free_energy": -8.2}},
     )
     result = _run_characterization_tool(get_tool_registry().get("openfe"), tool, request)
-    assert result.results["mol_1"]["openfe_binding_free_energy"] == -8.2
+    assert result.results["mol_1"]["openfe_absolute_binding_free_energy"] == -8.2
     tool.characterize.assert_called_once_with(request)
 
 
 def test_openfe_energy_does_not_become_boltz_affinity():
     assert _map_target_properties(
-        [TargetProperty(name="binding_affinity")], {"openfe_binding_free_energy": -8.2},
+        [TargetProperty(name="binding_affinity")], {"openfe_absolute_binding_free_energy": -8.2},
     ) == {}
 
 
@@ -73,7 +73,7 @@ def test_openfe_selection_preserves_upstream_boltz_configuration():
 
     config = {"base_url": "https://boltz.example", "timeout": 123, "cif_save_dir": "/tmp/poses"}
     state = WorkflowState(
-        user_prompt="OpenFE", targets=[TargetProperty(name="openfe_binding_free_energy")],
+        user_prompt="OpenFE", targets=[TargetProperty(name="openfe_absolute_binding_free_energy")],
         characterization_config={"openfe": {"structure_source": "boltz"}, "boltz_config": config},
     )
     decide_characterization_node(state)
@@ -90,13 +90,13 @@ def test_openfe_generates_platform_poses_before_upload():
     state = WorkflowState(user_prompt="OpenFE", characterization_config={"boltz": {"provider": "platform"}})
     request = CharacterizationRequest(
         smiles={"mol_1": "CCO"}, search_space={"mol_1": "CCO"}, molecule_ids=["mol_1"],
-        properties=["openfe_binding_free_energy"], proteins=[{"chain_id": "A", "sequence": "MAAA"}],
+        properties=["openfe_absolute_binding_free_energy"], proteins=[{"chain_id": "A", "sequence": "MAAA"}],
         tool_options={"structure_source": "boltz"},
     )
     poses = CharacterizationResult(results={"mol_1": {}}, metadata={"provider": "platform"})
     tool = Mock()
     tool.complexes_from_boltz.return_value = {"mol_1": {"structure": "/tmp/pose.cif"}}
-    tool.characterize.return_value = CharacterizationResult(results={"mol_1": {"openfe_binding_free_energy": -8.2}})
+    tool.characterize.return_value = CharacterizationResult(results={"mol_1": {"openfe_absolute_binding_free_energy": -8.2}})
     with patch("nodes.characterize_molecules._run_boltz_platform_characterization", return_value=poses) as generate:
         result = _run_openfe_with_boltz(state, request, Mock(), tool)
     tool.ensure_upload_support.assert_called_once()
@@ -117,7 +117,7 @@ def test_openfe_boltz_resume_does_not_generate_or_upload():
 
     request = CharacterizationRequest(
         smiles={"mol_1": "CCO"}, search_space={"mol_1": "CCO"}, molecule_ids=["mol_1"],
-        properties=["openfe_binding_free_energy"],
+        properties=["openfe_absolute_binding_free_energy"],
         tool_options={"structure_source": "boltz", "resume": True, "campaign_name": "existing"},
     )
     tool = OpenFETool(base_url="https://openfe.example", session=Mock())
@@ -128,4 +128,4 @@ def test_openfe_boltz_resume_does_not_generate_or_upload():
         result = _run_openfe_with_boltz(WorkflowState(user_prompt="OpenFE"), request, Mock(), tool)
     generate.assert_not_called()
     tool.session.request.assert_not_called()
-    assert result.results["mol_1"]["openfe_binding_free_energy"] == -8.2
+    assert result.results["mol_1"]["openfe_absolute_binding_free_energy"] == -8.2

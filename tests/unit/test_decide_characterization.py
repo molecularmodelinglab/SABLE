@@ -27,7 +27,7 @@ def test_openfe_selection_preserves_structure_configuration():
     openfe_config = {"complexes": {"mol_1": {"structure": "/data/complex.cif"}}}
     state = WorkflowState(
         user_prompt="minimize OpenFE binding free energy",
-        targets=[TargetProperty(name="openfe_binding_free_energy")],
+        targets=[TargetProperty(name="openfe_absolute_binding_free_energy")],
         characterization_config={"openfe": openfe_config},
     )
     result = decide_characterization_node(state)
@@ -40,7 +40,7 @@ def test_openfe_selection_preserves_structure_configuration():
 def test_openfe_can_be_combined_with_descriptor_tools():
     state = WorkflowState(
         user_prompt="OpenFE and QED",
-        targets=[TargetProperty(name="openfe_binding_free_energy"), TargetProperty(name="qed")],
+        targets=[TargetProperty(name="openfe_absolute_binding_free_energy"), TargetProperty(name="qed")],
     )
     result = decide_characterization_node(state)
     assert result.characterization_config["tool_ids"] == ["rdkit", "openfe"]
@@ -59,7 +59,7 @@ def test_prompt_only_openfe_selection_defaults_to_boltz_poses():
 
     state = WorkflowState(
         user_prompt="Optimize aspirin analogs for absolute binding free energy using OpenFE",
-        targets=[TargetProperty(name="openfe_binding_free_energy")],
+        targets=[TargetProperty(name="openfe_absolute_binding_free_energy")],
     )
     state = decide_characterization_node(state)
     assert state.characterization_config["tool_ids"] == ["openfe"]
@@ -109,7 +109,7 @@ def test_free_energy_prompt_corrects_llm_affinity_and_routes_to_openfe():
     })
     extracted = extractor.extract_dict(prompt)
     target = extracted["target_properties"][0]
-    assert target["property_name"] == "openfe_binding_free_energy"
+    assert target["property_name"] == "openfe_absolute_binding_free_energy"
     assert target["optimization_mode"] == "MIN"
     assert list(target["bounds"]) == [-30, 10]
     assert extracted["starting_molecules"] == [smiles]
@@ -127,14 +127,14 @@ def test_free_energy_prompt_corrects_llm_affinity_and_routes_to_openfe():
     assert request.tool_options["structure_source"] == "boltz"
 
 
-@pytest.mark.parametrize(("prompt", "proteins"), [
-    ("Optimize CCO for better binding affinity to P21453", [{"chain_id": "A", "uniprot_id": "P21453"}]),
-    ("Optimize CCO for better free energy", []),
-    ("Optimize CCO for relative binding free energy to P21453", [{"chain_id": "A", "uniprot_id": "P21453"}]),
-    ("Optimize CCO for free energy using RBFE to P21453", [{"chain_id": "A", "uniprot_id": "P21453"}]),
-    ("Optimize CCO for binding affinity and free energy to P21453", [{"chain_id": "A", "uniprot_id": "P21453"}]),
+@pytest.mark.parametrize(("prompt", "proteins", "expected"), [
+    ("Optimize CCO for better binding affinity to P21453", [{"chain_id": "A", "uniprot_id": "P21453"}], "binding_affinity"),
+    ("Optimize CCO for better free energy", [], "binding_affinity"),
+    ("Optimize CCO for relative binding free energy to P21453", [{"chain_id": "A", "uniprot_id": "P21453"}], "openfe_relative_binding_free_energy"),
+    ("Optimize CCO for free energy using RBFE to P21453", [{"chain_id": "A", "uniprot_id": "P21453"}], "openfe_relative_binding_free_energy"),
+    ("Optimize CCO for binding affinity and free energy to P21453", [{"chain_id": "A", "uniprot_id": "P21453"}], "binding_affinity"),
 ])
-def test_free_energy_correction_preserves_other_intents(prompt, proteins):
+def test_free_energy_correction_preserves_other_intents(prompt, proteins, expected):
     from nodes.argument_extraction.hybrid import HybridArgumentExtractor
 
     target = {"property_name": "binding_affinity", "optimization_mode": "MIN", "bounds": [-3, 6]}
@@ -142,7 +142,7 @@ def test_free_energy_correction_preserves_other_intents(prompt, proteins):
         "starting_molecules": ["CCO"], "confidence_score": 0.95,
         "proteins": proteins, "target_properties": [target],
     }, {}, prompt)
-    assert extracted["target_properties"][0]["property_name"] == "binding_affinity"
+    assert extracted["target_properties"][0]["property_name"] == expected
 
 
 def test_free_energy_correction_deduplicates_openfe_and_preserves_qed():
@@ -153,11 +153,11 @@ def test_free_energy_correction_deduplicates_openfe_and_preserves_qed():
         "proteins": [{"chain_id": "A", "uniprot_id": "P21453"}],
         "target_properties": [
             {"property_name": "binding_affinity", "optimization_mode": "MIN"},
-            {"property_name": "openfe_binding_free_energy", "optimization_mode": "MIN"},
+            {"property_name": "openfe_absolute_binding_free_energy", "optimization_mode": "MIN"},
             {"property_name": "qed", "optimization_mode": "MAX"},
         ],
     }, {}, "Optimize CCO for better binding free energy to P21453 and higher QED")
     assert [target["property_name"] for target in extracted["target_properties"]] == [
-        "openfe_binding_free_energy", "qed",
+        "openfe_absolute_binding_free_energy", "qed",
     ]
     assert [target["weight"] for target in extracted["target_properties"]] == [0.5, 0.5]
