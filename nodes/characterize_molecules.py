@@ -3,6 +3,7 @@ Characterize molecules using the selected tool(s).
 """
 
 from typing import Dict, Any, List
+from copy import deepcopy
 import asyncio
 import hashlib
 import time
@@ -366,7 +367,7 @@ def _build_characterization_request(
 
     if tool_id == "openfe":
         tool_options = dict(state.characterization_config.get("openfe") or {})
-        if "complexes" not in tool_options and "structure_source" not in tool_options:
+        if "complexes" not in tool_options and "ligands" not in tool_options and "structure_source" not in tool_options:
             tool_options["structure_source"] = "boltz"
         if tool_options.get("structure_source") == "boltz":
             proteins_payload = [
@@ -420,7 +421,7 @@ def _build_characterization_request(
             code="BOLTZ_MISSING_LIGANDS",
         )
 
-    return CharacterizationRequest(
+    request = CharacterizationRequest(
         smiles=smiles_by_id,
         properties=properties,
         molecule_ids=list(smiles_by_id.keys()),
@@ -429,6 +430,56 @@ def _build_characterization_request(
         precision=2,
         tool_options=tool_options,
     )
+    if tool_id == "openfe" and OpenFETool.protocol_for(request) != "abfe":
+        request = _build_openfe_series_request(state, request)
+    return request
+
+
+def _build_openfe_series_request(
+    state: WorkflowState, request: CharacterizationRequest,
+) -> CharacterizationRequest:
+    options = deepcopy(request.tool_options)
+    configured = options.get("ligands", [])
+    if not isinstance(configured, list) or any(not isinstance(ligand, dict) or not ligand.get("name") for ligand in configured):
+        raise OpenFEError("OpenFE ligands must be an API-format list, with names matching SABLE molecule IDs.")
+    by_name = {ligand["name"]: ligand for ligand in configured}
+    if len(by_name) != len(configured):
+        raise OpenFEError("OpenFE ligand names must be unique.")
+    reference = options.get("reference")
+    available = {**state.search_space, **request.search_space}
+    if reference is None:
+        if configured:
+            reference = configured[0]["name"]
+        elif state.starting_molecules:
+            smiles = state.starting_molecules[0]
+            reference = next((name for name, value in {**request.search_space, **available}.items() if value == smiles), "openfe_reference")
+            if reference in available and available[reference] != smiles:
+                raise OpenFEError("The reserved OpenFE reference ID conflicts with the search space.")
+            options["reference_smiles"] = smiles
+        else:
+            raise OpenFEError("RBFE/SepTop require a reference ligand or a starting molecule; a batch cannot choose its own reference.")
+    reference_smiles = options.get("reference_smiles") or by_name.get(reference, {}).get("smiles") or available.get(reference)
+    if not reference_smiles:
+        raise OpenFEError(f"Missing SMILES for OpenFE reference '{reference}'.")
+    if reference in available and available[reference] != reference_smiles:
+        raise OpenFEError("OpenFE reference chemistry must remain unchanged across batches.")
+    options.update(reference=reference, reference_smiles=reference_smiles)
+    saved = state.characterization_config.setdefault("openfe", {})
+    saved.update(reference=reference, reference_smiles=reference_smiles)
+    aliases = [name for name in request.molecule_ids if name != reference and request.search_space[name] == reference_smiles]
+    options["reference_aliases"] = aliases
+    ids = list(dict.fromkeys([name for name in request.molecule_ids if name not in aliases] + [reference]))
+    smiles_by_id = {name: reference_smiles if name == reference else request.search_space[name] for name in ids}
+    OpenFETool.validate_series_options(options, ids)
+    if options.get("structure_source") != "boltz":
+        options["ligands"] = [
+            deepcopy(by_name.get(name, {"name": name, "smiles": smiles_by_id[name]}))
+            for name in ids
+        ]
+    return request.model_copy(update={
+        "tool_options": options, "smiles": smiles_by_id, "search_space": smiles_by_id,
+        "molecule_ids": ids,
+    })
 
 
 def _run_openfe_with_boltz(
@@ -438,8 +489,9 @@ def _run_openfe_with_boltz(
     tool: OpenFETool,
 ) -> CharacterizationResult:
     options = dict(request.tool_options)
-    if options.get("complexes"):
-        raise OpenFEError("Choose explicit OpenFE complexes or structure_source='boltz', not both.")
+    protocol = OpenFETool.protocol_for(request)
+    if options.get("complexes") or options.get("ligands"):
+        raise OpenFEError("Choose explicit OpenFE complexes/ligands or structure_source='boltz', not both.")
     repeats = options.get("execution", {}).get("repeats", 3)
     if isinstance(repeats, bool) or not isinstance(repeats, int) or repeats < 1:
         raise OpenFEError("OpenFE repeats must be a positive integer.")
@@ -449,11 +501,21 @@ def _run_openfe_with_boltz(
             raise OpenFEError(f"Missing SMILES for '{molecule_id}'.")
     if options.get("campaign_name"):
         tool._campaign_path(options["campaign_name"])
+    if protocol != "abfe" and request.molecule_ids == [options.get("reference")] and not options.get("resume"):
+        reference = options["reference"]
+        options["ligands"] = [{"name": reference, "smiles": request.search_space[reference]}]
+        return tool.characterize(request.model_copy(update={"tool_options": options}))
     if options.get("resume"):
-        options["complexes"] = {
-            molecule_id: {"name": molecule_id, "ligand": {"smiles": request.search_space[molecule_id]}}
-            for molecule_id in request.molecule_ids
-        }
+        if protocol == "abfe":
+            options["complexes"] = {
+                molecule_id: {"name": molecule_id, "ligand": {"smiles": request.search_space[molecule_id]}}
+                for molecule_id in request.molecule_ids
+            }
+        else:
+            options["ligands"] = [
+                {"name": molecule_id, "smiles": request.search_space[molecule_id]}
+                for molecule_id in request.molecule_ids
+            ]
         return tool.characterize(request.model_copy(update={"tool_options": options}))
     if not request.molecule_ids or len(request.molecule_ids) > 100:
         raise OpenFEError("Automatic OpenFE uploads require between 1 and 100 molecules per batch.")
@@ -461,22 +523,49 @@ def _run_openfe_with_boltz(
         raise OpenFEError("Boltz-generated OpenFE structures require protein targets.")
     if options.get("upload_inputs") is False:
         raise OpenFEError("Boltz-generated OpenFE structures require upload_inputs=True.")
-    tool.ensure_upload_support()
+    tool.ensure_upload_support(protocol=protocol)
     boltz_options = {} if _boltz_provider(state) == "platform" else _boltz_tool_options(state)
     boltz_options = {**boltz_options, "fetch_cif": True}
-    boltz_request = request.model_copy(update={"tool_options": boltz_options})
+    cached_reference = options.get("reference_complex") if protocol != "abfe" else None
+    if cached_reference:
+        if cached_reference.get("ligand", {}).get("smiles") != request.search_space[options["reference"]]:
+            raise OpenFEError("Cached OpenFE reference chemistry does not match the request.")
+        if not Path(cached_reference.get("structure", "")).is_file():
+            raise OpenFEError("The cached OpenFE reference structure is unavailable; restore it before continuing.")
+    pose_ids = [name for name in request.molecule_ids if not (cached_reference and name == options["reference"])]
+    pose_smiles = {name: request.search_space[name] for name in pose_ids}
+    boltz_request = request.model_copy(update={
+        "tool_options": boltz_options, "molecule_ids": pose_ids,
+        "smiles": pose_smiles, "search_space": pose_smiles,
+    })
     if _boltz_provider(state) == "platform":
         poses = _run_boltz_platform_characterization(state, boltz_request)
     else:
         spec = registry.get("boltz")
         boltz_tool = _create_characterization_tool(registry, spec, boltz_request)
         poses = _run_characterization_tool(spec, boltz_tool, boltz_request)
-    options["complexes"] = tool.complexes_from_boltz(request, poses)
+    complexes = tool.complexes_from_boltz(boltz_request, poses)
+    if protocol == "abfe":
+        options["complexes"] = complexes
+    else:
+        reference = options["reference"]
+        if cached_reference:
+            complexes[reference] = deepcopy(cached_reference)
+        reference_complex = complexes[reference]
+        if reference_complex["ligand"]["smiles"] != request.search_space[reference]:
+            raise OpenFEError("Cached OpenFE reference chemistry does not match the request.")
+        options["ligands"] = [
+            {**complexes[name]["ligand"], "name": name, "structure": complexes[name]["structure"]}
+            for name in request.molecule_ids
+        ]
+        options["protein"] = deepcopy(reference_complex["protein"])
+        options.setdefault("alignment", {"pose": "keep"})
+        state.characterization_config.setdefault("openfe", {})["reference_complex"] = deepcopy(reference_complex)
     options["upload_inputs"] = True
     state.record_tool_run(ToolRunRecord(
         tool_id="boltz", stage=ToolKind.CHARACTERIZER, status="completed",
         inputs=_characterization_run_inputs(boltz_request),
-        outputs={"molecule_count": len(options["complexes"])},
+        outputs={"molecule_count": len(pose_ids)},
         metadata={"purpose": "openfe_structures", "result_metadata": poses.metadata},
     ))
     result = tool.characterize(request.model_copy(update={"tool_options": options}))
