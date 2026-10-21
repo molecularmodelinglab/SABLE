@@ -30,6 +30,24 @@ from nodes.argument_extraction.components import (
 )
 
 
+def _keyword_in_prompt(keyword: str, prompt_lower: str) -> bool:
+    """Return True when a property parser keyword occurs in the prompt.
+
+    Short single-token keywords are abbreviations ("ki", "kd", "mw", "som", ...) and
+    are matched on word boundaries: a plain substring test makes "ki" match "skin"
+    and "kinase", and "som" match "some", which silently adds unrequested
+    optimization targets. Longer keywords and multi-word phrases keep substring
+    matching so that forms like "clogp" or "h bond donors" still match.
+    """
+
+    keyword = keyword.strip().lower()
+    if not keyword:
+        return False
+    if len(keyword) <= 3 and " " not in keyword:
+        return re.search(rf"\b{re.escape(keyword)}\b", prompt_lower) is not None
+    return keyword in prompt_lower
+
+
 class HybridArgumentExtractor:
     """Combines LLM-based extraction with rule-based validation and fallbacks."""
     PROPERTY_CATALOG = get_property_catalog()
@@ -212,7 +230,7 @@ class HybridArgumentExtractor:
         
         targets = []
         for prop, keywords in property_keywords.items():
-            if any(kw in prompt_lower for kw in keywords):
+            if any(_keyword_in_prompt(kw, prompt_lower) for kw in keywords):
                 spec = self.PROPERTY_CATALOG.get(prop)
                 mode = OptimizationMode(spec.default_mode) if spec else OptimizationMode.MAXIMIZE
                 if prop == 'toxicity' and any(word in prompt_lower for word in ['reduce', 'minimize', 'lower', 'decrease']):

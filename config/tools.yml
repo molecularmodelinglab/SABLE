@@ -147,6 +147,139 @@ tools:
       local: false
       cost: high
 
+  # NERDD modules (https://nerdd.univie.ac.at). Each module is registered as its own
+  # characterizer so the registry can select exactly the module a target needs.
+  - id: nerdd_cypstrate
+    kind: characterizer
+    class_path: tools.nerdd_tool:NerddTool
+    enabled: true
+    priority: 40
+    capability:
+      provides:
+        - cyp1a2_substrate
+        - cyp2a6_substrate
+        - cyp2b6_substrate
+        - cyp2c8_substrate
+        - cyp2c9_substrate
+        - cyp2c19_substrate
+        - cyp2d6_substrate
+        - cyp2e1_substrate
+        - cyp3a4_substrate
+        - cyp_substrate_count
+        - cyp_substrate_coverage
+      batch: true
+      local: false
+      cost: medium
+    config:
+      module: cypstrate
+    metadata:
+      tool_specific_options:
+        - prediction_mode
+
+  - id: nerdd_cyplebrity
+    kind: characterizer
+    class_path: tools.nerdd_tool:NerddTool
+    enabled: true
+    priority: 40
+    capability:
+      provides:
+        - cyp1a2_inhibition
+        - cyp2c9_inhibition
+        - cyp2c19_inhibition
+        - cyp2d6_inhibition
+        - cyp3a4_inhibition
+        - cyp_inhibition_risk
+      batch: true
+      local: false
+      cost: medium
+    config:
+      module: cyplebrity
+
+  - id: nerdd_hitdexter3
+    kind: characterizer
+    class_path: tools.nerdd_tool:NerddTool
+    enabled: true
+    priority: 40
+    capability:
+      provides:
+        - promiscuity_target_based
+        - promiscuity_target_based_high
+        - promiscuity_cell_based
+        - promiscuity_cell_based_high
+        - promiscuity_cell_based_extended
+        - promiscuity_cell_based_extended_high
+        - promiscuity_risk
+      batch: true
+      local: false
+      cost: medium
+    config:
+      module: hitdexter3
+
+  - id: nerdd_np_scout
+    kind: characterizer
+    class_path: tools.nerdd_tool:NerddTool
+    enabled: true
+    priority: 40
+    capability:
+      provides:
+        - np_likeness
+      batch: true
+      local: false
+      cost: medium
+    config:
+      module: np_scout
+
+  - id: nerdd_skin_doctor_cp
+    kind: characterizer
+    class_path: tools.nerdd_tool:NerddTool
+    enabled: true
+    priority: 40
+    capability:
+      provides:
+        - skin_sensitization_probability
+        - skin_nonsensitization_probability
+      batch: true
+      local: false
+      cost: medium
+    config:
+      module: skin_doctor_cp
+
+  - id: nerdd_fame3r
+    kind: characterizer
+    class_path: tools.nerdd_tool:NerddTool
+    enabled: true
+    priority: 40
+    capability:
+      provides:
+        - som_max_probability
+        - som_mean_probability
+        - som_count
+      batch: true
+      local: false
+      cost: high
+    config:
+      module: fame3r
+    metadata:
+      tool_specific_options:
+        - metabolism_subset
+
+  - id: nerdd_awesom
+    kind: characterizer
+    class_path: tools.nerdd_tool:NerddTool
+    enabled: true
+    priority: 45
+    capability:
+      provides:
+        - awesom_som_max_probability
+        - awesom_som_mean_probability
+        - awesom_som_count
+        - awesom_total_uncertainty
+      batch: true
+      local: false
+      cost: high
+    config:
+      module: awesom
+
   - id: default_summarizer
     kind: summarizer
     class_path: nodes.summarize_results:summarize_results_node

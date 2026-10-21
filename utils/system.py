@@ -13,9 +13,17 @@ Extract the following information and respond with a JSON object:
 - enumeration_size: Size of enumerated library (default 100, max 2000)
 - llm_confidence: Your confidence in this extraction (0.0-1.0)
 
-Available properties: qed, logp, tpsa, molecular_weight, h_bond_donors, h_bond_acceptors, 
-rotatable_bonds, ring_count, heavy_atom_count, solubility, fsp3, cns_activity, toxicity, 
+Available properties: qed, logp, tpsa, molecular_weight, h_bond_donors, h_bond_acceptors,
+rotatable_bonds, ring_count, heavy_atom_count, solubility, fsp3, cns_activity, toxicity,
 binding_affinity, permeability
+
+ADMET liability properties (predicted by the NERDD models; all are probabilities in [0, 1]
+unless noted, and are normally minimized): cyp_inhibition_risk (any CYP inhibition),
+cyp1a2_inhibition, cyp2c9_inhibition, cyp2c19_inhibition, cyp2d6_inhibition, cyp3a4_inhibition,
+cyp_substrate_count (number of CYPs metabolizing the compound, 0-9), cyp3a4_substrate,
+cyp2d6_substrate, som_max_probability (most likely site of metabolism), som_count,
+promiscuity_risk (frequent-hitter/assay-interference likelihood),
+skin_sensitization_probability, np_likeness (natural product likeness, normally maximized)
 
 Note for binding_affinity: Extract the user's scientific intent as binding_affinity with MIN optimization and bounds [-3, 6]. Only calculate this if a protein target or UNIPROT ID is provided. Do not infer the Boltz backend from the prompt; the workflow maps this semantic target to the configured backend's native metric before optimization.
 

@@ -208,3 +208,298 @@ properties:
     label: Thiol Interference
     tool_names:
       stoplight: Thiol Interference
+
+  # --- NERDD: CYPlebrity (CYP inhibition probabilities) ---------------------
+  cyp1a2_inhibition:
+    label: CYP1A2 Inhibition Probability
+    parser_keywords: [cyp1a2 inhibition, cyp1a2 inhibitor]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_cyplebrity: cyp1a2_inhibition
+
+  cyp2c9_inhibition:
+    label: CYP2C9 Inhibition Probability
+    parser_keywords: [cyp2c9 inhibition, cyp2c9 inhibitor]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_cyplebrity: cyp2c9_inhibition
+
+  cyp2c19_inhibition:
+    label: CYP2C19 Inhibition Probability
+    parser_keywords: [cyp2c19 inhibition, cyp2c19 inhibitor]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_cyplebrity: cyp2c19_inhibition
+
+  cyp2d6_inhibition:
+    label: CYP2D6 Inhibition Probability
+    parser_keywords: [cyp2d6 inhibition, cyp2d6 inhibitor]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_cyplebrity: cyp2d6_inhibition
+
+  cyp3a4_inhibition:
+    label: CYP3A4 Inhibition Probability
+    parser_keywords: [cyp3a4 inhibition, cyp3a4 inhibitor]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_cyplebrity: cyp3a4_inhibition
+
+  cyp_inhibition_risk:
+    label: CYP Inhibition Risk
+    parser_keywords: [cyp inhibition, cyp inhibitor, cyp liability, drug drug interaction]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_cyplebrity: cyp_inhibition_risk
+    metadata:
+      aggregation: Maximum inhibition probability across CYP1A2/2C9/2C19/2D6/3A4.
+
+  # --- NERDD: CYPstrate (CYP substrate classification) ----------------------
+  cyp1a2_substrate:
+    label: CYP1A2 Substrate
+    parser_keywords: [cyp1a2 substrate]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_cypstrate: cyp1a2_substrate
+
+  cyp2a6_substrate:
+    label: CYP2A6 Substrate
+    parser_keywords: [cyp2a6 substrate]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_cypstrate: cyp2a6_substrate
+
+  cyp2b6_substrate:
+    label: CYP2B6 Substrate
+    parser_keywords: [cyp2b6 substrate]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_cypstrate: cyp2b6_substrate
+
+  cyp2c8_substrate:
+    label: CYP2C8 Substrate
+    parser_keywords: [cyp2c8 substrate]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_cypstrate: cyp2c8_substrate
+
+  cyp2c9_substrate:
+    label: CYP2C9 Substrate
+    parser_keywords: [cyp2c9 substrate]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_cypstrate: cyp2c9_substrate
+
+  cyp2c19_substrate:
+    label: CYP2C19 Substrate
+    parser_keywords: [cyp2c19 substrate]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_cypstrate: cyp2c19_substrate
+
+  cyp2d6_substrate:
+    label: CYP2D6 Substrate
+    parser_keywords: [cyp2d6 substrate]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_cypstrate: cyp2d6_substrate
+
+  cyp2e1_substrate:
+    label: CYP2E1 Substrate
+    parser_keywords: [cyp2e1 substrate]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_cypstrate: cyp2e1_substrate
+
+  cyp3a4_substrate:
+    label: CYP3A4 Substrate
+    parser_keywords: [cyp3a4 substrate]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_cypstrate: cyp3a4_substrate
+
+  cyp_substrate_count:
+    label: CYP Substrate Count
+    parser_keywords: [cyp substrate, cyp metabolism, metabolic liability]
+    default_bounds: [0.0, 9.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_cypstrate: cyp_substrate_count
+    metadata:
+      encoding: Substrate=1, Non-substrate=0; "No prediction" is reported as missing.
+      coverage: >-
+        Only reported when all nine isozymes resolved, so that an abstaining
+        prediction is never scored as a low (favourable) count. See
+        cyp_substrate_coverage for how many isozymes resolved.
+
+  cyp_substrate_coverage:
+    label: CYP Substrate Coverage
+    default_bounds: [0.0, 9.0]
+    default_mode: MAX
+    tool_names:
+      nerdd_cypstrate: cyp_substrate_coverage
+    metadata:
+      description: Number of the nine CYPstrate isozymes that returned a call.
+
+  # --- NERDD: Hit Dexter 3 (assay promiscuity / frequent hitters) -----------
+  promiscuity_target_based:
+    label: Promiscuity (Target-Based)
+    parser_keywords: [target based promiscuity]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_hitdexter3: promiscuity_target_based
+
+  promiscuity_target_based_high:
+    label: High Promiscuity (Target-Based)
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_hitdexter3: promiscuity_target_based_high
+
+  promiscuity_cell_based:
+    label: Promiscuity (Cell-Based)
+    parser_keywords: [cell based promiscuity]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_hitdexter3: promiscuity_cell_based
+
+  promiscuity_cell_based_high:
+    label: High Promiscuity (Cell-Based)
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_hitdexter3: promiscuity_cell_based_high
+
+  promiscuity_cell_based_extended:
+    label: Promiscuity (Extended Cell-Based)
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_hitdexter3: promiscuity_cell_based_extended
+
+  promiscuity_cell_based_extended_high:
+    label: High Promiscuity (Extended Cell-Based)
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_hitdexter3: promiscuity_cell_based_extended_high
+
+  promiscuity_risk:
+    label: Promiscuity Risk
+    parser_keywords: [promiscuity, promiscuous, frequent hitter, assay interference]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_hitdexter3: promiscuity_risk
+    metadata:
+      aggregation: Maximum promiscuity probability across Hit Dexter 3 models.
+
+  # --- NERDD: NP-Scout / Skin Doctor CP ------------------------------------
+  np_likeness:
+    label: Natural Product Likeness
+    parser_keywords: [natural product likeness, natural product like, np likeness]
+    default_bounds: [0.0, 1.0]
+    default_mode: MAX
+    tool_names:
+      nerdd_np_scout: np_likeness
+
+  skin_sensitization_probability:
+    label: Skin Sensitization p-value (sensitizing class)
+    parser_keywords: [skin sensitization, skin sensitizer, skin irritation]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_skin_doctor_cp: skin_sensitization_probability
+    metadata:
+      caveat: >-
+        Mondrian conformal prediction p-value, not a calibrated probability. The
+        sensitizing and non-sensitizing p-values are independent and do not sum to 1,
+        so targeting both at once adds two near-redundant objectives.
+
+  skin_nonsensitization_probability:
+    label: Skin Sensitization p-value (non-sensitizing class)
+    default_bounds: [0.0, 1.0]
+    default_mode: MAX
+    tool_names:
+      nerdd_skin_doctor_cp: skin_nonsensitization_probability
+
+  # --- NERDD: FAME3R / AweSOM (sites of metabolism, atom level) ------------
+  som_max_probability:
+    label: Max Site-of-Metabolism Probability
+    parser_keywords: [site of metabolism, sites of metabolism, som, metabolic stability]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_fame3r: som_max_probability
+    metadata:
+      aggregation: Maximum per-atom SOM probability reported by FAME3R.
+
+  som_mean_probability:
+    label: Mean Site-of-Metabolism Probability
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_fame3r: som_mean_probability
+    metadata:
+      caveat: >-
+        Averaged over every atom, so it falls as molecules grow. Minimizing it can
+        reward larger molecules; prefer som_max_probability as an objective.
+
+  som_count:
+    label: Site-of-Metabolism Count
+    parser_keywords: [number of sites of metabolism, som count]
+    default_bounds: [0.0, 50.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_fame3r: som_count
+
+  awesom_som_max_probability:
+    label: AweSOM Max Site-of-Metabolism Probability
+    parser_keywords: [awesom]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_awesom: awesom_som_max_probability
+
+  awesom_som_mean_probability:
+    label: AweSOM Mean Site-of-Metabolism Probability
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_awesom: awesom_som_mean_probability
+    metadata:
+      caveat: >-
+        Averaged over every atom, so it falls as molecules grow. Minimizing it can
+        reward larger molecules; prefer awesom_som_max_probability as an objective.
+
+  awesom_som_count:
+    label: AweSOM Site-of-Metabolism Count
+    default_bounds: [0.0, 50.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_awesom: awesom_som_count
+
+  awesom_total_uncertainty:
+    label: AweSOM Total Uncertainty
+    parser_keywords: [som uncertainty, prediction uncertainty]
+    default_bounds: [0.0, 1.0]
+    default_mode: MIN
+    tool_names:
+      nerdd_awesom: awesom_total_uncertainty

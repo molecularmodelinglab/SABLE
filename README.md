@@ -129,6 +129,11 @@ Configuration is loaded from environment variables. Copy `.env.example` to `.env
 | `AZURE_STORAGE_CONTAINER` | Azure Blob container for durable run data |
 | `BOLTZ_BASE_URL` | Base URL of a user-managed Boltz2 API deployment |
 | `BOLTZ_API_TOKEN` | Authentication token for the Boltz2 API |
+| `NERDD_BASE_URL` | NERDD API base URL (default `https://nerdd.univie.ac.at/api`) |
+| `NERDD_BATCH_SIZE` | Molecules submitted per NERDD job (default: per-module) |
+| `NERDD_POLL_INTERVAL` | Seconds between NERDD job status polls (default `5`) |
+| `NERDD_MAX_WAIT` | Maximum seconds to wait for a NERDD job (default `900`) |
+| `NERDD_TIMEOUT` | Per-request timeout for NERDD HTTP calls (default `60`) |
 
 The workflow can fall back to rule-based argument extraction when no LLM is configured. Protein structure prediction and HPC execution require the additional Boltz and HPC variables documented in `.env.example`.
 
@@ -142,6 +147,45 @@ BOLTZ_API_TOKEN=your_api_token
 ```
 
 SABLE does not deploy or host the Boltz2 service. The configured endpoint must be reachable from the SABLE API and Celery worker containers.
+
+### NERDD ADMET Characterization
+
+[NERDD](https://nerdd.univie.ac.at) models are available as characterizers and need no
+configuration or API key — the public service is used by default. Each module is a
+separate tool id, so a campaign only queries the modules its objectives require:
+
+| Tool id | NERDD module | Properties |
+| --- | --- | --- |
+| `nerdd_cyplebrity` | CYPlebrity | `cyp{1a2,2c9,2c19,2d6,3a4}_inhibition`, `cyp_inhibition_risk` |
+| `nerdd_cypstrate` | CYPstrate | `cyp{1a2,2a6,2b6,2c8,2c9,2c19,2d6,2e1,3a4}_substrate`, `cyp_substrate_count` |
+| `nerdd_hitdexter3` | Hit Dexter 3 | `promiscuity_*`, `promiscuity_risk` |
+| `nerdd_np_scout` | NP-Scout | `np_likeness` |
+| `nerdd_skin_doctor_cp` | Skin Doctor CP | `skin_sensitization_probability` |
+| `nerdd_fame3r` | FAME3R | `som_max_probability`, `som_mean_probability`, `som_count` |
+| `nerdd_awesom` | AweSOM | `awesom_som_*`, `awesom_total_uncertainty` |
+
+```bash
+python run_workflow.py --prompt "Optimize aspirin for higher QED and lower CYP3A4 inhibition"
+```
+
+Notes:
+
+- NERDD is job based: SABLE submits a batch, polls until the job completes, then reads
+  every result page. Jobs are submitted sequentially to stay inside the anonymous quota
+  (5 active jobs; a 429 while a job initializes is retried with backoff).
+- FAME3R and AweSOM predict per **atom**. Their rows are aggregated to one value per
+  molecule (max/mean probability and the number of predicted sites) so the optimizer
+  receives a scalar.
+- CYPstrate returns class labels. `Substrate` is encoded as `1.0` and `Non-substrate` as
+  `0.0`; `No prediction` (the consensus model abstaining) is reported as **missing**
+  rather than as `0.0`, so an abstention is never optimized against as a negative result.
+  For the same reason `cyp_substrate_count` is only reported when all nine isozymes
+  resolve — `cyp_substrate_coverage` always reports how many did.
+- Skin Doctor CP returns Mondrian conformal **p-values**, not calibrated probabilities;
+  the sensitizing and non-sensitizing values are independent and do not sum to 1.
+- All liability properties default to `MIN` optimization; `np_likeness` defaults to `MAX`.
+- Prefer `som_max_probability` over `som_mean_probability` as an objective: the mean is
+  taken over every atom and therefore falls as molecules get larger.
 
 ## Project Structure
 
