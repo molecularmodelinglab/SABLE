@@ -476,7 +476,10 @@ class NerddTool(BaseTool):
         try:
             job = response.json()
         except ValueError as exc:
-            raise NerddToolError(f"NERDD returned a non-JSON job response: {exc}") from exc
+            raise NerddToolError(
+                f"NERDD returned a non-JSON job response from {url} "
+                f"(HTTP {response.status_code}); check NERDD_BASE_URL: {exc}"
+            ) from exc
 
         job_id = job.get("id")
         if not job_id:

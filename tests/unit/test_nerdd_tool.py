@@ -354,6 +354,18 @@ def test_failed_jobs_raise(monkeypatch, no_sleep):
         NerddTool(module="cyplebrity").predict({"m1": ASPIRIN})
 
 
+def test_non_json_job_response_points_at_the_base_url(monkeypatch, no_sleep):
+    # A wrong NERDD_BASE_URL can land on an HTML page that answers 200.
+    monkeypatch.setattr(
+        nerdd_tool.requests,
+        "request",
+        lambda method, url, **kwargs: FakeResponse(ValueError("Expecting value"), status_code=200),
+    )
+
+    with pytest.raises(NerddToolError, match="NERDD_BASE_URL"):
+        NerddTool(module="cyplebrity").predict({"m1": ASPIRIN})
+
+
 def test_polling_times_out_instead_of_hanging(monkeypatch, no_sleep):
     install(monkeypatch, FakeNerdd([], statuses=["processing"]))
 
