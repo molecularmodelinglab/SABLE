@@ -94,6 +94,7 @@ services:
       - OPENFE_API_TOKEN=${OPENFE_API_TOKEN:-}
       - OPENFE_POLL_INTERVAL=${OPENFE_POLL_INTERVAL:-10}
       - OPENFE_WAIT_TIMEOUT=${OPENFE_WAIT_TIMEOUT:-3600}
+      - OPENFE_EXECUTION_PROFILE=${OPENFE_EXECUTION_PROFILE:-local}
     volumes:
       - ./data:/app/data  # For large artifacts (checkpoints, results)
       - ./logs:/app/logs
@@ -150,6 +151,7 @@ services:
       - OPENFE_API_TOKEN=${OPENFE_API_TOKEN:-}
       - OPENFE_POLL_INTERVAL=${OPENFE_POLL_INTERVAL:-10}
       - OPENFE_WAIT_TIMEOUT=${OPENFE_WAIT_TIMEOUT:-3600}
+      - OPENFE_EXECUTION_PROFILE=${OPENFE_EXECUTION_PROFILE:-local}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
