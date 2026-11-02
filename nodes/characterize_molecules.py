@@ -216,6 +216,19 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                     result = _run_openfe_with_boltz(state, request, registry, tool)
                 else:
                     result = _run_characterization_tool(spec, tool, request)
+            if tool_id == "openfe" and result.metadata.get("quality_warnings"):
+                emit_event(
+                    state,
+                    kind="openfe_quality_warning",
+                    node="characterize_molecules",
+                    tool=tool_id,
+                    severity="warning",
+                    data={
+                        "campaign_name": result.metadata.get("campaign_name"),
+                        "message": "OpenFE results accepted despite failed quality checks; estimates may be unreliable.",
+                        "warnings": result.metadata["quality_warnings"],
+                    },
+                )
             _merge_characterization_result(results, boltz_metadata, result)
             tools_executed.append(tool_id)
 
