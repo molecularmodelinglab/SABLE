@@ -185,13 +185,121 @@ def test_no_silent_partial_or_failed_quality_batch(failure):
     tool.submit_campaign.assert_not_called()
 
 
-def test_failed_quality_override_preserves_verdict():
+@pytest.mark.parametrize("protocol", ["rbfe", "septop"])
+def test_failed_quality_error_identifies_edges_checks_and_resume(protocol):
+    tool = make_tool()
+    network = network_result()
+    network["edges"][0].update(quality="fail", note="repeat spread exceeds threshold")
+    network["checks"] = [{"name": "cycle_closure", "status": "fail", "detail": "closure is 4 kcal/mol"}]
+    tool.wait_for_network = Mock(return_value=network)
+    tool.submit_campaign = Mock()
+    with pytest.raises(OpenFEError) as caught:
+        tool.characterize(request_for(protocol, resume=True))
+    message = str(caught.value)
+    for detail in ("after execution completed", "ref_candidate", "repeat spread exceeds threshold",
+                   "cycle_closure", "closure is 4 kcal/mol", "/campaigns/series/network",
+                   "resume=true", "allow_failed_quality=true"):
+        assert detail in message
+    tool.submit_campaign.assert_not_called()
+
+
+def test_failed_edge_without_details_does_not_invent_cause():
+    network = network_result()
+    network["edges"][0]["quality"] = "fail"
+    assert OpenFETool._network_quality_failures(network) == [
+        "edge 'ref_candidate' failed quality (service did not provide per-edge check details)"
+    ]
+
+
+def test_optional_edge_checks_include_failed_details_only():
+    network = network_result()
+    network["edges"][0]["checks"] = [
+        {"name": "mbar_overlap", "status": "fail", "detail": "overlap 0.002"},
+        {"name": "repeat_spread", "status": "pass", "detail": "spread 0.1"},
+    ]
+    assert OpenFETool._network_quality_failures(network) == [
+        "edge 'ref_candidate' failed quality (mbar_overlap: overlap 0.002)"
+    ]
+
+
+@pytest.mark.parametrize("protocol", ["rbfe", "septop"])
+def test_failed_quality_override_preserves_verdict(protocol):
     tool = make_tool()
     network = network_result()
     network["edges"][0]["quality"] = "fail"
+    network["checks"] = [{"name": "cycle_closure", "status": "fail", "detail": "closure is 4 kcal/mol"}]
+    original = deepcopy(network)
     tool.wait_for_network = Mock(return_value=network)
-    result = tool.characterize(request_for(resume=True, allow_failed_quality=True))
-    assert result.metadata["network"]["edges"][0]["quality"] == "fail"
+    tool.submit_campaign = Mock()
+    result = tool.characterize(request_for(protocol, resume=True, allow_failed_quality=True))
+    assert result.metadata["network"] == original
+    assert len(result.metadata["quality_warnings"]) == 2
+    assert "ref_candidate" in result.metadata["quality_warnings"][0]
+    assert "cycle_closure" in result.metadata["quality_warnings"][1]
+    assert result.results["candidate"][OPENFE_PROPERTIES[protocol]] == -2.0
+    tool.submit_campaign.assert_not_called()
+
+
+@pytest.mark.parametrize("quality", ["pass", "unknown"])
+def test_acceptable_network_does_not_add_quality_warnings(quality):
+    tool = make_tool()
+    network = network_result()
+    network["edges"][0]["quality"] = quality
+    network["edges"][0]["checks"] = None
+    tool.wait_for_network = Mock(return_value=network)
+    result = tool.characterize(request_for(resume=True))
+    assert result.metadata["quality_warnings"] == []
+
+
+@pytest.mark.parametrize("failure", ["disconnected", "invalid", "incomplete", "execution"])
+def test_quality_override_does_not_bypass_other_validation(failure):
+    tool = make_tool()
+    network = network_result()
+    network["edges"][0]["quality"] = "fail"
+    summary = status()
+    if failure == "disconnected":
+        network["unreachable"] = ["candidate"]
+    elif failure == "invalid":
+        network["edges"][0]["ddg"] = float("nan")
+    elif failure == "incomplete":
+        summary = status(repeats=1)
+    else:
+        summary = status(state="failed")
+    tool.status = Mock(return_value=summary)
+    tool.network = Mock(return_value=network)
+    with pytest.raises(OpenFEError, match="disconnected|invalid|fewer repeats|runs failed"):
+        tool.characterize(request_for(resume=True, allow_failed_quality=True))
+
+
+@pytest.mark.parametrize("failed_quality", [False, True])
+def test_workflow_preserves_quality_warnings_and_emits_warning(failed_quality, monkeypatch):
+    import nodes.characterize_molecules as node
+
+    request = request_for(resume=True, allow_failed_quality=True)
+    tool = make_tool()
+    network = network_result()
+    if failed_quality:
+        network["edges"][0]["quality"] = "fail"
+    tool.wait_for_network = Mock(return_value=network)
+    state = WorkflowState(
+        user_prompt="RBFE", current_bo_recommendations=["candidate"],
+        search_space={"candidate": "CCCO"},
+        targets=[TargetProperty(name=OPENFE_PROPERTIES["rbfe"])],
+        characterization_config={"tool_ids": ["openfe"]},
+    )
+    monkeypatch.setattr(node, "_build_characterization_request", Mock(return_value=request))
+    monkeypatch.setattr(node, "_create_characterization_tool", Mock(return_value=tool))
+    node.characterize_molecules_node(state)
+    record = next(run for run in state.tool_runs if run.tool_id == "openfe")
+    assert record.status == "completed"
+    warnings = record.metadata["result_metadata"]["quality_warnings"]
+    assert bool(warnings) == failed_quality
+    events = [entry["data"] for entry in state.logs if entry["action"] == "openfe_quality_warning"]
+    assert len(events) == int(failed_quality)
+    if failed_quality:
+        assert events[0]["severity"] == "warning"
+        assert events[0]["data"]["campaign_name"] == "series"
+        assert events[0]["data"]["warnings"] == warnings
 
 
 def test_upload_series_traverses_all_inputs_and_deduplicates(tmp_path):
