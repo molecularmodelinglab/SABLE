@@ -46,6 +46,15 @@ class OpenFETool:
         return protocol
 
     @staticmethod
+    def execution_options(options: dict[str, Any]) -> dict[str, Any]:
+        configured = options.get("execution")
+        if configured is not None and not isinstance(configured, dict):
+            raise OpenFEError("OpenFE execution must be an object.")
+        execution = deepcopy(configured) if configured is not None else {}
+        execution["profile"] = os.getenv("OPENFE_EXECUTION_PROFILE", "").strip() or "local"
+        return execution
+
+    @staticmethod
     def validate_series_options(options: dict[str, Any], names: list[str]) -> None:
         network = options.get("network") or {}
         central = network.get("central_ligand")
@@ -207,7 +216,7 @@ class OpenFETool:
             molecule_by_ligand[ligand_name] = molecule_id
             complex_names.add(complex_spec["name"])
             complexes.append(complex_spec)
-        execution = options.get("execution", {})
+        execution = self.execution_options(options)
         repeats = execution.get("repeats", 3)
         if isinstance(repeats, bool) or not isinstance(repeats, int) or repeats < 1:
             raise OpenFEError("OpenFE repeats must be a positive integer.")
@@ -275,7 +284,8 @@ class OpenFETool:
             ligand = by_name.get(molecule_id, {})
             if not request.search_space.get(molecule_id) or ligand.get("smiles") != request.search_space[molecule_id]:
                 raise OpenFEError(f"OpenFE ligand SMILES must match molecule '{molecule_id}'.")
-        repeats = options.get("execution", {}).get("repeats", 3)
+        execution = self.execution_options(options)
+        repeats = execution.get("repeats", 3)
         if isinstance(repeats, bool) or not isinstance(repeats, int) or repeats < 1:
             raise OpenFEError("OpenFE repeats must be a positive integer.")
         if len(ligands) == 1 and not options.get("resume"):
@@ -297,9 +307,9 @@ class OpenFETool:
                 raise OpenFEError("OpenFE needs a protein path or a reference complex structure.")
             campaign = {
                 "name": name, "protocol": protocol, "reference": reference,
-                "ligands": ligands,
+                "ligands": ligands, "execution": execution,
             }
-            fields = ("protein", "cofactors", "alignment", "network", "settings", "execution", "relax")
+            fields = ("protein", "cofactors", "alignment", "network", "settings", "relax")
             fields += ("similarity", "charges") if protocol == "rbfe" else ("screening",)
             for field in fields:
                 if field in options:

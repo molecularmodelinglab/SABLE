@@ -371,6 +371,39 @@ def test_characterize_maps_ligands_preserves_units_and_quality():
     assert request.tool_options["complexes"]["mol_1"]["name"] == "complex_1"
 
 
+@pytest.mark.parametrize("environment,expected", [
+    (None, "local"), ("", "local"), ("   ", "local"),
+    ("local", "local"), (" gpu-profile ", "gpu-profile"),
+])
+def test_abfe_execution_profile_comes_only_from_environment(environment, expected, monkeypatch):
+    from copy import deepcopy
+
+    monkeypatch.delenv("OPENFE_EXECUTION_PROFILE", raising=False)
+    if environment is not None:
+        monkeypatch.setenv("OPENFE_EXECUTION_PROFILE", environment)
+    tool = make_tool()
+    tool.submit_campaign = Mock()
+    tool.wait_for_results = Mock(return_value=[prediction(repeats=5)])
+    request = characterization_request(execution={"profile": "ignored-per-run", "repeats": 5})
+    original = deepcopy(request.tool_options)
+    tool.characterize(request)
+    assert tool.submit_campaign.call_args.args[0]["execution"] == {"profile": expected, "repeats": 5}
+    assert request.tool_options == original
+    assert tool.wait_for_results.call_args.args[1] == {"ethanol": 5}
+
+
+@pytest.mark.parametrize("options", [{}, {"execution": None}, {"execution": {}}, {"execution": {"profile": None}}])
+def test_missing_execution_profile_defaults_to_local(options, monkeypatch):
+    monkeypatch.delenv("OPENFE_EXECUTION_PROFILE", raising=False)
+    assert OpenFETool.execution_options(options) == {"profile": "local"}
+
+
+@pytest.mark.parametrize("execution", ["local", [], 1])
+def test_invalid_execution_options_are_rejected(execution):
+    with pytest.raises(OpenFEError, match="execution must be an object"):
+        OpenFETool.execution_options({"execution": execution})
+
+
 def test_resume_never_submits_again():
     tool = make_tool()
     tool.submit_campaign = Mock()

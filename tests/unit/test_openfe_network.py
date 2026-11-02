@@ -68,6 +68,36 @@ def test_native_payload_and_reference_rebasing(protocol):
 
 
 @pytest.mark.parametrize("protocol", ["rbfe", "septop"])
+@pytest.mark.parametrize("environment,expected", [
+    (None, "local"), ("", "local"), ("   ", "local"),
+    ("local", "local"), (" gpu-profile ", "gpu-profile"),
+])
+def test_network_execution_profile_comes_only_from_environment(protocol, environment, expected, monkeypatch):
+    monkeypatch.delenv("OPENFE_EXECUTION_PROFILE", raising=False)
+    if environment is not None:
+        monkeypatch.setenv("OPENFE_EXECUTION_PROFILE", environment)
+    tool = make_tool()
+    tool.submit_campaign = Mock()
+    tool.wait_for_network = Mock(return_value=network_result())
+    request = request_for(protocol, execution={"profile": "ignored-per-run", "repeats": 5})
+    original = deepcopy(request.tool_options)
+    tool.characterize(request)
+    assert tool.submit_campaign.call_args.args[0]["execution"] == {"profile": expected, "repeats": 5}
+    assert request.tool_options == original
+    tool.wait_for_network.assert_called_once_with("series", protocol=protocol, expected_repeats=5)
+
+
+@pytest.mark.parametrize("protocol", ["rbfe", "septop"])
+def test_network_with_no_execution_options_submits_local_profile(protocol, monkeypatch):
+    monkeypatch.delenv("OPENFE_EXECUTION_PROFILE", raising=False)
+    tool = make_tool()
+    tool.submit_campaign = Mock()
+    tool.wait_for_network = Mock(return_value=network_result())
+    tool.characterize(request_for(protocol))
+    assert tool.submit_campaign.call_args.args[0]["execution"] == {"profile": "local"}
+
+
+@pytest.mark.parametrize("protocol", ["rbfe", "septop"])
 def test_payload_validates_against_updated_reference_schema(protocol, monkeypatch):
     source = Path(__file__).resolve().parents[2] / "reference_code" / "src"
     if not source.is_dir() or sys.version_info < (3, 12):
