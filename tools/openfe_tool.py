@@ -307,11 +307,16 @@ class OpenFETool:
             campaign.setdefault("network", {"method": "radial", "central_ligand": reference})
             self.submit_campaign(campaign, upload_inputs=options.get("upload_inputs", False))
         network = self.wait_for_network(name, protocol=protocol, expected_repeats=repeats)
-        if not options.get("allow_failed_quality", False):
-            if any(edge.get("quality") == "fail" for edge in network["edges"]) or any(
-                check.get("status") == "fail" for check in network["checks"]
-            ):
-                raise OpenFEError(f"OpenFE network quality checks failed in '{name}'.")
+        quality_warnings = self._network_quality_failures(network)
+        if quality_warnings and not options.get("allow_failed_quality", False):
+            raise OpenFEError(
+                f"OpenFE network quality checks failed in '{name}' after execution completed: "
+                f"{'; '.join(quality_warnings)}. "
+                f"Inspect GET {self._campaign_path(name)}/network. "
+                "To explicitly accept flagged results without resubmitting, use the same inputs with "
+                "campaign_name, resume=true and allow_failed_quality=true. "
+                "This bypasses quality checks, not execution or result validation."
+            )
         fitted = {row["ligand"]: row for row in network["ligands"]}
         required = set(molecule_ids) | {reference}
         reachable = {reference}
@@ -349,8 +354,28 @@ class OpenFETool:
         return CharacterizationResult(results=results, metadata={
             "tool_id": "openfe", "campaign_name": name, "protocol": protocol,
             "reference": reference, "openfe": details, "network": network,
+            "quality_warnings": quality_warnings,
             "reference_aliases": options.get("reference_aliases", []),
         })
+
+    @staticmethod
+    def _network_quality_failures(network: dict[str, Any]) -> list[str]:
+        failures = []
+        for edge in network["edges"]:
+            failed_checks = [
+                f"{check.get('name', 'unnamed check')}: {check.get('detail') or 'no detail reported'}"
+                for check in edge.get("checks") or [] if check.get("status") == "fail"
+            ]
+            if edge.get("quality") == "fail" or failed_checks:
+                detail = "; ".join(failed_checks) or edge.get("note") or "service did not provide per-edge check details"
+                failures.append(f"edge '{edge.get('edge', 'unnamed')}' failed quality ({detail})")
+        for check in network["checks"]:
+            if check.get("status") == "fail":
+                failures.append(
+                    f"network check '{check.get('name', 'unnamed')}' failed: "
+                    f"{check.get('detail') or 'no detail reported'}"
+                )
+        return failures
 
     def network(self, name: str) -> dict[str, Any]:
         payload = self._request("GET", f"{self._campaign_path(name)}/network")
