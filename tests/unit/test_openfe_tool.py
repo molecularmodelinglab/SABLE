@@ -367,7 +367,11 @@ def test_characterize_maps_ligands_preserves_units_and_quality():
     assert result.metadata["openfe"]["mol_1"]["quality"] == "unknown"
     assert result.metadata["openfe"]["mol_1"]["units"] == "kcal/mol"
     tool.wait_for_results.assert_called_once_with("test", {"ethanol": 3})
-    assert tool.submit_campaign.call_args.args[0]["neutralize_ligands"] is False
+    campaign = tool.submit_campaign.call_args.args[0]
+    assert campaign["neutralize_ligands"] is False
+    assert "alignment" not in campaign
+    assert campaign["complexes"] == list(request.tool_options["complexes"].values())
+    assert "pose" not in campaign["complexes"][0]["ligand"]
     assert request.tool_options["complexes"]["mol_1"]["name"] == "complex_1"
 
 

@@ -104,6 +104,7 @@ def test_openfe_generates_platform_poses_before_upload():
     uploaded = tool.characterize.call_args.args[0]
     assert uploaded.tool_options["upload_inputs"] is True
     assert uploaded.tool_options["complexes"] == tool.complexes_from_boltz.return_value
+    assert "alignment" not in uploaded.tool_options
     assert "complexes" not in request.tool_options
     assert result.metadata["boltz"] == {"provider": "platform"}
 

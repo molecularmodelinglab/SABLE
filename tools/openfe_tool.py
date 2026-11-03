@@ -315,6 +315,7 @@ class OpenFETool:
                 if field in options:
                     campaign[field] = deepcopy(options[field])
             campaign.setdefault("network", {"method": "radial", "central_ligand": reference})
+            campaign.setdefault("alignment", {}).setdefault("pose", "mcs")
             self.submit_campaign(campaign, upload_inputs=options.get("upload_inputs", False))
         network = self.wait_for_network(name, protocol=protocol, expected_repeats=repeats)
         quality_warnings = self._network_quality_failures(network)

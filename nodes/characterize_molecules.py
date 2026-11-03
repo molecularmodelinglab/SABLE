@@ -572,7 +572,7 @@ def _run_openfe_with_boltz(
             for name in request.molecule_ids
         ]
         options["protein"] = deepcopy(reference_complex["protein"])
-        options.setdefault("alignment", {"pose": "keep"})
+        options.setdefault("alignment", {"pose": "mcs"})
         state.characterization_config.setdefault("openfe", {})["reference_complex"] = deepcopy(reference_complex)
     options["upload_inputs"] = True
     state.record_tool_run(ToolRunRecord(

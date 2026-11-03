@@ -59,6 +59,7 @@ def test_native_payload_and_reference_rebasing(protocol):
     payload = tool.submit_campaign.call_args.args[0]
     assert payload["protocol"] == protocol
     assert payload["network"] == {"method": "radial", "central_ligand": "ref"}
+    assert payload["alignment"] == {"pose": "mcs"}
     assert "neutralize_ligands" not in payload and "complexes" not in payload
     assert result.results == {"ref": {OPENFE_PROPERTIES[protocol]: 0.0},
                               "candidate": {OPENFE_PROPERTIES[protocol]: -2.0}}
@@ -85,6 +86,22 @@ def test_network_execution_profile_comes_only_from_environment(protocol, environ
     assert tool.submit_campaign.call_args.args[0]["execution"] == {"profile": expected, "repeats": 5}
     assert request.tool_options == original
     tool.wait_for_network.assert_called_once_with("series", protocol=protocol, expected_repeats=5)
+
+
+@pytest.mark.parametrize("alignment", [{}, {"n_conformers": 25}, {"pose": "keep", "n_conformers": 25}])
+@pytest.mark.parametrize("protocol", ["rbfe", "septop"])
+def test_network_pose_defaults_preserve_explicit_overrides(protocol, alignment):
+    tool = make_tool()
+    tool.submit_campaign = Mock()
+    tool.wait_for_network = Mock(return_value=network_result())
+    request = request_for(protocol, alignment=alignment)
+    request.tool_options["ligands"][1].update(pose="keep", path="candidate.sdf")
+    original = deepcopy(request.tool_options)
+    tool.characterize(request)
+    campaign = tool.submit_campaign.call_args.args[0]
+    assert campaign["alignment"] == {"pose": "mcs", **alignment}
+    assert campaign["ligands"] == original["ligands"]
+    assert request.tool_options == original
 
 
 @pytest.mark.parametrize("protocol", ["rbfe", "septop"])
@@ -444,13 +461,15 @@ def test_series_rejects_out_of_batch_edges_before_pose_generation():
         build(state, {"ref": "CCO", "candidate": "CCCO"})
 
 
+@pytest.mark.parametrize("alignment", [{}, {"n_conformers": 25}, {"pose": "keep", "n_conformers": 25}])
 @pytest.mark.parametrize("protocol", ["rbfe", "septop"])
-def test_boltz_reference_pose_is_reused(protocol, tmp_path, monkeypatch):
+def test_boltz_reference_pose_is_reused(protocol, alignment, tmp_path, monkeypatch):
     import nodes.characterize_molecules as node
     from schemas.state import ProteinTarget
 
     state = WorkflowState(user_prompt=protocol, starting_molecules=["CCO"],
                           targets=[TargetProperty(name=OPENFE_PROPERTIES[protocol])],
+                          characterization_config={"openfe": {"alignment": deepcopy(alignment)}},
                           protein_targets=[ProteinTarget(chain_id="A", sequence="AAAA")])
     tool = make_tool()
     tool.ensure_upload_support = Mock()
@@ -476,7 +495,8 @@ def test_boltz_reference_pose_is_reused(protocol, tmp_path, monkeypatch):
     node._run_openfe_with_boltz(state, build(state, {"next": "CCCCO"}), Mock(), tool)
     assert runner.call_args.args[2].molecule_ids == ["next"]
     options = tool.characterize.call_args.args[0].tool_options
-    assert options["alignment"] == {"pose": "keep"}
+    assert options["alignment"] == {"pose": "mcs", **alignment}
+    assert state.characterization_config["openfe"]["alignment"] == alignment
     assert options["protein"] == {"chains": ["A"]}
     assert next(ligand for ligand in options["ligands"] if ligand["name"] == "ref")["structure"] == reference_path
     assert "extra_ligand_copies" not in options["ligands"][0]
