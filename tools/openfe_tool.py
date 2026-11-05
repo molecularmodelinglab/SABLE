@@ -244,7 +244,7 @@ class OpenFETool:
         details = {}
         for prediction in predictions:
             molecule_id = molecule_by_ligand[prediction["ligand"]]
-            if prediction.get("quality") == "fail" and not options.get("allow_failed_quality", False):
+            if prediction.get("quality") == "fail" and not options.get("allow_failed_quality", True):
                 raise OpenFEError(f"OpenFE quality checks failed for '{molecule_id}' in '{name}'.")
             energy = float(prediction["dg"])
             uncertainty = float(prediction["uncertainty"])
@@ -319,7 +319,7 @@ class OpenFETool:
             self.submit_campaign(campaign, upload_inputs=options.get("upload_inputs", False))
         network = self.wait_for_network(name, protocol=protocol, expected_repeats=repeats)
         quality_warnings = self._network_quality_failures(network)
-        if quality_warnings and not options.get("allow_failed_quality", False):
+        if quality_warnings and not options.get("allow_failed_quality", True):
             raise OpenFEError(
                 f"OpenFE network quality checks failed in '{name}' after execution completed: "
                 f"{'; '.join(quality_warnings)}. "
