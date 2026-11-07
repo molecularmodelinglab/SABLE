@@ -95,7 +95,8 @@ class GeminiClient:
 def _create_openai_client() -> Optional[LLMClient]:
     api_key = os.environ.get("OPENAI_API_KEY")
     base_url = os.environ.get("OPENAI_URL")
-    model = os.environ.get("OPENAI_MODEL", "gpt-5-chat")
+    # Compose passes these through as empty strings when they are unset.
+    model = os.environ.get("OPENAI_MODEL") or "gpt-5-chat"
     if not api_key:
         print("Warning: LLM_PROVIDER is 'openai' but OPENAI_API_KEY is not set.")
         return None
@@ -105,11 +106,12 @@ def _create_openai_client() -> Optional[LLMClient]:
 
 def _create_gemini_client() -> Optional[LLMClient]:
     api_key = os.environ.get("GOOGLE_API_KEY")
+    model = os.environ.get("GEMINI_MODEL") or "gemini-2.5-pro"
     if not api_key:
         print("Warning: LLM_PROVIDER is 'gemini' but GOOGLE_API_KEY is not set.")
         return None
     print("Initializing Gemini client...")
-    return GeminiClient(api_key=api_key)
+    return GeminiClient(api_key=api_key, model=model)
 
 
 LLM_PROVIDER_FACTORIES: dict[str, Callable[[], Optional[LLMClient]]] = {
