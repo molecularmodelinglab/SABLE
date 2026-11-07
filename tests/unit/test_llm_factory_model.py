@@ -20,9 +20,10 @@ def _record_gemini(monkeypatch):
     captured = {}
 
     class Recorder:
-        def __init__(self, api_key, model="gemini-2.5-pro"):
+        def __init__(self, api_key, system_prompt=None, model="gemini-2.5-pro"):
             captured["api_key"] = api_key
             captured["model"] = model
+            captured["system_prompt"] = system_prompt
 
     monkeypatch.setattr(llm_factory, "GeminiClient", Recorder)
     return captured
@@ -54,3 +55,12 @@ def test_gemini_model_is_read_from_the_environment(monkeypatch, gemini_env):
     llm_factory.create_llm_client("gemini")
 
     assert captured["model"] == "gemini-2.5-flash"
+
+
+def test_gemini_client_receives_the_extraction_system_prompt(monkeypatch, gemini_env):
+    # Without it Gemini answers the prompt in prose and extraction finds no JSON.
+    captured = _record_gemini(monkeypatch)
+
+    llm_factory.create_llm_client("gemini")
+
+    assert captured["system_prompt"] == llm_factory.system_instruction

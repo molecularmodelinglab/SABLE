@@ -76,11 +76,12 @@ class OpenAIClient:
 class GeminiClient:
     """Wrapper for the Google Generative AI (Gemini) client."""
 
-    def __init__(self, api_key: str, model: str = "gemini-2.5-pro"):
+    def __init__(self, api_key: str, system_prompt: str, model: str = "gemini-2.5-pro"):
         if not genai:
             raise ImportError("The 'google-generativeai' library is not installed. Please install it with 'pip install google-generativeai'.")
         genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(model)
+        self.system_prompt = system_prompt
+        self.model = genai.GenerativeModel(model, system_instruction=system_prompt)
 
     def generate(self, prompt: str) -> str:
         """Generates a response using the Gemini API."""
@@ -111,7 +112,7 @@ def _create_gemini_client() -> Optional[LLMClient]:
         print("Warning: LLM_PROVIDER is 'gemini' but GOOGLE_API_KEY is not set.")
         return None
     print("Initializing Gemini client...")
-    return GeminiClient(api_key=api_key, model=model)
+    return GeminiClient(api_key=api_key, model=model, system_prompt=system_instruction)
 
 
 LLM_PROVIDER_FACTORIES: dict[str, Callable[[], Optional[LLMClient]]] = {
