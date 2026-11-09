@@ -137,6 +137,7 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
     results: Dict[str, Dict[str, Any]] = {}
     tools_executed: List[str] = []
     boltz_metadata: Dict[str, Dict[str, Any]] = {}
+    openfe_failed_ids: set[str] = set()
 
     characterization_ids: List[str] = list(state.current_bo_recommendations or [])
     characterization_smiles_map: Dict[str, str] = {
@@ -229,6 +230,23 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
                         "warnings": result.metadata["quality_warnings"],
                     },
                 )
+            if tool_id == "openfe" and result.failed_molecules:
+                openfe_failed_ids.update(result.failed_molecules)
+                failures = state.profiling.setdefault("openfe_failed_molecules", {})
+                for molecule_id in result.failed_molecules:
+                    failures[molecule_id] = {
+                        "smiles": characterization_search_space.get(molecule_id),
+                        "reason": result.metadata.get("failed_molecules", {}).get(molecule_id, "OpenFE characterization failed."),
+                        "campaign_name": result.metadata.get("campaign_name"),
+                        "iteration": state.current_iteration,
+                    }
+                emit_event(
+                    state, kind="openfe_partial_batch", node="characterize_molecules",
+                    tool=tool_id, severity="warning",
+                    data={"campaign_name": result.metadata.get("campaign_name"),
+                          "failed_molecules": {mid: failures[mid] for mid in result.failed_molecules},
+                          "accepted_molecule_count": len(result.results)},
+                )
             _merge_characterization_result(results, boltz_metadata, result)
             tools_executed.append(tool_id)
 
@@ -296,6 +314,14 @@ def characterize_molecules_node(state: WorkflowState) -> Dict[str, Any]:
             node="characterize_molecules",
             code="BOLTZ_NOT_RECORDED",
         )
+
+    # Descriptor-only rows must not enter scoring when their OpenFE objective failed.
+    for molecule_id in openfe_failed_ids:
+        results.pop(molecule_id, None)
+    if openfe_failed_ids:
+        state.current_bo_recommendations = [
+            mid for mid in state.current_bo_recommendations if mid not in openfe_failed_ids
+        ]
 
     # Prepare metadata for experiment results
     executed_tool_names: List[str] = []

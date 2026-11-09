@@ -52,9 +52,18 @@ def bo_iteration_node(state: WorkflowState) -> Dict[str, Any]:
         )
     )
 
+    failures = state.profiling.get("openfe_failed_molecules", {})
+    failed_smiles = {entry["smiles"] for entry in failures.values() if entry.get("smiles")}
+    eligible_space = {
+        mid: smiles for mid, smiles in state.search_space.items()
+        if mid not in failures and smiles not in failed_smiles
+    }
+    if not eligible_space:
+        return _complete_without_recommendations(state)
+
     measurement_data = _measurement_data_from_state(state)
     request = BORecommendationRequest(
-        search_space=state.search_space,
+        search_space=eligible_space,
         targets=[_target_payload(target) for target in state.targets],
         measurements=measurement_data or None,
         batch_size=state.bo_config.batch_size if state.bo_config else 5,
@@ -72,7 +81,7 @@ def bo_iteration_node(state: WorkflowState) -> Dict[str, Any]:
         valid_ids = [
             mid
             for mid in result.recommended_ids
-            if mid in state.search_space and state.search_space[mid] not in tested_smiles
+            if mid in eligible_space and eligible_space[mid] not in tested_smiles
         ]
         if not valid_ids:
             state.record_tool_run(ToolRunRecord(

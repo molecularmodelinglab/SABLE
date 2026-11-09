@@ -342,15 +342,23 @@ class OpenFETool:
             reachable = expanded
         missing = required - (set(fitted) & reachable)
         missing.update(required & set(network["unreachable"]))
-        if missing:
+        if reference in missing:
+            raise OpenFEError(f"OpenFE reference '{reference}' is missing or disconnected; no comparable results are available.")
+        accepted = [molecule_id for molecule_id in molecule_ids if molecule_id not in missing]
+        reference_ids = {reference, *options.get("reference_aliases", [])}
+        if set(molecule_ids) - reference_ids and not set(accepted) - reference_ids:
             raise OpenFEError(
-                f"OpenFE ligands missing or disconnected from reference '{reference}': {', '.join(sorted(missing))}. "
-                "Check screening and network planning; no partial batch was accepted."
+                f"OpenFE has no usable candidates connected to reference '{reference}'; "
+                f"missing or disconnected: {', '.join(sorted(missing))}."
             )
+        failures = {
+            molecule_id: f"Missing fitted result or disconnected from reference '{reference}'."
+            for molecule_id in molecule_ids if molecule_id in missing
+        }
         offset = fitted[reference]["dg_relative"]
         results = {
             molecule_id: {OPENFE_PROPERTIES[protocol]: fitted[molecule_id]["dg_relative"] - offset}
-            for molecule_id in molecule_ids
+            for molecule_id in accepted
         }
         details = {
             molecule_id: {
@@ -359,13 +367,14 @@ class OpenFETool:
                 "uncertainty_scope": "network_mean_fit_not_reference_difference",
                 "units": "kcal/mol", "campaign_name": name,
             }
-            for molecule_id in molecule_ids
+            for molecule_id in accepted
         }
         results.update({alias: {OPENFE_PROPERTIES[protocol]: 0.0} for alias in options.get("reference_aliases", [])})
-        return CharacterizationResult(results=results, metadata={
+        return CharacterizationResult(results=results, failed_molecules=list(failures), metadata={
             "tool_id": "openfe", "campaign_name": name, "protocol": protocol,
             "reference": reference, "openfe": details, "network": network,
             "quality_warnings": quality_warnings,
+            "failed_molecules": failures,
             "reference_aliases": options.get("reference_aliases", []),
         })
 
@@ -426,7 +435,7 @@ class OpenFETool:
         deadline = time.monotonic() + self.wait_timeout
         while True:
             summary = self.status(name)
-            self._check_failure(summary)
+            self._check_failure(summary, allow_failed_runs=True)
             if summary.get("protocol") != protocol:
                 raise OpenFEError("The remote OpenFE campaign protocol does not match the requested protocol.")
             operation = summary.get("last_operation") or {}
@@ -434,15 +443,32 @@ class OpenFETool:
                 # Gathering updates Slurm run states; fitted values alone can contain partial repeats.
                 network = self.network(name)
                 gathered = self.status(name)
-                self._check_failure(gathered)
+                self._check_failure(gathered, allow_failed_runs=True)
                 runs = gathered.get("runs", [])
                 if not runs:
                     raise OpenFEError("OpenFE planned no network edges.")
-                if all(run.get("state") == "done" for run in runs):
-                    if any(run.get("repeats", 0) < expected_repeats for run in runs):
+                if all(run.get("state") in {"done", "failed"} for run in runs):
+                    completed = {run["name"] for run in runs if run.get("state") == "done"}
+                    failed = {run["name"] for run in runs if run.get("state") == "failed"}
+                    if not completed:
+                        raise OpenFEError(f"OpenFE runs failed; no completed network edges: {', '.join(sorted(failed))}.")
+                    if any(run.get("repeats", 0) < expected_repeats for run in runs if run["name"] in completed):
                         raise OpenFEError("The OpenFE campaign has fewer repeats than requested.")
-                    if {run["name"] for run in runs} != {edge.get("edge") for edge in network["edges"]}:
+                    edges = network["edges"]
+                    edge_names = [edge.get("edge") for edge in edges]
+                    if len(set(edge_names)) != len(edge_names):
+                        raise OpenFEError("OpenFE returned duplicate edge names.")
+                    if not completed <= set(edge_names) or not set(edge_names) <= completed | failed:
                         raise OpenFEError("OpenFE network results do not cover every planned edge.")
+                    excluded = [edge for edge in edges if edge["edge"] in failed]
+                    # A failed edge with an estimate may already influence the remote ligand fit.
+                    if any(edge.get("ddg") is not None for edge in excluded):
+                        raise OpenFEError("OpenFE failed runs contributed partial estimates to the network fit; complete repeats are required.")
+                    network = deepcopy(network)
+                    if failed:
+                        network["failed_runs"] = sorted(failed)
+                        network["excluded_edges"] = excluded
+                        network["edges"] = [edge for edge in edges if edge["edge"] in completed]
                     self._validate_network_values(network)
                     return network
             self._pause(name, deadline)
@@ -502,14 +528,14 @@ class OpenFETool:
         return payload
 
     @staticmethod
-    def _check_failure(summary: dict[str, Any]) -> None:
+    def _check_failure(summary: dict[str, Any], *, allow_failed_runs: bool = False) -> None:
         operation = summary.get("last_operation") or {}
         if operation.get("status") == "failed":
             raise OpenFEError(
                 f"OpenFE {operation.get('operation')} failed: {operation.get('message')}"
             )
         failed = [run["name"] for run in summary.get("runs", []) if run.get("state") == "failed"]
-        if failed:
+        if failed and not allow_failed_runs:
             raise OpenFEError(f"OpenFE runs failed: {', '.join(failed)}")
 
     def _pause(self, name: str, deadline: float) -> None:
