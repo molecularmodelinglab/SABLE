@@ -228,7 +228,7 @@ def test_no_silent_partial_or_failed_quality_batch(failure):
     tool.wait_for_network = Mock(return_value=network)
     tool.submit_campaign = Mock()
     with pytest.raises(OpenFEError, match="quality|disconnected"):
-        tool.characterize(request_for(resume=True))
+        tool.characterize(request_for(resume=True, allow_failed_quality=False))
     tool.submit_campaign.assert_not_called()
 
 
@@ -241,7 +241,7 @@ def test_failed_quality_error_identifies_edges_checks_and_resume(protocol):
     tool.wait_for_network = Mock(return_value=network)
     tool.submit_campaign = Mock()
     with pytest.raises(OpenFEError) as caught:
-        tool.characterize(request_for(protocol, resume=True))
+        tool.characterize(request_for(protocol, resume=True, allow_failed_quality=False))
     message = str(caught.value)
     for detail in ("after execution completed", "ref_candidate", "repeat spread exceeds threshold",
                    "cycle_closure", "closure is 4 kcal/mol", "/campaigns/series/network",
@@ -546,3 +546,158 @@ def test_configured_protocol_reaches_workflow_targets(prompt, protocol, expected
 def test_protocol_options_must_agree(protocol, options):
     with pytest.raises(OpenFEError):
         make_tool().characterize(request_for(protocol, **options))
+
+
+def partial_request(protocol="rbfe", **options):
+    request = request_for(protocol, resume=True, **options)
+    request.molecule_ids.append("dropped")
+    request.search_space["dropped"] = "CCCCO"
+    request.tool_options["ligands"].append({"name": "dropped", "smiles": "CCCCO"})
+    return request
+
+
+@pytest.mark.parametrize("protocol", ["rbfe", "septop"])
+@pytest.mark.parametrize("failure", ["missing", "disconnected", "unreachable"])
+def test_partial_network_preserves_valid_results_and_reports_exclusions(protocol, failure):
+    tool = make_tool()
+    network = network_result()
+    if failure != "missing":
+        network["ligands"].append({"ligand": "dropped", "dg_relative": -100.0, "uncertainty": 0.1})
+    if failure == "unreachable":
+        network["unreachable"] = ["dropped"]
+    tool.wait_for_network = Mock(return_value=network)
+    tool.submit_campaign = Mock()
+    result = tool.characterize(partial_request(protocol, reference_aliases=["alias"]))
+    assert result.failed_molecules == ["dropped"]
+    assert "reference 'ref'" in result.metadata["failed_molecules"]["dropped"]
+    assert result.results == {"ref": {OPENFE_PROPERTIES[protocol]: 0.0},
+                              "candidate": {OPENFE_PROPERTIES[protocol]: -2.0},
+                              "alias": {OPENFE_PROPERTIES[protocol]: 0.0}}
+    assert "dropped" not in result.metadata["openfe"]
+    assert result.metadata["network"] == network
+    tool.submit_campaign.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", ["missing", "unreachable"])
+def test_partial_network_requires_reference(failure):
+    tool = make_tool()
+    network = network_result()
+    if failure == "missing":
+        network["ligands"].pop(0)
+    else:
+        network["unreachable"] = ["ref"]
+    tool.wait_for_network = Mock(return_value=network)
+    with pytest.raises(OpenFEError, match="reference 'ref'.*missing or disconnected"):
+        tool.characterize(partial_request())
+
+
+@pytest.mark.parametrize("protocol", ["rbfe", "septop"])
+@pytest.mark.parametrize("include_failed_edge", [False, True])
+def test_failed_network_run_does_not_discard_completed_edges(protocol, include_failed_edge):
+    tool = make_tool()
+    summary = status(protocol=protocol)
+    summary["runs"].append({"name": "ref_dropped", "state": "failed", "repeats": 3})
+    network = network_result()
+    if include_failed_edge:
+        network["edges"].append({"edge": "ref_dropped", "ligand_a": "ref", "ligand_b": "dropped",
+                                 "ddg": None, "uncertainty": None, "quality": "fail"})
+    original = deepcopy(network)
+    tool.status = Mock(return_value=summary)
+    tool.network = Mock(return_value=network)
+    result = tool.characterize(partial_request(protocol))
+    assert result.failed_molecules == ["dropped"]
+    assert result.results["candidate"][OPENFE_PROPERTIES[protocol]] == -2.0
+    assert result.metadata["network"]["failed_runs"] == ["ref_dropped"]
+    assert len(result.metadata["network"]["edges"]) == 1
+    assert network == original
+
+
+def test_partial_batch_still_waits_for_other_running_edges():
+    tool = make_tool()
+    running = status(state="running")
+    running["runs"].append({"name": "ref_dropped", "state": "failed", "repeats": 3})
+    done = deepcopy(running)
+    done["runs"][0]["state"] = "done"
+    tool.status = Mock(side_effect=[running, running, running, done])
+    tool.network = Mock(return_value=network_result())
+    tool._pause = Mock()
+    result = tool.characterize(partial_request())
+    assert result.failed_molecules == ["dropped"]
+    tool._pause.assert_called_once()
+
+
+def test_failed_edge_partial_estimate_cannot_contaminate_accepted_fit():
+    tool = make_tool()
+    summary = status()
+    summary["runs"].append({"name": "ref_dropped", "state": "failed", "repeats": 3})
+    network = network_result()
+    network["edges"].append({"edge": "ref_dropped", "ligand_a": "ref", "ligand_b": "dropped",
+                             "ddg": -100.0, "uncertainty": 0.1})
+    tool.status = Mock(return_value=summary)
+    tool.network = Mock(return_value=network)
+    with pytest.raises(OpenFEError, match="partial estimates"):
+        tool.characterize(partial_request())
+
+
+def test_campaign_operation_failure_is_still_fatal():
+    tool = make_tool()
+    summary = status()
+    summary["last_operation"]["status"] = "failed"
+    tool.status = Mock(return_value=summary)
+    with pytest.raises(OpenFEError, match="submit failed"):
+        tool.characterize(partial_request())
+
+
+@pytest.mark.parametrize("tool_order", [["openfe", "rdkit"], ["rdkit", "openfe"]])
+def test_partial_workflow_excludes_descriptor_only_rows_and_future_recommendations(tool_order, monkeypatch):
+    import nodes.characterize_molecules as node
+    import nodes.bo_iteration as bo
+    from schemas.tool_schemas import BORecommendationResult
+
+    request = partial_request()
+    tool = make_tool()
+    tool.wait_for_network = Mock(return_value=network_result())
+    openfe_result = tool.characterize(request)
+    descriptor_result = CharacterizationResult(results={"candidate": {"qed": 0.5}, "dropped": {"qed": 0.9}})
+    state = WorkflowState(
+        user_prompt="RBFE and QED", current_bo_recommendations=["candidate", "dropped"],
+        search_space={"candidate": "CCCO", "dropped": "CCCCO", "next": "CCCCCO", "duplicate": "CCCCO"},
+        targets=[TargetProperty(name=OPENFE_PROPERTIES["rbfe"]), TargetProperty(name="qed")],
+        characterization_config={"tool_ids": tool_order},
+    )
+    monkeypatch.setattr(node, "_build_characterization_request", Mock(return_value=request))
+    monkeypatch.setattr(node, "_create_characterization_tool", Mock())
+    monkeypatch.setattr(node, "_run_characterization_tool",
+                        lambda spec, tool, request: openfe_result if spec.id == "openfe" else descriptor_result)
+    node.characterize_molecules_node(state)
+    assert [row.molecule_id for row in state.experimental_results] == ["candidate"]
+    assert state.experimental_results[0].properties["qed"] == 0.5
+    assert state.current_bo_recommendations == ["candidate"]
+    record = next(run for run in state.tool_runs if run.tool_id == "openfe")
+    assert record.outputs["failed_molecule_count"] == 1
+    assert record.metadata["result_metadata"]["failed_molecules"]["dropped"]
+    events = [entry["data"] for entry in state.logs if entry["action"] == "openfe_partial_batch"]
+    assert len(events) == 1
+    assert events[0]["severity"] == "warning"
+    assert events[0]["data"]["failed_molecules"]["dropped"]["campaign_name"] == "series"
+
+    state = WorkflowState.model_validate(state.model_dump())
+    optimizer = Mock(return_value=BORecommendationResult(recommended_ids=["dropped", "duplicate", "next"]))
+    monkeypatch.setattr(bo, "_run_optimizer_tool", optimizer)
+    bo.bo_iteration_node(state)
+    assert optimizer.call_args.args[2].search_space == {"candidate": "CCCO", "next": "CCCCCO"}
+    assert state.current_bo_recommendations == ["next"]
+    assert "dropped" in state.search_space
+
+
+def test_bo_finishes_when_every_molecule_was_excluded(monkeypatch):
+    import nodes.bo_iteration as bo
+
+    state = WorkflowState(user_prompt="RBFE", search_space={"dropped": "CCCCO"},
+                          targets=[TargetProperty(name=OPENFE_PROPERTIES["rbfe"])],
+                          profiling={"openfe_failed_molecules": {"dropped": {"smiles": "CCCCO"}}})
+    optimizer = Mock()
+    monkeypatch.setattr(bo, "_run_optimizer_tool", optimizer)
+    bo.bo_iteration_node(state)
+    optimizer.assert_not_called()
+    assert state.status == "completed"
