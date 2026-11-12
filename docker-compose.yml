@@ -79,6 +79,8 @@ services:
       - LLM_PROVIDER=${LLM_PROVIDER}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-}
       - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
       - MOLECULAR_FP=${MOLECULAR_FP:-MORDRED}
@@ -126,6 +128,8 @@ services:
       - LLM_PROVIDER=${LLM_PROVIDER}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-}
       - HPC_HOST=${HPC_HOST}
       - HPC_USER=${HPC_USER}
       - HPC_PASSWORD=${HPC_PASSWORD:-}
@@ -261,6 +265,8 @@ services:
       - LLM_PROVIDER=${LLM_PROVIDER}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-}
       - MOLECULAR_FP=${MOLECULAR_FP:-MORDRED}
       - MULTI_OPT_TYPE=${MULTI_OPT_TYPE:-pareto}
       - ./checkpoints:/app/checkpoints
