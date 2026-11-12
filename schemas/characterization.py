@@ -13,6 +13,7 @@ class PropertySource(str, Enum):
     """Enumeration for the source of a calculated property value."""
     RDKIT = "rdkit"
     STOPLIGHT = "stoplight"
+    NERDD = "nerdd"
     LLM = "llm"
     EXPERIMENTAL = "experimental"
 
@@ -81,11 +82,20 @@ def select_characterization_tool_ids(
         if non_boltz_single:
             selected.append(non_boltz_single[0].id)
         else:
-            for tool_id in ("rdkit", "stoplight"):
-                spec = registry.get(tool_id)
+            # No single characterizer covers every requested property, so combine
+            # characterizers greedily in registry priority order until the requested
+            # properties are covered. Iterating the registry (rather than a fixed
+            # tool list) lets newly registered characterizers participate in
+            # multi-objective campaigns.
+            uncovered = set(remaining_props)
+            for spec in registry.list(kind=ToolKind.CHARACTERIZER):
+                if spec.id == "boltz" or not uncovered:
+                    continue
                 coverage = {PROPERTY_CATALOG.normalize(prop) for prop in spec.provides}
-                if remaining_props & coverage:
-                    selected.append(tool_id)
+                newly_covered = uncovered & coverage
+                if newly_covered:
+                    selected.append(spec.id)
+                    uncovered -= newly_covered
 
     if requires_boltz:
         selected.append("boltz")
