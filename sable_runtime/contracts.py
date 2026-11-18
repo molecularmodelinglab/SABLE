@@ -1,0 +1,51 @@
+"""Versioned, closed contracts for installed skills and execution requests."""
+from typing import Annotated, Any, Literal
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+Identifier = Annotated[str, Field(pattern=r'^[a-z][a-z0-9_-]{0,63}$')]
+
+
+class Contract(BaseModel):
+    model_config = ConfigDict(extra='forbid', frozen=True)
+
+
+class Operation(Contract):
+    id: Identifier
+    description: str = Field(min_length=1, max_length=1000)
+    handler: str = Field(pattern=r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+    input_schema: dict[str, Any]
+    output_schema: dict[str, Any]
+    budget_units: int = Field(default=1, ge=1, strict=True)
+    service: Identifier | None = None
+    credential: Identifier | None = None
+
+
+class Manifest(Contract):
+    schema_version: Literal[1] = 1
+    id: Identifier
+    version: str = Field(pattern=r'^\d+\.\d+\.\d+$')
+    description: str = Field(min_length=1, max_length=1000)
+    runtime: Literal['python'] = 'python'
+    operations: list[Operation] = Field(min_length=1)
+
+    @model_validator(mode='after')
+    def unique_operations(self):
+        ids = [operation.id for operation in self.operations]
+        if len(ids) != len(set(ids)):
+            raise ValueError('Duplicate operation IDs')
+        return self
+
+
+class Action(Contract):
+    campaign_id: Identifier
+    action_id: Identifier
+    skill_id: Identifier
+    skill_version: str
+    skill_digest: str = Field(pattern=r'^[a-f0-9]{64}$')
+    operation_id: Identifier
+    inputs: dict[str, Any]
+
+
+class Budget(Contract):
+    max_actions: int = Field(ge=1, strict=True)
+    max_units: int = Field(ge=1, strict=True)
