@@ -5,7 +5,7 @@ description: Plan bounded constrained analogue exploration using HEALER, RDKit d
 
 Use this workflow when a user wants to explore or optimize analogues. It composes installed operations and has no executable operation of its own.
 
-Establish explicit starting SMILES, objectives, preserved scaffold or sites, hard property constraints, and a small evaluation budget. Clarify unsupported activity/solubility claims rather than substituting convenient descriptor proxies. Load the HEALER, RDKit and BayBE skills for their contracts.
+Establish explicit starting SMILES, objectives, preserved scaffold or sites, hard property constraints, and a small evaluation budget. Clarify unsupported activity/solubility claims rather than substituting convenient descriptor proxies. Load an available enumeration skill (`healer` for local execution or `healer-api` for the configured service), RDKit and BayBE for their contracts. Remote job receipts are pending work; use the resolved candidate library after the runtime resumes the campaign.
 
 A typical campaign is:
 

@@ -1,14 +1,17 @@
 {
   "schema_version": 1,
   "id": "hit-to-lead",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Plan constrained analogue exploration with HEALER, RDKit and BayBE; use for bounded discovery campaigns.",
   "operations": [],
   "requirements": {
     "skills": [
-      "healer",
       "baybe",
       "rdkit-descriptors"
+    ],
+    "any_skills": [
+      "healer",
+      "healer-api"
     ]
   }
 }
