@@ -336,7 +336,7 @@ export function RunDetailPage() {
                       <div className="provider-job__header">
                         <div>
                           <strong>{job.provider === 'boltz_platform' ? 'Boltz Platform' : job.provider}</strong>
-                          <span>{job.execution_kind.replaceAll('_', ' ')}</span>
+                          <span>{job.execution_kind.replace(/_/g, ' ')}</span>
                         </div>
                         <RunStatusBadge status={job.status} />
                       </div>

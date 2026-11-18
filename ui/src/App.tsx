@@ -11,6 +11,7 @@ import { RegisterPage } from './pages/RegisterPage'
 import { AdminDashboardPage } from './pages/AdminDashboardPage'
 import { AccountPage } from './pages/AccountPage'
 import { LandingPage } from './pages/LandingPage'
+import { AgentCampaignPage } from './pages/AgentCampaignPage'
 import { useAuthProfile } from './hooks/useAuthProfile'
 
 export function App() {
@@ -29,6 +30,7 @@ export function App() {
             <AppShell header={<Header title={headerContent.title} description={headerContent.description} pathname={location.pathname} />}>
               <Routes>
                 <Route path="/dashboard" element={<DashboardPage />} />
+                <Route path="/agent" element={<AgentCampaignPage />} />
                 <Route path="/runs/new" element={<NewRunPage />} />
                 <Route path="/runs/:id" element={<RunDetailPage />} />
                 <Route path="/account" element={<AccountPage />} />
