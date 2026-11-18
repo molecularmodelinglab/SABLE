@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "id": "dataset-summary",
+  "version": "1.0.0",
+  "description": "Descriptive statistics for an observation series with a shared unit.",
+  "operations": [{
+    "id": "summarize",
+    "description": "Return count, minimum, maximum and mean without changing units.",
+    "handler": "summarize",
+    "budget_units": 1,
+    "input_schema": {
+      "type": "object", "additionalProperties": false,
+      "required": ["values", "unit"],
+      "properties": {
+        "values": {"type": "array", "minItems": 1, "maxItems": 10000, "items": {"type": "number"}},
+        "unit": {"type": "string", "minLength": 1, "maxLength": 64}
+      }
+    },
+    "output_schema": {
+      "type": "object", "additionalProperties": false,
+      "required": ["count", "minimum", "maximum", "mean", "unit"],
+      "properties": {
+        "count": {"type": "integer", "minimum": 1},
+        "minimum": {"type": "number"}, "maximum": {"type": "number"},
+        "mean": {"type": "number"}, "unit": {"type": "string"}
+      }
+    }
+  }]
+}
