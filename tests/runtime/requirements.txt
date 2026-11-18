@@ -1,0 +1,2 @@
+-r ../../sable_runtime/requirements.txt
+pytest==8.3.4
