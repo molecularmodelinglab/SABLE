@@ -58,7 +58,7 @@ class SkillRegistry:
                 raise ValueError('Required package files must be regular files')
             content[name] = path.read_bytes()
         manifest = Manifest.model_validate_json(content['manifest.json'])
-        entries = list(manifest.workers.values())
+        entries = list(manifest.workers.values()) + list(manifest.remote_jobs.values())
         if manifest.completion_check:
             entries.append(manifest.completion_check)
         if manifest.requirements.probe:
@@ -76,6 +76,8 @@ class SkillRegistry:
         for operation in manifest.operations:
             validate_schema(operation.input_schema)
             validate_schema(operation.output_schema)
+        for job in manifest.remote_jobs.values():
+            validate_schema(job.output_schema)
         key = (manifest.id, manifest.version)
         if key in self._skills:
             raise ValueError('Skill version already installed')
@@ -114,12 +116,15 @@ class SkillRegistry:
             raise ValueError('Installed operation handler is missing')
         return handler
 
-    def available(self):
+    def available(self, services=()):
         """Evaluate requirements of host-installed trusted packages, then dependencies."""
         candidates = {}
         for key, skill in self._skills.items():
             requirements = skill.manifest.requirements
             try:
+                required_services = set(requirements.services) | {j.service for j in skill.manifest.remote_jobs.values()}
+                if not required_services <= set(services):
+                    continue
                 allowed_env = set(os.getenv('SABLE_V2_WORKER_ENV_ALLOWLIST', '').split(','))
                 if any(set(worker.environment) - allowed_env for worker in skill.manifest.workers.values()):
                     continue
@@ -139,17 +144,30 @@ class SkillRegistry:
         while True:
             names = {key[0] for key in available}
             added = {key for key, skill in candidates.items()
-                     if set(skill.manifest.requirements.skills) <= names} - available
+                     if set(skill.manifest.requirements.skills) <= names
+                     and (not skill.manifest.requirements.any_skills
+                          or set(skill.manifest.requirements.any_skills) & names)} - available
             if not added:
                 return available
             available.update(added)
 
-    def install_directory(self, root):
+    def install_directory(self, root, services=()):
         """The deployment-owned directory is the installation/trust boundary."""
         for directory in sorted(Path(root).iterdir()):
             if directory.is_dir() and not directory.is_symlink() and (directory / 'manifest.json').is_file():
                 self.install(directory)
-        return self.available()
+        return self.available(services)
+
+    def remote_handler(self, skill, job, phase):
+        handler_name = getattr(job, phase)
+        if handler_name is None:
+            raise ValueError('Remote operation is unsupported')
+        namespace = {'__name__': f'sable_remote_{skill.digest}'}
+        exec(compile(skill.files[job.file], f'<skill:{job.file}>', 'exec'), namespace)
+        handler = namespace.get(handler_name)
+        if not callable(handler):
+            raise ValueError('Remote handler is missing')
+        return handler
 
     def completion_feedback(self, skill, results, evidence):
         entry = skill.manifest.completion_check
