@@ -224,3 +224,21 @@ def test_discovery_finish_requires_current_ranking(service):
     state['results']['ranking']['measurement_action_ids'] = ['evaluation']
     service._act(state, 'alice', finish)
     assert state['status'] == 'completed'
+
+
+def test_recovery_preserves_empty_observation_exclusion(service):
+    state = service.create('alice', 'Calculate a malformed structure')
+    model = ScriptedModel([decision('load_skill', skill_id='rdkit-descriptors')])
+    service.advance(state['id'], 'alice', model)
+    state = service.get(state['id'], 'alice')
+    state['turns'] = 2
+    pending = decision('execute_operation', skill_id='rdkit-descriptors', operation_id='calculate',
+                       inputs={'smiles': ['invalid'], 'properties': ['qed']})
+    state['pending'] = pending.model_dump()
+    service._act(state, 'alice', pending)
+    with service.ledger.connect() as db:
+        db.execute('UPDATE agent_campaigns SET state=?,busy=1,lease_until=0 WHERE id=?',
+                   (json.dumps(state), state['id']))
+    recovered = service.get(state['id'], 'alice')
+    assert recovered['results'] == {}
+    assert recovered['history'][-1]['result']['output']['failures']

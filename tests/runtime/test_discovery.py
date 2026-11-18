@@ -71,9 +71,9 @@ def test_hard_constraints_deduplication_and_seed_exclusion():
 
 def test_workflow_skill_is_instruction_only():
     reg = registry()
-    description = reg.describe('hit-to-lead','1.1.0',{('hit-to-lead','1.1.0')})
+    description = reg.describe('hit-to-lead','1.2.0',{('hit-to-lead','1.2.0')})
     assert not description['manifest']['operations']
-    assert reg.get('hit-to-lead', '1.1.0').code == b''
+    assert reg.get('hit-to-lead', '1.2.0').code == b''
 
 
 @pytest.mark.parametrize('strategy', ['single','pareto','desirability'])

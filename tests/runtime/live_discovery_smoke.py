@@ -19,7 +19,7 @@ def main():
                         base_url=config.get('OPENAI_URL') or None)
     try:
         service = CampaignService(Ledger('/tmp/live-discovery.sqlite'), registry(),
-                    {('healer','1.1.0'),('baybe','1.1.0'),('rdkit-descriptors','1.2.0'),('hit-to-lead','1.1.0')})
+                    {('healer','1.1.0'),('baybe','1.1.0'),('rdkit-descriptors','1.2.0'),('hit-to-lead','1.2.0')})
         state = service.create('smoke-test',
             'Explore analogues of acetanilide, SMILES CC(=O)Nc1ccccc1, to maximize computed QED. '
             'Preserve the benzene substructure SMARTS c1ccccc1 and enforce molecular weight between 80 and 500 g/mol. '
