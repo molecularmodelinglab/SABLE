@@ -1,0 +1,218 @@
+{
+  "schema_version": 1,
+  "id": "healer",
+  "version": "1.0.0",
+  "description": "Enumerate reaction-based analogues with local HEALER, enforcing explicit scaffold and descriptor constraints.",
+  "operations": [
+    {
+      "id": "enumerate",
+      "description": "Create a bounded candidate library; reference the returned action ID in downstream skills.",
+      "handler": "enumerate_analogs",
+      "budget_units": 2,
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "starting_smiles": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "max_candidates": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 128
+          },
+          "mode": {
+            "enum": [
+              "MoleculeHEALER",
+              "SiteHEALER",
+              "FragmentHEALER"
+            ]
+          },
+          "n_compositions": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
+          },
+          "seed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "scaffold_smarts": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "property_filters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "property": {
+                  "enum": [
+                    "molecular_weight",
+                    "logp",
+                    "tpsa",
+                    "h_bond_donors",
+                    "h_bond_acceptors",
+                    "rotatable_bonds",
+                    "qed"
+                  ]
+                },
+                "minimum": {
+                  "type": "number"
+                },
+                "maximum": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "property",
+                "minimum",
+                "maximum"
+              ]
+            },
+            "maxItems": 7
+          },
+          "reaction_tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "minItems": 1,
+            "maxItems": 16
+          },
+          "reactive_sites": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "minItems": 1,
+            "maxItems": 16,
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "starting_smiles",
+          "max_candidates"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "candidate_library"
+          },
+          "starting_smiles": {
+            "type": "string"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "smiles": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "smiles"
+              ]
+            },
+            "maxItems": 128
+          },
+          "constraints": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "scaffold_smarts": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "property_filters": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "property": {
+                      "enum": [
+                        "molecular_weight",
+                        "logp",
+                        "tpsa",
+                        "h_bond_donors",
+                        "h_bond_acceptors",
+                        "rotatable_bonds",
+                        "qed"
+                      ]
+                    },
+                    "minimum": {
+                      "type": "number"
+                    },
+                    "maximum": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "property",
+                    "minimum",
+                    "maximum"
+                  ]
+                },
+                "maxItems": 7
+              }
+            },
+            "required": [
+              "scaffold_smarts",
+              "property_filters"
+            ]
+          },
+          "exclusions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "source_index": {
+                  "type": "integer"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "source_index",
+                "reason"
+              ]
+            }
+          },
+          "provenance": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "kind",
+          "starting_smiles",
+          "candidates",
+          "constraints",
+          "exclusions",
+          "provenance"
+        ]
+      }
+    }
+  ]
+}
