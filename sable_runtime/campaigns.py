@@ -17,9 +17,10 @@ class CampaignConflict(RuntimeError):
 
 
 class CampaignService:
-    def __init__(self, ledger, registry, allowed, *, services=None, credentials=None):
+    def __init__(self, ledger, registry, allowed, *, services=None, credentials=None, discovery_allowed=None):
         self.ledger, self.registry = ledger, registry
         self.allowed = frozenset(allowed)  # Host-configured skill/version pairs.
+        self.discovery_allowed = frozenset(allowed if discovery_allowed is None else discovery_allowed)
         self.services, self.credentials = dict(services or {}), credentials
         self.jobs = JobManager(ledger, registry, services=self.services, credentials=credentials, allowed=self.allowed)
         self.artifacts = ArtifactStore(ledger)
@@ -32,7 +33,7 @@ class CampaignService:
 
     def create(self, owner, prompt):
         campaign_id = 'campaign-' + uuid4().hex
-        pins = self.registry.discover(self.allowed)
+        pins = self.registry.discover(self.discovery_allowed)
         state = dict(id=campaign_id, status='ready', history=[{'role': 'user', 'content': prompt}],
                      skills=pins, loaded={}, results={}, report=None, question=None,
                      turns=0, max_turns=24, model=None, pending=None, error=None, agent_spec=AGENT_SPEC)
@@ -86,7 +87,37 @@ class CampaignService:
             if not busy and state['status'] in {'ready', 'waiting_jobs'}:
                 state['status'] = 'waiting_jobs' if any(j['status'] in ACTIVE for j in jobs) else 'ready'
             db.execute('UPDATE agent_campaigns SET state=?,busy=? WHERE id=?', (json.dumps(state), int(busy), campaign_id))
-            return {**state, 'busy': busy, 'jobs': jobs, 'artifacts': self.artifacts.list(campaign_id, owner)}
+            budget = self.ledger.owned(db,campaign_id,owner)
+            usage = [json.loads(row['payload']).get('usage',{}) for row in db.execute(
+                "SELECT payload FROM events WHERE campaign=? AND kind='model_decision'",(campaign_id,))]
+            metrics = {'tool_actions':budget['used_actions'],'max_tool_actions':budget['max_actions'],
+                       'operation_units':budget['used_units'],'max_operation_units':budget['max_units'],
+                       'input_tokens':sum(u.get('input_tokens',0) for u in usage),
+                       'output_tokens':sum(u.get('output_tokens',0) for u in usage)}
+            return {**state, 'busy': busy, 'jobs': jobs, 'artifacts': self.artifacts.list(campaign_id, owner), 'metrics':metrics}
+
+    def catalog(self):
+        return [dict(id=skill.manifest.id, version=skill.manifest.version,
+                     description=skill.manifest.description, digest=skill.digest,
+                     available=key in self.discovery_allowed, resumable=key in self.allowed,
+                     requirements=skill.manifest.requirements.model_dump(),
+                     operations=[{'id':op.id,'description':op.description} for op in skill.manifest.operations])
+                for key, skill in sorted(self.registry._skills.items())]
+
+    def export(self, campaign_id, owner):
+        state = self.get(campaign_id, owner)
+        contents = {self.artifacts.read(campaign_id,owner,item['id']): item['id'] for item in state['artifacts']}
+        def references(value):
+            if isinstance(value,str) and value in contents:
+                return {'artifact_id':contents[value]}
+            if isinstance(value,dict):
+                return {key:references(item) for key,item in value.items()}
+            if isinstance(value,list):
+                return [references(item) for item in value]
+            return value
+        return references({'schema_version':1, 'kind':'campaign_record', 'campaign':state,
+                           'events':self.ledger.events(campaign_id, owner),
+                           'notice':'Operational record, not a curated training example. Exact uploaded-file values are replaced by artifact references; review user and tool text before sharing.'})
 
     def list(self, owner):
         with self.ledger.connect() as db:
