@@ -78,6 +78,10 @@ services:
       - AUTH0_AUDIENCE=${AUTH0_AUDIENCE}
       - LLM_PROVIDER=${LLM_PROVIDER}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - SABLE_V2_ENABLED=${SABLE_V2_ENABLED:-0}
+      - SABLE_V2_MODEL=${SABLE_V2_MODEL:-}
+      - SABLE_V2_LEDGER_PATH=${SABLE_V2_LEDGER_PATH:-/app/data/v2/campaigns.sqlite}
+      - OPENAI_URL=${OPENAI_URL:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
