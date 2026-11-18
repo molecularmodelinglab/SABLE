@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "id": "boltz",
+  "version": "1.0.0",
+  "description": "Self-hosted Boltz single-ligand affinity prediction.",
+  "operations": [
+    {
+      "id": "predict",
+      "handler": "predict",
+      "description": "Queue one self-hosted Boltz prediction for explicit protein sequences.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "molecule": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+              },
+              "smiles": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              }
+            },
+            "required": [
+              "id",
+              "smiles"
+            ]
+          },
+          "proteins": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "sequence": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 10000
+                },
+                "chain_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+                }
+              },
+              "required": [
+                "sequence",
+                "chain_id"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 16
+          }
+        },
+        "required": [
+          "molecule",
+          "proteins"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "remote_job"
+          },
+          "job_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "kind",
+          "job_id",
+          "status"
+        ]
+      }
+    }
+  ],
+  "remote_jobs": {
+    "prediction": {
+      "file": "remote.py",
+      "submit": "submit_prediction",
+      "poll": "poll_prediction",
+      "service": "boltz",
+      "timeout_seconds": 86400,
+      "poll_interval_seconds": 10,
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "boltz_prediction"
+          },
+          "provider": {
+            "const": "self_hosted"
+          },
+          "protein_scope_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "measurement": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+              },
+              "smiles": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "metrics": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "affinity": {
+                    "type": "number"
+                  },
+                  "binding_confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "affinity"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "smiles",
+              "metrics"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "provider",
+          "protein_scope_id",
+          "measurement"
+        ]
+      }
+    }
+  },
+  "requirements": {
+    "modules": [
+      "httpx"
+    ],
+    "services": [
+      "boltz"
+    ]
+  }
+}
