@@ -42,6 +42,12 @@ Finish only with evidence action IDs actually recorded in this campaign. Explain
 limitations in the summary. Do not claim that computed drug-likeness establishes efficacy or safety.
 Your context includes durable history, loaded skills, results, and remaining turn allowance.'''
 
+SYSTEM += ''' For analogue optimization, load the hit-to-lead workflow guidance when available.
+Pass recorded action references between scientific tools instead of reconstructing structures or
+measurements. Bulk arrays may be shown as truncated previews; downstream tools resolve full records.
+Recommendations are not measurements. Respect fixed constraints and round limits, and reserve
+budget for final ranking and reporting.'''
+
 AGENT_SPEC = sha256((SYSTEM + json.dumps(TOOLS, sort_keys=True)).encode()).hexdigest()
 
 
