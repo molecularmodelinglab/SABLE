@@ -1,0 +1,257 @@
+{
+  "schema_version": 1,
+  "id": "healer-api",
+  "version": "1.0.0",
+  "description": "Enumerate reaction-based analogues through the HEALER API with durable jobs and explicit chemical constraints.",
+  "operations": [
+    {
+      "id": "enumerate",
+      "description": "Submit bounded remote HEALER enumeration; resolve the durable job to obtain a candidate library.",
+      "handler": "enumerate",
+      "budget_units": 2,
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "starting_smiles": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "max_candidates": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 128
+          },
+          "mode": {
+            "enum": [
+              "MoleculeHEALER",
+              "SiteHEALER",
+              "FragmentHEALER"
+            ]
+          },
+          "n_compositions": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
+          },
+          "seed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "scaffold_smarts": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "property_filters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "property": {
+                  "enum": [
+                    "molecular_weight",
+                    "logp",
+                    "tpsa",
+                    "h_bond_donors",
+                    "h_bond_acceptors",
+                    "rotatable_bonds",
+                    "qed"
+                  ]
+                },
+                "minimum": {
+                  "type": "number"
+                },
+                "maximum": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "property",
+                "minimum",
+                "maximum"
+              ]
+            },
+            "maxItems": 7
+          },
+          "reaction_tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "minItems": 1,
+            "maxItems": 16
+          },
+          "reactive_sites": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "minItems": 1,
+            "maxItems": 16,
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "starting_smiles",
+          "max_candidates"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "remote_job"
+          },
+          "job_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "job_id",
+          "status"
+        ]
+      }
+    }
+  ],
+  "remote_jobs": {
+    "enumeration": {
+      "file": "remote.py",
+      "submit": "submit",
+      "poll": "poll",
+      "service": "healer-api",
+      "timeout_seconds": 900,
+      "poll_interval_seconds": 5,
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "candidate_library"
+          },
+          "starting_smiles": {
+            "type": "string"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "smiles": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "smiles"
+              ]
+            },
+            "maxItems": 128
+          },
+          "constraints": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "scaffold_smarts": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "property_filters": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "property": {
+                      "enum": [
+                        "molecular_weight",
+                        "logp",
+                        "tpsa",
+                        "h_bond_donors",
+                        "h_bond_acceptors",
+                        "rotatable_bonds",
+                        "qed"
+                      ]
+                    },
+                    "minimum": {
+                      "type": "number"
+                    },
+                    "maximum": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "property",
+                    "minimum",
+                    "maximum"
+                  ]
+                },
+                "maxItems": 7
+              }
+            },
+            "required": [
+              "scaffold_smarts",
+              "property_filters"
+            ]
+          },
+          "exclusions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "source_index": {
+                  "type": "integer"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "source_index",
+                "reason"
+              ]
+            }
+          },
+          "provenance": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "kind",
+          "starting_smiles",
+          "candidates",
+          "constraints",
+          "exclusions",
+          "provenance"
+        ]
+      }
+    }
+  },
+  "requirements": {
+    "modules": [
+      "rdkit",
+      "requests"
+    ],
+    "services": [
+      "healer-api"
+    ]
+  }
+}
