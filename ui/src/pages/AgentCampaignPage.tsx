@@ -7,8 +7,9 @@ type ScientificResult = { observations?: unknown; kind?: string; candidates?: { 
 type JobStatus = 'queued' | 'submitting' | 'unknown' | 'running' | 'succeeded' | 'partial' | 'failed' | 'cancelled' | 'timed_out' | 'cancelling'
 type Job = { id: string; campaign: string; action: string; skill_id: string; remote_id: string | null; status: JobStatus; can_cancel: boolean; can_reconcile: boolean; created: string | number; updated: string | number; next_poll: string | number | null; deadline: string | number | null; result?: unknown; error?: unknown; diagnostics?: Record<string, unknown> }
 type Artifact = { id: string; name: string; size_bytes: number; sha256: string }
-type Campaign = { id: string; status: string; busy: boolean; question: string | null; error: string | null; turns: number; max_turns: number; report: { summary: string; evidence: string[] } | null; results: Record<string, ScientificResult>; jobs?: Job[]; artifacts?: Artifact[] }
-type Event = { event_id: string; action: string; sequence: number; timestamp: string; kind: string; payload: unknown }
+type Campaign = { id: string; status: string; busy: boolean; question: string | null; error: string | null; turns: number; max_turns: number; report: { summary: string; evidence: string[] } | null; results: Record<string, ScientificResult>; jobs?: Job[]; artifacts?: Artifact[]; skills?: { id: string; version: string; digest: string }[]; model?: string; metrics?: { tool_actions: number; max_tool_actions: number; operation_units: number; max_operation_units: number; input_tokens: number; output_tokens: number } }
+type Capability = { id: string; version: string; description: string; digest: string; available: boolean; resumable: boolean; requirements: unknown; operations: { id: string; description: string }[] }
+type Event = { event_id: string; action: string; sequence: number; timestamp: string; kind: string; payload: unknown; preview?: boolean }
 
 const activeJob = (job: Job) => ['queued', 'submitting', 'running', 'cancelling'].includes(job.status)
 const timestamp = (value: string | number | null) => value === null ? NaN : typeof value === 'number' ? value * 1000 : Date.parse(value)
@@ -22,6 +23,14 @@ function descriptorObservations(value: unknown): value is Observation[] {
     Array.isArray(observation.values) && observation.values.every(value => record(value) &&
       typeof value.property === 'string' && typeof value.value === 'number' && Number.isFinite(value.value) && typeof value.unit === 'string'))
 }
+
+function download(name: string, value: unknown, plain = false) {
+  const blob = new Blob([plain ? String(value) : JSON.stringify(value, null, 2)], { type: plain ? 'text/plain;charset=utf-8' : 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a'); anchor.href = url; anchor.download = name
+  anchor.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+const eventGroup = (kind: string) => kind.startsWith('model_') ? 'model' : kind.startsWith('action_') ? 'tool' : kind.startsWith('job_') ? 'job' : kind.startsWith('artifact_') ? 'file' : 'campaign'
 
 async function request<T>(path = '', body?: unknown): Promise<T> {
   const response = await fetch(`${API_BASE}/v2/campaigns${path}`, {
@@ -42,6 +51,10 @@ export function AgentCampaignPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [campaign, setCampaign] = useState<Campaign | null>(null)
   const [events, setEvents] = useState<Event[]>([])
+  const [capabilities, setCapabilities] = useState<Capability[]>([])
+  const [traceFilter, setTraceFilter] = useState('all')
+  const [traceSearch, setTraceSearch] = useState('')
+  const [fullEvent, setFullEvent] = useState<Event | null>(null)
   const [prompt, setPrompt] = useState('Calculate QED and molecular weight for aspirin: CC(=O)Oc1ccccc1C(=O)O')
   const [reply, setReply] = useState('')
   const [working, setWorking] = useState(false)
@@ -56,12 +69,25 @@ export function AgentCampaignPage() {
   const canUpload = !!campaign && !campaign.busy && ['ready', 'awaiting_user', 'waiting', 'waiting_jobs'].includes(campaign.status)
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; request<Campaign[]>().then(setCampaigns).catch(e => setError(e.message)); return () => { mounted.current = false } }, [])
+  useEffect(() => { request<Capability[]>('/capabilities').then(data => { if (Array.isArray(data)) setCapabilities(data) }).catch(e => setError(e.message)) }, [])
   useEffect(() => {
     if (!campaign) return
     const id = campaign.id
-    let active = true
-    const refresh = () => request<Event[]>(`/${id}/events`).then(data => { if (active) setEvents(data) }).catch(e => { if (active) setError(e.message) })
-    refresh()
+    let active = true, fetching = false, cursor = 0
+    setEvents([]); setFullEvent(null); setTraceFilter('all'); setTraceSearch('')
+    const refresh = async () => {
+      if (fetching) return
+      fetching = true
+      try {
+        const data = await request<Event[]>(`/${id}/events?after=${cursor}&limit=200&preview=true`)
+        if (active && Array.isArray(data) && data.length) {
+          cursor = data[data.length - 1].sequence
+          setEvents(previous => [...previous, ...data.filter(event => !previous.some(old => old.event_id === event.event_id))].slice(-1000))
+        }
+      } catch (e) { if (active) setError(e instanceof Error ? e.message : 'Activity refresh failed') }
+      finally { fetching = false }
+    }
+    void refresh()
     const timer = window.setInterval(refresh, 1500)
     return () => { active = false; window.clearInterval(timer) }
   }, [campaign?.id])
@@ -136,7 +162,6 @@ export function AgentCampaignPage() {
       if (mounted.current) setCampaign(current)
     }
     if (mounted.current) {
-      setEvents(await request<Event[]>(`/${current.id}/events`))
       setCampaigns(await request<Campaign[]>())
     }
   }
@@ -164,6 +189,13 @@ export function AgentCampaignPage() {
 
   return <section className="agent-campaign">
     <h1>Scientific agent campaigns</h1>
+    <details><summary>Available capabilities ({capabilities.filter(c => c.available).length})</summary>
+      {capabilities.map(c => <article key={`${c.id}@${c.version}`}><h3>{c.id} · {c.version}</h3>
+        <p>{c.description}</p><p>{c.available ? 'Available for new campaigns' : c.resumable ? 'Retained for existing campaigns' : 'Unavailable: check deployment requirements'}</p>
+        <ul>{c.operations.map(op => <li key={op.id}>{op.id}: {op.description}</li>)}</ul>
+        <details><summary>Requirements and package identity</summary><pre>{JSON.stringify({ requirements: c.requirements, digest: c.digest }, null, 2)}</pre></details>
+      </article>)}
+    </details>
     <p>Describe your objective, molecular structures, constraints, and evaluation budget. With the available skills, the agent can explore analogues, calculate descriptors, choose evaluation batches, and report observed results.</p>
     {error && <p role="alert">{error}</p>}
     <form onSubmit={e => { e.preventDefault(); perform(async () => run(await request<Campaign>('', { message: prompt }))) }}>
@@ -184,6 +216,10 @@ export function AgentCampaignPage() {
     }}><option value="">Select a campaign</option>{campaigns.map(c => <option key={c.id} value={c.id}>{c.id} — {c.status}</option>)}</select>
     {campaign && <>
       <h2>Campaign activity</h2>
+      {campaign.metrics && <p>Tool actions: {campaign.metrics.tool_actions}/{campaign.metrics.max_tool_actions} · Operation units: {campaign.metrics.operation_units}/{campaign.metrics.max_operation_units} · Tokens: {campaign.metrics.input_tokens.toLocaleString()} input / {campaign.metrics.output_tokens.toLocaleString()} output</p>}
+      <details><summary>Model and pinned skills</summary><p>{campaign.model || 'No model decision yet'}</p><ul>{campaign.skills?.map(skill => <li key={skill.id}>{skill.id} {skill.version}<br /><code>{skill.digest}</code></li>)}</ul></details>
+      <button disabled={controlsBusy} onClick={() => perform(async () => download(`${campaign.id}.json`, await request(`/${campaign.id}/export`)))}>Download campaign record</button>
+      <p>The record contains user and tool text. Review it before sharing or dataset use.</p>
       <p role="status">{campaign.busy || working ? 'Working' : campaign.status.replace(/_/g, ' ')} · {campaign.turns}/{campaign.max_turns} decisions{jobWorking ? ' · Updating remote jobs' : ''}</p>
       {campaign.error && <p role="alert">The agent step failed: {campaign.error}. Review the recorded activity; no automatic retry was submitted.</p>}
       <div>
@@ -197,6 +233,7 @@ export function AgentCampaignPage() {
         }} />
         {campaign.artifacts?.length ? <ul>{campaign.artifacts.map(artifact => <li key={artifact.id}>
           {artifact.name} · Artifact ID: <code>{artifact.id}</code> · {artifact.size_bytes.toLocaleString()} bytes
+          <button disabled={controlsBusy} onClick={() => perform(async () => { const value = await request<{ content: string }>(`/${campaign.id}/artifacts/${artifact.id}`); download(artifact.name, value.content, true) })}>Download file</button>
           <details><summary>SHA-256</summary><code style={{ overflowWrap: 'anywhere' }}>{artifact.sha256}</code></details>
         </li>)}</ul> : <p>No files uploaded yet.</p>}
       </div>
@@ -256,8 +293,19 @@ export function AgentCampaignPage() {
           <table><thead><tr><th>Rank</th><th>Pareto front</th><th>SMILES</th><th>Observed objectives</th></tr></thead><tbody>{result.rankings.map(row => <tr key={row.molecule_id}><td>{row.rank ?? 'Unranked'}</td><td>{row.pareto_front ?? '—'}</td><td>{row.smiles}</td><td>{Object.entries(row.objective_values).map(([name, value]) => `${name}: ${value.toPrecision(6)}`).join('; ')}</td></tr>)}</tbody></table>
         </> : <pre>{JSON.stringify(result, null, 2)}</pre>}
       </div>)}
-      <h2>Trace</h2>
-      {events.map(event => <details key={event.event_id}><summary>{new Date(event.timestamp).toLocaleTimeString()} · {event.kind} · {event.action}</summary><pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(event.payload, null, 2)}</pre></details>)}
+      <h2>Activity timeline</h2>
+      <label htmlFor="trace-category">Category </label><select id="trace-category" value={traceFilter} onChange={e => setTraceFilter(e.target.value)}>
+        {['all', 'model', 'tool', 'job', 'file', 'campaign'].map(group => <option key={group} value={group}>{group}</option>)}
+      </select>{' '}
+      <label htmlFor="trace-search">Search activity </label><input id="trace-search" value={traceSearch} onChange={e => setTraceSearch(e.target.value)} />
+      <p>Showing up to 1,000 recent events with bounded previews. Download the campaign record for the full timeline.</p>
+      {events.filter(event => (traceFilter === 'all' || eventGroup(event.kind) === traceFilter) && `${event.kind} ${event.action} ${JSON.stringify(event.payload)}`.toLowerCase().includes(traceSearch.toLowerCase())).map(event =>
+        <details key={event.event_id}><summary>{new Date(event.timestamp).toLocaleTimeString()} · {eventGroup(event.kind)} · {event.kind.replace(/_/g, ' ')} · {event.action}</summary>
+          <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(event.payload, null, 2)}</pre>
+          <button disabled={controlsBusy} onClick={() => perform(async () => setFullEvent(await request<Event>(`/${campaign.id}/events/${event.sequence}`)))}>Inspect full event {event.sequence}</button>
+          {campaign.results[event.action] && <a href={`#result-${event.action}`}>View result</a>}
+        </details>)}
+      {fullEvent && <section aria-label="Full event"><h3>{fullEvent.kind} · {fullEvent.action}</h3><button onClick={() => setFullEvent(null)}>Close event</button><pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(fullEvent.payload, null, 2)}</pre></section>}
     </>}
   </section>
 }
