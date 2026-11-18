@@ -9,6 +9,7 @@ from jsonschema import Draft202012Validator
 from pydantic import SecretStr
 
 from .contracts import Action
+from .local_worker import run_worker
 
 
 class ExecutionError(RuntimeError):
@@ -26,6 +27,8 @@ class ExecutionContext:
     action_id: str
     service: ServiceBinding | None = None
     secret: SecretStr | None = field(default=None, repr=False)
+    results: Mapping = field(default_factory=dict, repr=False)
+    run_worker: Callable | None = field(default=None, repr=False)
 
 
 def contains_secret(value, secret):
@@ -90,7 +93,15 @@ class Executor:
         if cached is not None:
             return cached
         try:
-            context = ExecutionContext(action.campaign_id, action.action_id, service, secret)
+            # Resolve successful results from this owned campaign, never model-written measurements.
+            with self.ledger.connect() as db:
+                self.ledger.owned(db, action.campaign_id, owner)
+                rows = db.execute('SELECT id,result FROM actions WHERE campaign=? AND status=?',
+                                  (action.campaign_id, 'succeeded')).fetchall()
+                results = {row['id']: json.loads(row['result']) for row in rows}
+            context = ExecutionContext(action.campaign_id, action.action_id, service, secret,
+                                       MappingProxyType(results),
+                                       lambda name, payload: run_worker(skill, name, payload))
             result = self.registry.handler(skill, operation)(action.inputs, context)
             # Convert to JSON values before validation, storage and caller exposure.
             result = json.loads(json.dumps(result, allow_nan=False))

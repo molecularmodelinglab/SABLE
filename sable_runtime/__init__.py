@@ -1,1 +1,1 @@
-"""SABLE v2 runtime foundations, independent of the v1 graph."""
+"""Skill execution, campaign state, and durable action records."""

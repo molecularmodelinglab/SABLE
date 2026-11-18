@@ -1,4 +1,4 @@
-"""SABLE endpoints; dependencies are injectable without importing v1 services."""
+"""Authenticated campaign endpoints with injectable services and model clients."""
 from functools import lru_cache
 import os
 from pathlib import Path
@@ -25,10 +25,7 @@ def _configured_service():
     path.parent.mkdir(parents=True, exist_ok=True)
     registry = SkillRegistry()
     root = Path(__file__).resolve().parents[2] / 'skills'
-    allowed = set()
-    for name in ('rdkit-descriptors', 'dataset-summary'):
-        registry.install(root / name)
-        allowed.add((name, '1.0.0'))
+    allowed = registry.install_directory(root)
     return CampaignService(Ledger(path), registry, allowed)
 
 

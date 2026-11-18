@@ -26,11 +26,11 @@ class CampaignService:
         pins = self.registry.discover(self.allowed)
         state = dict(id=campaign_id, status='ready', history=[{'role': 'user', 'content': prompt}],
                      skills=pins, loaded={}, results={}, report=None, question=None,
-                     turns=0, max_turns=12, model=None, pending=None, error=None, agent_spec=AGENT_SPEC)
+                     turns=0, max_turns=24, model=None, pending=None, error=None, agent_spec=AGENT_SPEC)
         with self.ledger.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             db.execute('INSERT INTO campaigns(id,owner,max_actions,max_units) VALUES(?,?,?,?)',
-                       (campaign_id, owner, 8, 8))
+                       (campaign_id, owner, 16, 20))
             db.execute('INSERT INTO agent_campaigns(id,state) VALUES(?,?)', (campaign_id, json.dumps(state)))
             self.ledger.event(db, campaign_id, 'campaign', 'campaign_created', {'prompt': prompt, 'skills': pins})
         return self.get(campaign_id, owner)
@@ -90,7 +90,11 @@ class CampaignService:
             for pin in state['skills']:
                 if (pin['id'], pin['version']) not in self.allowed:
                     raise CampaignConflict('Campaign skill is no longer authorized')
-                if self.registry.get(pin['id'], pin['version']).digest != pin['digest']:
+                try:
+                    installed = self.registry.get(pin['id'], pin['version'])
+                except ValueError:
+                    raise CampaignConflict('Pinned skill version is no longer installed') from None
+                if installed.digest != pin['digest']:
                     raise CampaignConflict('Installed skill differs from campaign pin')
             state['model'] = model.identity
             state['turns'] += 1
@@ -98,7 +102,7 @@ class CampaignService:
             self.ledger.event(db, campaign_id, f"turn-{state['turns']}", 'model_started', {'model': model.identity})
         try:
             # Deliberately omit internal lock/pending fields from model context.
-            context = {key: state[key] for key in ('history', 'skills', 'loaded', 'results', 'turns', 'max_turns')}
+            context = {key: compact(state[key]) for key in ('history', 'skills', 'loaded', 'results', 'turns', 'max_turns')}
             decision = Decision.model_validate(model.decide(context))
             schema = next(t['function']['parameters'] for t in TOOLS if t['function']['name'] == decision.name)
             Draft202012Validator(schema).validate(decision.arguments)
@@ -122,6 +126,12 @@ class CampaignService:
         if decision.name == 'finish':
             if not args['evidence'] or not set(args['evidence']) <= state['results'].keys():
                 raise ValueError('Report references unknown evidence')
+            for pin in state['skills']:
+                if pin['id'] in state['loaded']:
+                    skill = self.registry.get(pin['id'], pin['version'])
+                    feedback = self.registry.completion_feedback(skill, state['results'], args['evidence'])
+                    if feedback is not None:
+                        return feedback
             state.update(status='completed', report=args)
             return args
         pin = next(p for p in state['skills'] if p['id'] == args['skill_id'])
@@ -148,3 +158,15 @@ class CampaignService:
         if 'observations' not in result or result['observations']:
             state['results'][action.action_id] = result
         return {'action_id': action.action_id, 'output': result}
+
+
+def compact(value):
+    """Keep recorded results intact while bounding bulk data in model context."""
+    if isinstance(value, dict):
+        return {key: ({'retained_row_count': len(item)} if key == 'reaction_rows' and isinstance(item, list)
+                      else compact(item)) for key, item in value.items()}
+    if isinstance(value, list):
+        if len(value) > 16:
+            return {'items': [compact(v) for v in value[:16]], 'total_count': len(value), 'truncated': True}
+        return [compact(v) for v in value]
+    return value

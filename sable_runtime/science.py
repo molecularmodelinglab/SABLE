@@ -1,9 +1,5 @@
 """Scientific data contracts shared by discovery skills; no model-written measurements."""
-import json
 import math
-import os
-import subprocess
-import sys
 from hashlib import sha256
 from rdkit import Chem, rdBase
 from rdkit.Chem import Descriptors, QED
@@ -115,19 +111,3 @@ def validate_targets(targets, strategy):
             raise ValueError('Target bounds must increase')
         if (target['mode'] == 'MATCH' or strategy == 'desirability') and bounds is None:
             raise ValueError('MATCH and desirability require fixed normalization bounds')
-
-
-def worker(kind, payload):
-    env = {k: v for k, v in os.environ.items() if k in {
-        'PATH', 'PYTHONPATH', 'PYTHONDONTWRITEBYTECODE', 'HEALER_DATA_DIR', 'LANG'}}
-    env.update(OMP_NUM_THREADS='1', MKL_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1',
-               HOME='/tmp', XDG_CACHE_HOME='/tmp', PYTHONUNBUFFERED='1')
-    try:
-        result = subprocess.run([sys.executable, '-m', 'sable_runtime.scientific_worker', kind],
-                                input=json.dumps(payload, allow_nan=False), capture_output=True, text=True,
-                                timeout=120, env=env)
-    except subprocess.TimeoutExpired:
-        raise RuntimeError('Local scientific operation exceeded its time budget') from None
-    if result.returncode:
-        raise RuntimeError('Scientific worker failed')
-    return json.loads(result.stdout)

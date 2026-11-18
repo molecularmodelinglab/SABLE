@@ -5,7 +5,11 @@ Installing a package trusts its Python code. This registry is not a sandbox.
 from dataclasses import dataclass
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
+from types import MappingProxyType
+from typing import Mapping
+from importlib.util import find_spec
 
 from jsonschema import Draft202012Validator
 from .contracts import Manifest
@@ -17,6 +21,7 @@ class InstalledSkill:
     instructions: str
     code: bytes
     digest: str
+    files: Mapping[str, bytes]
 
     @property
     def manifest(self):
@@ -47,12 +52,27 @@ class SkillRegistry:
     def install(self, directory: Path):
         directory = Path(directory).resolve()
         content = {}
-        for name in ('manifest.json', 'SKILL.md', 'operations.py'):
+        for name in ('manifest.json', 'SKILL.md'):
             path = directory / name
             if path.is_symlink() or not path.is_file():
                 raise ValueError('Required package files must be regular files')
             content[name] = path.read_bytes()
         manifest = Manifest.model_validate_json(content['manifest.json'])
+        entries = list(manifest.workers.values())
+        if manifest.completion_check:
+            entries.append(manifest.completion_check)
+        if manifest.requirements.probe:
+            entries.append(manifest.requirements.probe)
+        for entry in entries:
+            path = directory / entry.file
+            if path.is_symlink() or not path.is_file():
+                raise ValueError('Entrypoint files must be regular package files')
+            content[entry.file] = path.read_bytes()
+        if manifest.operations:
+            path = directory / 'operations.py'
+            if path.is_symlink() or not path.is_file():
+                raise ValueError('Executable skills require a regular operations.py file')
+            content['operations.py'] = path.read_bytes()
         for operation in manifest.operations:
             validate_schema(operation.input_schema)
             validate_schema(operation.output_schema)
@@ -63,7 +83,7 @@ class SkillRegistry:
         for name, data in sorted(content.items()):
             digest.update(name.encode() + b'\0' + str(len(data)).encode() + b'\0' + data)
         installed = InstalledSkill(manifest.model_dump_json(), content['SKILL.md'].decode(),
-                                   content['operations.py'], digest.hexdigest())
+                                   content.get('operations.py', b''), digest.hexdigest(), MappingProxyType(content))
         self._skills[key] = installed
         return installed.digest
 
@@ -93,3 +113,48 @@ class SkillRegistry:
         if not callable(handler):
             raise ValueError('Installed operation handler is missing')
         return handler
+
+    def available(self):
+        """Evaluate requirements of host-installed trusted packages, then dependencies."""
+        candidates = {}
+        for key, skill in self._skills.items():
+            requirements = skill.manifest.requirements
+            try:
+                allowed_env = set(os.getenv('SABLE_V2_WORKER_ENV_ALLOWLIST', '').split(','))
+                if any(set(worker.environment) - allowed_env for worker in skill.manifest.workers.values()):
+                    continue
+                if not all(find_spec(name) is not None for name in requirements.modules):
+                    continue
+                if requirements.probe:
+                    entry = requirements.probe
+                    namespace = {'__name__': f'sable_probe_{skill.digest}'}
+                    exec(compile(skill.files[entry.file], f'<skill:{entry.file}>', 'exec'), namespace)
+                    if namespace[entry.handler]() is not True:
+                        continue
+            except Exception:
+                # Missing optional dependencies/configuration must not break discovery.
+                continue
+            candidates[key] = skill
+        available = set()
+        while True:
+            names = {key[0] for key in available}
+            added = {key for key, skill in candidates.items()
+                     if set(skill.manifest.requirements.skills) <= names} - available
+            if not added:
+                return available
+            available.update(added)
+
+    def install_directory(self, root):
+        """The deployment-owned directory is the installation/trust boundary."""
+        for directory in sorted(Path(root).iterdir()):
+            if directory.is_dir() and not directory.is_symlink() and (directory / 'manifest.json').is_file():
+                self.install(directory)
+        return self.available()
+
+    def completion_feedback(self, skill, results, evidence):
+        entry = skill.manifest.completion_check
+        if entry is None:
+            return None
+        namespace = {'__name__': f'sable_completion_{skill.digest}'}
+        exec(compile(skill.files[entry.file], f'<skill:{entry.file}>', 'exec'), namespace)
+        return namespace[entry.handler](results, evidence)

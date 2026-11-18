@@ -20,13 +20,32 @@ class Operation(Contract):
     credential: Identifier | None = None
 
 
+class PythonEntryPoint(Contract):
+    file: str = Field(pattern=r'^[a-zA-Z_][a-zA-Z0-9_]*\.py$')
+    handler: str = Field(pattern=r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+
+
+class LocalWorker(PythonEntryPoint):
+    timeout_seconds: int = Field(default=120, ge=1, le=120, strict=True)
+    environment: list[str] = Field(default_factory=list)
+
+
+class Requirements(Contract):
+    modules: list[str] = Field(default_factory=list)
+    skills: list[Identifier] = Field(default_factory=list)
+    probe: PythonEntryPoint | None = None
+
+
 class Manifest(Contract):
     schema_version: Literal[1] = 1
     id: Identifier
     version: str = Field(pattern=r'^\d+\.\d+\.\d+$')
     description: str = Field(min_length=1, max_length=1000)
     runtime: Literal['python'] = 'python'
-    operations: list[Operation] = Field(min_length=1)
+    operations: list[Operation] = Field(default_factory=list)
+    workers: dict[Identifier, LocalWorker] = Field(default_factory=dict)
+    requirements: Requirements = Field(default_factory=Requirements)
+    completion_check: PythonEntryPoint | None = None
 
     @model_validator(mode='after')
     def unique_operations(self):
