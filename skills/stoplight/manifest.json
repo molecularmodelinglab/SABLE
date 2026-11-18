@@ -1,0 +1,231 @@
+{
+  "schema_version": 1,
+  "id": "stoplight",
+  "version": "1.0.0",
+  "description": "Remote Stoplight molecular properties with explicit identities and partial exclusions.",
+  "operations": [
+    {
+      "id": "characterize",
+      "handler": "characterize",
+      "description": "Queue a bounded Stoplight CSV calculation.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "molecules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+                },
+                "smiles": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              },
+              "required": [
+                "id",
+                "smiles"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 100
+          },
+          "precision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8
+          }
+        },
+        "required": [
+          "molecules"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "remote_job"
+          },
+          "job_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "kind",
+          "job_id",
+          "status"
+        ]
+      }
+    }
+  ],
+  "remote_jobs": {
+    "properties": {
+      "file": "remote.py",
+      "submit": "submit",
+      "poll": "poll",
+      "service": "stoplight",
+      "timeout_seconds": 120,
+      "poll_interval_seconds": 10,
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "molecular_properties"
+          },
+          "provider": {
+            "const": "stoplight"
+          },
+          "precision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8
+          },
+          "measurements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+                },
+                "smiles": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "properties": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "ALogP": {
+                      "type": "number"
+                    },
+                    "AmpC \u03b2-lactamase aggregation": {
+                      "type": "number"
+                    },
+                    "CNS Activity": {
+                      "type": "number"
+                    },
+                    "Cysteine protease cruzain aggregation": {
+                      "type": "number"
+                    },
+                    "FSP3": {
+                      "type": "number"
+                    },
+                    "Firefly Luciferase interference": {
+                      "type": "number"
+                    },
+                    "HBA": {
+                      "type": "number"
+                    },
+                    "HBD": {
+                      "type": "number"
+                    },
+                    "Molecular Weight": {
+                      "type": "number"
+                    },
+                    "Nano Luciferase interference": {
+                      "type": "number"
+                    },
+                    "Num Heavy Atoms": {
+                      "type": "number"
+                    },
+                    "Num Saturated Quaternary Carbons": {
+                      "type": "number"
+                    },
+                    "Number of Rings": {
+                      "type": "number"
+                    },
+                    "Number of Rotatable Bonds": {
+                      "type": "number"
+                    },
+                    "Polar Surface Area": {
+                      "type": "number"
+                    },
+                    "Redox interference": {
+                      "type": "number"
+                    },
+                    "Solubility in Water (mg/L)": {
+                      "type": "number"
+                    },
+                    "Thiol interference": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "HBD"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "smiles",
+                "properties"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 100
+          },
+          "exclusions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "id",
+                "reason"
+              ]
+            },
+            "minItems": 0,
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "kind",
+          "provider",
+          "precision",
+          "measurements",
+          "exclusions"
+        ]
+      },
+      "reconcilable": false
+    }
+  },
+  "requirements": {
+    "modules": [
+      "httpx"
+    ],
+    "services": [
+      "stoplight"
+    ]
+  }
+}
