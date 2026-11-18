@@ -51,6 +51,8 @@ class BayBEOptimizerTool(BaseTool):
         search_space_id_column: Optional[str] = "Molecule_ID",
         measurement_data: Optional[Union[List[Dict[str, Any]], str]] = None,
         search_space: Optional[Dict[str, Any]] = None,
+        optimizer_strategy: Optional[str] = None,
+        normalize_targets: bool = False,
     ) -> Union[List[str], str]:
         try:
             self._check_baybe_installed()
@@ -75,11 +77,17 @@ class BayBEOptimizerTool(BaseTool):
             # ]
 
             baybe_targets = []
+            strategy = (optimizer_strategy or os.getenv("MULTI_OPT_TYPE", "pareto")).lower()
             for t in targets:
                 target_name = _target_value(t, "name")
                 target_mode = _normalize_mode(_target_value(t, "mode"))
                 target_bounds = _target_value(t, "bounds")
-                if target_mode == "MAX":
+                if normalize_targets and target_mode in {"MAX", "MIN"}:
+                    if not target_bounds or len(target_bounds) != 2 or target_bounds[0] >= target_bounds[1]:
+                        raise ValueError("Normalized targets require increasing bounds")
+                    baybe_targets.append(NumericalTarget.normalized_ramp(
+                        name=target_name, cutoffs=target_bounds, descending=target_mode == "MIN"))
+                elif target_mode == "MAX":
                     baybe_targets.append(NumericalTarget(name=target_name, minimize=False))
                 elif target_mode == "MIN":
                     baybe_targets.append(NumericalTarget(name=target_name, minimize=True))
@@ -91,11 +99,11 @@ class BayBEOptimizerTool(BaseTool):
                 objective = SingleTargetObjective(target=baybe_targets[0])
             else:
                 weights = [_target_value(t, "weight", 1.0) for t in targets]
-                if os.getenv("MULTI_OPT_TYPE", "pareto").lower() == "pareto":
+                if strategy == "pareto":
                     objective = ParetoObjective(targets=baybe_targets)
                 else:
-                    objective = DesirabilityObjective(targets=baybe_targets, weights=weights, require_normalization=False)
-                print(f"Using multi-objective optimization with type: {os.getenv('MULTI_OPT_TYPE', 'pareto').lower()}")
+                    objective = DesirabilityObjective(targets=baybe_targets, weights=weights, require_normalization=normalize_targets)
+                print(f"Using multi-objective optimization with type: {strategy}")
             campaign = Campaign(searchspace=searchspace, objective=objective)#, acquisition_function=qUpperConfidenceBound(beta=0.1))
 
             if measurement_data:
