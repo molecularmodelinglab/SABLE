@@ -1,0 +1,10 @@
+ARG SABLE_SCIENCE_BASE=sable-api:latest
+FROM ${SABLE_SCIENCE_BASE}
+WORKDIR /workspace
+COPY sable_runtime/requirements.txt /workspace/sable_runtime/requirements.txt
+RUN /opt/conda/envs/sable/bin/python -m pip install --no-cache-dir -r sable_runtime/requirements.txt
+# build-science.sh supplies an explicit source-only archive, never the full workspace.
+COPY . /workspace/
+ENV SABLE_V2_WORKER_ENV_ALLOWLIST=HEALER_DATA_DIR PYTHONPATH=/workspace PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 HEALER_STOCK=test HEALER_DATA_DIR=/opt/conda/envs/sable/lib/python3.12/site-packages/healer/data/buildingblocks HEALER_EXECUTION_MODE=internal LLM_PROVIDER=disabled OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
+ENTRYPOINT ["/opt/conda/envs/sable/bin/python"]
+CMD ["-m", "pytest", "-c", "tests/runtime/pytest.ini", "--confcutdir=tests/runtime", "tests/runtime", "-q"]

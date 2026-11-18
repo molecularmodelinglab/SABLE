@@ -33,7 +33,7 @@ def decision(name, **arguments):
 def service(tmp_path):
     registry = SkillRegistry()
     registry.install(Path(__file__).resolve().parents[2] / 'skills/rdkit-descriptors')
-    return CampaignService(Ledger(tmp_path / 'agent.sqlite'), registry, {('rdkit-descriptors', '1.0.0')})
+    return CampaignService(Ledger(tmp_path / 'agent.sqlite'), registry, {('rdkit-descriptors', '1.2.0')})
 
 
 def scientific_steps():
@@ -195,3 +195,32 @@ def test_invalid_molecules_are_not_report_evidence(service):
     state = service.advance(state['id'], 'alice', model)
     assert state['results'] == {}
     assert len(state['history'][-1]['result']['output']['failures']) == 2
+
+
+def test_missing_pinned_version_returns_a_conflict(service):
+    state = service.create('alice', 'Inspect CCO')
+    service.registry = SkillRegistry()
+    with pytest.raises(CampaignConflict, match='no longer installed'):
+        service.advance(state['id'], 'alice', ScriptedModel([]))
+
+
+def test_discovery_finish_requires_current_ranking(service):
+    state = service.create('alice', 'Optimize analogues')
+    service.registry.install(Path(__file__).resolve().parents[2] / 'skills/baybe')
+    state['skills'].append({'id': 'baybe', 'version': '1.1.0'})
+    state['loaded']['baybe'] = {}
+    state['results'] = {
+        'recommendation': {'kind': 'recommendation', 'library_action_id': 'library'},
+        'evaluation': {'library_action_id': 'library', 'observations': [{'candidate_id': 'a'}]},
+    }
+    finish = decision('finish', summary='Observed results', evidence=['evaluation'])
+    output = service._act(state, 'alice', finish)
+    assert output['error'] == 'ranking_required'
+    assert state['status'] == 'ready'
+    state['results']['ranking'] = {'kind': 'optimization_report', 'library_action_id': 'library',
+                                   'measurement_action_ids': []}
+    finish.arguments['evidence'] = ['ranking']
+    assert service._act(state, 'alice', finish)['error'] == 'ranking_required'
+    state['results']['ranking']['measurement_action_ids'] = ['evaluation']
+    service._act(state, 'alice', finish)
+    assert state['status'] == 'completed'

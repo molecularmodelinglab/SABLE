@@ -22,7 +22,7 @@ def main():
                             base_url=config.get('OPENAI_URL') or None)
         registry = SkillRegistry()
         registry.install(Path('/workspace/skills/rdkit-descriptors'))
-        service = CampaignService(Ledger('/tmp/live-campaign.sqlite'), registry, {('rdkit-descriptors', '1.0.0')})
+        service = CampaignService(Ledger('/tmp/live-campaign.sqlite'), registry, {('rdkit-descriptors', '1.2.0')})
         state = service.create('smoke-test', 'Calculate molecular weight and QED for ethanol, SMILES CCO. Report the computed values with units and explain their limitations. No other properties or tools are needed.')
         for _ in range(6):
             if state['status'] != 'ready':
