@@ -12,6 +12,7 @@ from sable_runtime.ledger import Ledger
 from sable_runtime.registry import SkillRegistry
 from sable_runtime.jobs import JobConflict
 from sable_runtime.service_config import load_services
+from sable_runtime.skill_store import load_deployment_skills, deployment_revision
 
 
 class CampaignInput(Contract):
@@ -28,23 +29,26 @@ class ArtifactInput(Contract):
 
 
 @lru_cache(maxsize=1)
-def _configured_service():
+def _configured_service(revision=None):
     """Return the configured campaign service."""
     path = Path(os.environ.get('SABLE_V2_LEDGER_PATH', ''))
     if not path.is_absolute():
         raise HTTPException(503, 'Configure an absolute SABLE_V2_LEDGER_PATH on a durable local volume')
     path.parent.mkdir(parents=True, exist_ok=True)
-    registry = SkillRegistry()
     root = Path(__file__).resolve().parents[2] / 'skills'
     services, credentials = load_services(os.getenv('SABLE_SERVICE_BINDINGS_PATH'))
-    allowed = registry.install_directory(root, services)
-    return CampaignService(Ledger(path), registry, allowed, services=services, credentials=credentials)
+    registry, allowed, selected = load_deployment_skills(root, services)
+    return CampaignService(Ledger(path), registry, allowed, services=services, credentials=credentials,
+                           discovery_allowed=selected)
 
 
 def configured_service():
     if os.getenv('SABLE_V2_ENABLED') != '1':
         raise HTTPException(503, 'V2 campaigns are not enabled on this deployment')
-    return _configured_service()
+    try:
+        return _configured_service(deployment_revision())
+    except (ValueError, OSError):
+        raise HTTPException(503,'Skill deployment configuration is invalid; validate the configured store and service bindings') from None
 
 
 def configured_model():
@@ -74,13 +78,46 @@ def make_router(user_dependency, service_dependency=configured_service, model_fa
     def list_campaigns(user=Depends(user_dependency), service=Depends(service_dependency)):
         return invoke(service.list, str(user.id))
 
+    @router.get('/capabilities')
+    def capabilities(user=Depends(user_dependency), service=Depends(service_dependency)):
+        return service.catalog()
+
     @router.get('/{campaign_id}')
     def get(campaign_id: str, user=Depends(user_dependency), service=Depends(service_dependency)):
         return invoke(service.get, campaign_id, str(user.id))
 
     @router.get('/{campaign_id}/events')
-    def events(campaign_id: str, after: int = Query(default=0, ge=0), user=Depends(user_dependency), service=Depends(service_dependency)):
-        return invoke(service.ledger.events, campaign_id, str(user.id), after)
+    def events(campaign_id: str, after: int = Query(default=0, ge=0),
+               limit: int = Query(default=200, ge=1, le=500), preview: bool = False,
+               user=Depends(user_dependency), service=Depends(service_dependency)):
+        rows = invoke(service.ledger.events, campaign_id, str(user.id), after, limit)
+        if preview:
+            from sable_runtime.campaigns import compact
+            def shorten(value):
+                if isinstance(value,str) and len(value)>2000:
+                    return value[:2000]+' … [preview truncated]'
+                if isinstance(value,dict):
+                    return {key:shorten(item) for key,item in value.items()}
+                if isinstance(value,list):
+                    return [shorten(item) for item in value]
+                return value
+            rows = [{**row,'payload':shorten(compact(row['payload'])),'preview':True} for row in rows]
+        return rows
+
+    @router.get('/{campaign_id}/events/{sequence}')
+    def event(campaign_id: str, sequence: int, user=Depends(user_dependency), service=Depends(service_dependency)):
+        rows = invoke(service.ledger.events, campaign_id, str(user.id), sequence-1, 1)
+        if not rows or rows[0]['sequence'] != sequence:
+            raise HTTPException(404,'Event not found')
+        return rows[0]
+
+    @router.get('/{campaign_id}/export')
+    def export(campaign_id: str, user=Depends(user_dependency), service=Depends(service_dependency)):
+        return invoke(service.export, campaign_id, str(user.id))
+
+    @router.get('/{campaign_id}/artifacts/{artifact_id}')
+    def artifact(campaign_id: str, artifact_id: str, user=Depends(user_dependency), service=Depends(service_dependency)):
+        return {'content':invoke(service.artifacts.read, campaign_id, str(user.id), artifact_id)}
 
     @router.post('/{campaign_id}/advance')
     def advance(campaign_id: str, user=Depends(user_dependency), service=Depends(service_dependency)):

@@ -116,10 +116,13 @@ class SkillRegistry:
             raise ValueError('Installed operation handler is missing')
         return handler
 
-    def available(self, services=()):
+    def available(self, services=(), candidates=None):
         """Evaluate requirements of host-installed trusted packages, then dependencies."""
+        permitted = candidates
         candidates = {}
         for key, skill in self._skills.items():
+            if permitted is not None and key not in permitted:
+                continue
             requirements = skill.manifest.requirements
             try:
                 required_services = set(requirements.services) | {j.service for j in skill.manifest.remote_jobs.values()}

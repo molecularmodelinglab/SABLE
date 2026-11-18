@@ -92,9 +92,13 @@ class Ledger:
                 raise LedgerError('Action is not running')
             self.event(db, action.campaign_id, action.action_id, f'action_{status}', result)
 
-    def events(self, campaign_id, owner, after=0):
+    def events(self, campaign_id, owner, after=0, limit=None):
         with self.connect() as db:
             self.owned(db, campaign_id, owner)
-            rows = db.execute('SELECT * FROM events WHERE campaign=? AND sequence>? ORDER BY sequence',
-                              (campaign_id, after)).fetchall()
+            query = 'SELECT * FROM events WHERE campaign=? AND sequence>? ORDER BY sequence'
+            params = [campaign_id, after]
+            if limit is not None:
+                query += ' LIMIT ?'
+                params.append(limit)
+            rows = db.execute(query, params).fetchall()
             return [{**dict(row), 'schema_version': 1, 'payload': json.loads(row['payload'])} for row in rows]
