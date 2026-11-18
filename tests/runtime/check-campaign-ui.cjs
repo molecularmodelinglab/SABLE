@@ -6,9 +6,9 @@ const source = fs.readFileSync('/workspace/ui/src/pages/AgentCampaignPage.tsx', 
 const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020 } }).outputText
 const job = (status, extra = {}) => ({ id: 'j1', campaign: 'c1', action: 'a1', skill_id: 'remote.skill', remote_id: null, status, can_cancel: true, can_reconcile: status === 'unknown', created: 1000, updated: 1000, next_poll: 1000, deadline: 2000, ...extra })
 const campaign = jobs => ({ id: 'c1', status: 'waiting_jobs', busy: false, turns: 1, max_turns: 8, results: {}, jobs })
-function harness(initial, admin = true) {
+function harness(initial, admin = true, activity = []) {
   let state = [], effects = [], refs = [], index = 0, pending = [], dirty = false, tree, now = 1000000, timerId = 0
-  let current = initial, failure = null, posts = [], timers = new Map()
+  let current = initial, failure = null, posts = [], gets = [], downloads = [], timers = new Map()
   const react = {
     useState(value) { const i = index++; if (!(i in state)) state[i] = value; return [state[i], v => { state[i] = typeof v === 'function' ? v(state[i]) : v; dirty = true }] },
     useRef(value) { const i = index++; return refs[i] ||= { current: value } },
@@ -16,7 +16,11 @@ function harness(initial, admin = true) {
   }
   class FakeDate extends Date { static now() { return now } }
   const exports = {}
-  vm.runInNewContext(code, { exports, Date: FakeDate, TextEncoder, console, window: {
+  vm.runInNewContext(code, { exports, Date: FakeDate, TextEncoder, console,
+    Blob: class { constructor(parts) { this.parts = parts } },
+    URL: { createObjectURL(blob) { downloads.push(blob.parts); return 'blob:test' }, revokeObjectURL() {} },
+    document: { createElement() { return { click() {} } } },
+    window: {
     setTimeout(fn, delay) { const id = ++timerId; timers.set(id, { fn, at: now + delay }); return id },
     clearTimeout(id) { timers.delete(id) }, setInterval() { return 0 }, clearInterval() {},
   }, require(name) {
@@ -27,19 +31,27 @@ function harness(initial, admin = true) {
     throw Error(name)
   }, fetch: async (url, options) => {
     if (options.method === 'POST') { posts.push({ url, body: JSON.parse(options.body) }); if (failure) return { ok: false, status: 409, json: async () => ({ detail: failure }) } }
-    const data = url.endsWith('/events') ? [] : url === '/v2/campaigns' && options.method !== 'POST' ? [current] : current
+    if (options.method === 'GET') gets.push(url)
+    let data = url === '/v2/campaigns' && options.method !== 'POST' ? [current] : current
+    if (url.endsWith('/capabilities')) data = [{ id: 'example', version: '1.0.0', description: 'Example capability', available: true, resumable: true, operations: [] }]
+    if (url.includes('/events?')) { const after = Number(new URLSearchParams(url.split('?')[1]).get('after')); data = activity.filter(event => event.sequence > after).slice(0, 200) }
+    if (/\/events\/\d+$/.test(url)) data = activity.find(event => event.sequence === Number(url.split('/').pop()))
+    if (url.endsWith('/export')) data = { schema_version: 1, campaign: current, events: activity }
+    if (url.includes('/artifacts/') && options.method === 'GET') data = { content: 'coordinate text' }
     return { ok: true, json: async () => data }
   } })
   function render() { index = 0; dirty = false; tree = exports.AgentCampaignPage(); const jobs = pending; pending = []; jobs.forEach(fn => fn()) }
   async function settle() { for (let i = 0; i < 15; i++) { await Promise.resolve(); if (dirty) render() } }
   function nodes(node) { if (arguments.length === 0) node = tree; if (!node || typeof node !== 'object') return []; if (Array.isArray(node)) return node.flatMap(n => nodes(n)); return [node, ...nodes(node.props?.children)] }
   function text(node) { if (arguments.length === 0) node = tree; if (node == null || typeof node === 'boolean') return ''; if (typeof node !== 'object') return String(node); if (Array.isArray(node)) return node.map(text).join(' '); return text(node.props?.children) }
-  return { posts, nodes, text, setCurrent(v) { current = v }, fail(v) { failure = v },
+  return { posts, gets, downloads, nodes, text, setCurrent(v) { current = v }, fail(v) { failure = v },
     async start() { render(); await settle(); nodes().find(n => n.type === 'select').props.onChange({ target: { value: 'c1' } }); await settle() },
     async tick(ms) { now += ms; const due = [...timers].filter(([, t]) => t.at <= now); for (const [id, t] of due) { timers.delete(id); await t.fn(); await settle() } },
-    async click(label) { const button = nodes().find(n => n.type === 'button' && text(n) === label); assert.ok(button, label); assert.equal(button.props.disabled, false); button.props.onClick(); await settle() },
+    async click(label) { const button = nodes().find(n => n.type === 'button' && text(n).replace(/\s+/g, ' ').trim() === label); assert.ok(button, label); assert.equal(button.props.disabled, false); button.props.onClick(); await settle() },
+    async search(value) { nodes().find(n => n.props?.id === 'trace-search').props.onChange({ target: { value } }); await settle() },
+    async category(value) { nodes().find(n => n.props?.id === 'trace-category').props.onChange({ target: { value } }); await settle() },
     async upload(file) { const input = nodes().find(n => n.props?.id === 'campaign-artifact'); assert.equal(input.props.disabled, false); input.props.onChange({ currentTarget: { files: [file], value: 'selected' } }); await settle() },
-    async reconcile(value) { nodes().find(n => n.type === 'input' && n.props.type !== 'file').props.onChange({ target: { value } }); await settle(); const input = nodes().find(n => n.type === 'input' && n.props.type !== 'file'); const form = nodes().find(n => n.type === 'form' && nodes(n).includes(input)); form.props.onSubmit({ preventDefault() {} }); await settle() },
+    async reconcile(value) { nodes().find(n => n.type === 'input' && String(n.props.id || '').startsWith('remote-id-')).props.onChange({ target: { value } }); await settle(); const input = nodes().find(n => n.type === 'input' && String(n.props.id || '').startsWith('remote-id-')); const form = nodes().find(n => n.type === 'form' && nodes(n).includes(input)); form.props.onSubmit({ preventDefault() {} }); await settle() },
     stop() { effects.forEach(e => e?.cleanup?.()) },
   }
 }
@@ -57,7 +69,7 @@ function harness(initial, admin = true) {
   await unknown.reconcile('  remote-42  '); assert.match(unknown.posts[0].url, /\/reconcile$/); assert.equal(unknown.posts[0].body.remote_id, 'remote-42'); unknown.stop()
 
   const nonAdmin = harness(campaign([job('unknown')]), false)
-  await nonAdmin.start(); assert.equal(nonAdmin.nodes().filter(n => n.type === 'input' && n.props.type !== 'file').length, 0); assert.match(nonAdmin.text(), /Contact an administrator/); assert.match(nonAdmin.text(), /verify that the provider job belongs/); nonAdmin.stop()
+  await nonAdmin.start(); assert.equal(nonAdmin.nodes().filter(n => n.type === 'input' && String(n.props.id || '').startsWith('remote-id-')).length, 0); assert.match(nonAdmin.text(), /Contact an administrator/); assert.match(nonAdmin.text(), /verify that the provider job belongs/); nonAdmin.stop()
 
   const future = harness(campaign([job('running', { next_poll: 1100 })]))
   await future.start(); await future.tick(5000); assert.equal(future.posts.length, 0); future.stop()
@@ -133,6 +145,30 @@ function harness(initial, admin = true) {
     view.stop()
   }
   console.log('PASS: 5 capability-gating scenarios: queued local cancellation, unsupported active cancellation, unsafe unknown lookup, supported admin reconciliation, terminal controls hidden.')
+  const activity = [
+    { event_id: 'e1', sequence: 1, action: 'turn-1', kind: 'model_decision', timestamp: '2026-01-01T00:00:00Z', payload: { message: 'model-only' } },
+    { event_id: 'e2', sequence: 2, action: 'turn-2', kind: 'action_succeeded', timestamp: '2026-01-01T00:00:01Z', payload: { message: 'tool-only' } },
+  ]
+  const timeline = harness({ ...campaign([]), status: 'ready', skills: [{ id: 'example', version: '1.0.0', digest: 'pin' }],
+    metrics: { tool_actions: 1, max_tool_actions: 16, operation_units: 1, max_operation_units: 20, input_tokens: 100, output_tokens: 10 },
+    artifacts: [{ id: 'file-1', name: 'protein.pdb', size_bytes: 10, sha256: 'checksum' }] }, true, activity)
+  await timeline.start()
+  assert.match(timeline.text(), /Available capabilities \(\s*1\s*\)/)
+  assert.match(timeline.text(), /Tool actions:\s*1\s*\/\s*16/)
+  assert.equal(timeline.nodes().filter(n => n.type === 'button' && timeline.text(n).startsWith('Inspect full event')).length, 2)
+  await timeline.category('tool')
+  assert.equal(timeline.nodes().filter(n => n.type === 'button' && timeline.text(n).startsWith('Inspect full event')).length, 1)
+  await timeline.search('absent')
+  assert.equal(timeline.nodes().filter(n => n.type === 'button' && timeline.text(n).startsWith('Inspect full event')).length, 0)
+  await timeline.search('tool-only'); await timeline.click('Inspect full event 2')
+  assert.match(timeline.text(), /action_succeeded/)
+  await timeline.click('Download campaign record'); await timeline.click('Download file')
+  assert.equal(timeline.downloads.length, 2)
+  assert.match(timeline.downloads[0][0], /campaign/)
+  assert.equal(timeline.downloads[1][0], 'coordinate text')
+  assert.equal(timeline.posts.length, 0)
+  timeline.stop()
+  console.log('PASS: capability catalog, budget display, timeline category/search, full-event inspection, campaign and artifact downloads without model calls.')
   assert.ok([...queued.posts, ...unknown.posts, ...conflict.posts, ...timeout.posts].every(p => !p.url.endsWith('/advance')))
   console.log('PASS: queued submission polling, 5s bound, ready stop, no unknown retries, explicit trimmed reconciliation, future due time, 409 details and 30s backoff, timeout controls, partial results and cancellation wording, admin-only reconciliation with ownership guidance; no model advance from job controls.')
 })().catch(e => { console.error(e); process.exitCode = 1 })
