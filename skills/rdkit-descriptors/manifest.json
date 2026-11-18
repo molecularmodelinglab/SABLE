@@ -1,32 +1,181 @@
 {
-  "id": "rdkit-descriptors", "version": "1.0.0", "schema_version": 1,
+  "id": "rdkit-descriptors",
+  "version": "1.1.0",
+  "schema_version": 1,
   "description": "Compute RDKit molecular descriptors and QED from explicit SMILES, preserving method and units.",
-  "operations": [{
-    "id": "calculate", "handler": "calculate", "budget_units": 1,
-    "description": "Calculate requested descriptors for up to 32 single-component molecular structures.",
-    "input_schema": {
-      "type": "object", "additionalProperties": false, "required": ["smiles", "properties"],
-      "properties": {
-        "smiles": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 2048}},
-        "properties": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["molecular_weight", "logp", "tpsa", "h_bond_donors", "h_bond_acceptors", "rotatable_bonds", "qed"]}}
-      }
-    },
-    "output_schema": {
-      "type": "object", "additionalProperties": false, "required": ["observations", "failures"],
-      "properties": {
-        "observations": {"type": "array", "items": {
-          "type": "object", "additionalProperties": false,
-          "required": ["input_index", "input_smiles", "canonical_smiles", "method", "method_version", "source", "values"],
+  "operations": [
+    {
+      "id": "calculate",
+      "handler": "calculate",
+      "budget_units": 1,
+      "description": "Calculate requested descriptors for up to 32 single-component molecular structures.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "properties"
+        ],
+        "properties": {
+          "smiles": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
           "properties": {
-            "input_index": {"type": "integer", "minimum": 0}, "input_smiles": {"type": "string"},
-            "canonical_smiles": {"type": "string"}, "method": {"const": "RDKit"}, "method_version": {"type": "string"}, "source": {"const": "computed"},
-            "values": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["property", "value", "unit"],
-              "properties": {"property": {"type": "string"}, "value": {"type": "number"}, "unit": {"type": "string"}}}}
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "molecular_weight",
+                "logp",
+                "tpsa",
+                "h_bond_donors",
+                "h_bond_acceptors",
+                "rotatable_bonds",
+                "qed"
+              ]
+            }
+          },
+          "source_action_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "candidate_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "minItems": 1,
+            "maxItems": 32,
+            "uniqueItems": true
           }
-        }},
-        "failures": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["input_index", "input_smiles", "error"],
-          "properties": {"input_index": {"type": "integer"}, "input_smiles": {"type": "string"}, "error": {"type": "string"}}}}
+        },
+        "oneOf": [
+          {
+            "required": [
+              "smiles"
+            ]
+          },
+          {
+            "required": [
+              "source_action_id"
+            ]
+          }
+        ],
+        "dependentRequired": {
+          "candidate_ids": [
+            "source_action_id"
+          ]
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "observations",
+          "failures"
+        ],
+        "properties": {
+          "observations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "input_index",
+                "input_smiles",
+                "canonical_smiles",
+                "method",
+                "method_version",
+                "source",
+                "values"
+              ],
+              "properties": {
+                "input_index": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "input_smiles": {
+                  "type": "string"
+                },
+                "canonical_smiles": {
+                  "type": "string"
+                },
+                "method": {
+                  "const": "RDKit"
+                },
+                "method_version": {
+                  "type": "string"
+                },
+                "source": {
+                  "const": "computed"
+                },
+                "values": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "property",
+                      "value",
+                      "unit"
+                    ],
+                    "properties": {
+                      "property": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "number"
+                      },
+                      "unit": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "candidate_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "failures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "input_index",
+                "input_smiles",
+                "error"
+              ],
+              "properties": {
+                "input_index": {
+                  "type": "integer"
+                },
+                "input_smiles": {
+                  "type": "string"
+                },
+                "error": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "library_action_id": {
+            "type": "string"
+          }
+        }
       }
     }
-  }]
+  ]
 }

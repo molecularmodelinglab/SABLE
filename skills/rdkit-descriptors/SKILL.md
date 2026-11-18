@@ -8,3 +8,5 @@ Use `calculate` for molecular weight, LogP, TPSA, hydrogen-bond counts, rotatabl
 Each result retains the input SMILES, canonical isomeric SMILES, RDKit version, property units, and computational method. Invalid structures appear in `failures`, not as zero-valued observations. Mixtures with disconnected components are rejected in this first version.
 
 These are calculated descriptors. QED is a drug-likeness heuristic; LogP is a calculated partition coefficient. Neither measures solubility, permeability, safety, potency, or biological activity. Clarify or explain unsupported objectives instead of treating a descriptor as a substitute. Do not compare observations from incompatible methods or conditions without identifying that difference.
+
+For a generated library or BayBE batch, pass its `source_action_id` instead of SMILES. Optionally select `candidate_ids` from that source; otherwise all candidates in the source are evaluated (maximum 32). This preserves candidate identity and library provenance for downstream optimization. Do not retype generated SMILES or measurement values into an optimizer call.
