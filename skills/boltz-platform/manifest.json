@@ -1,0 +1,233 @@
+{
+  "schema_version": 1,
+  "id": "boltz-platform",
+  "version": "1.0.0",
+  "description": "Boltz Platform library screens with target-scoped confidence and optimization scores.",
+  "operations": [
+    {
+      "id": "screen",
+      "handler": "screen",
+      "description": "Queue a Platform library screen from an owned candidate library.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "library_action_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "proteins": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "sequence": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 10000
+                },
+                "chain_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+                }
+              },
+              "required": [
+                "sequence",
+                "chain_id"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 16
+          }
+        },
+        "required": [
+          "library_action_id",
+          "proteins"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "remote_job"
+          },
+          "job_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "kind",
+          "job_id",
+          "status"
+        ]
+      }
+    }
+  ],
+  "remote_jobs": {
+    "screen": {
+      "file": "remote.py",
+      "submit": "submit",
+      "poll": "poll",
+      "service": "boltz-platform",
+      "timeout_seconds": 86400,
+      "poll_interval_seconds": 10,
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "boltz_screen"
+          },
+          "provider": {
+            "const": "platform"
+          },
+          "protein_scope_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "library_action_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "measurements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+                },
+                "smiles": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "metrics": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "binding_confidence": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "structure_confidence": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "ptm": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "iptm": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "complex_plddt": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "complex_iplddt": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "optimization_score": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [],
+                  "minProperties": 1
+                },
+                "provider_result_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "warnings": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "minItems": 0,
+                  "maxItems": 100
+                }
+              },
+              "required": [
+                "id",
+                "smiles",
+                "metrics",
+                "provider_result_id",
+                "warnings"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 100
+          },
+          "exclusions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "id",
+                "reason"
+              ]
+            },
+            "minItems": 0,
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "kind",
+          "provider",
+          "protein_scope_id",
+          "library_action_id",
+          "measurements",
+          "exclusions"
+        ]
+      },
+      "cancel": "cancel"
+    }
+  },
+  "requirements": {
+    "modules": [
+      "httpx"
+    ],
+    "services": [
+      "boltz-platform"
+    ]
+  }
+}
