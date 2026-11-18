@@ -33,7 +33,22 @@ class LocalWorker(PythonEntryPoint):
 class Requirements(Contract):
     modules: list[str] = Field(default_factory=list)
     skills: list[Identifier] = Field(default_factory=list)
+    any_skills: list[Identifier] = Field(default_factory=list)
+    services: list[Identifier] = Field(default_factory=list)
     probe: PythonEntryPoint | None = None
+
+
+class RemoteJob(Contract):
+    file: str = Field(pattern=r'^[a-zA-Z_][a-zA-Z0-9_]*\.py$')
+    submit: str = Field(pattern=r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+    poll: str = Field(pattern=r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+    cancel: str | None = Field(default=None, pattern=r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+    service: Identifier
+    credential: Identifier | None = None
+    reconcilable: bool = True
+    timeout_seconds: int = Field(default=900, ge=1, le=604800, strict=True)
+    poll_interval_seconds: int = Field(default=5, ge=1, le=3600, strict=True)
+    output_schema: dict[str, Any]
 
 
 class Manifest(Contract):
@@ -44,6 +59,7 @@ class Manifest(Contract):
     runtime: Literal['python'] = 'python'
     operations: list[Operation] = Field(default_factory=list)
     workers: dict[Identifier, LocalWorker] = Field(default_factory=dict)
+    remote_jobs: dict[Identifier, RemoteJob] = Field(default_factory=dict)
     requirements: Requirements = Field(default_factory=Requirements)
     completion_check: PythonEntryPoint | None = None
 
