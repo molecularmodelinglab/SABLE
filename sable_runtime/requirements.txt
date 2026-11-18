@@ -1,2 +1,4 @@
 pydantic==2.11.7
 jsonschema==4.23.0
+
+PyYAML==6.0.2
