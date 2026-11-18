@@ -12,3 +12,5 @@ Set `scaffold_smarts` when a substructure must be retained and `property_filters
 MoleculeHEALER is the default. SiteHEALER requires explicit zero-based RDKit atom indices in `reactive_sites`; do not guess atom numbering. FragmentHEALER is available for compatible fragments. Reaction tags restrict the reaction families; stock selection and data paths belong to deployment configuration, not model arguments. Local operations have a 120-second limit; remote enumeration jobs are not supported by this skill yet.
 
 The retained reaction rows provide computational enumeration provenance. They are not proof of experimental synthetic success, commercial availability, or biological activity.
+
+The local implementation is declared in `manifest.json` and runs through `worker.py`; deployment requirements are checked before this capability is advertised.

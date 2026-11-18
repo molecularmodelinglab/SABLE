@@ -1,6 +1,6 @@
 import os
 from rdkit import Chem, rdBase
-from sable_runtime.science import canonical, filter_library, worker
+from sable_runtime.science import canonical, filter_library
 
 
 def enumerate_analogs(inputs, context):
@@ -21,7 +21,7 @@ def enumerate_analogs(inputs, context):
                'reaction_tags': inputs.get('reaction_tags', ['all']),
                'n_compositions': inputs.get('n_compositions', 4), 'seed': inputs.get('seed', 42),
                'max_candidates': inputs['max_candidates'], 'reactive_sites': inputs.get('reactive_sites')}
-    generated = worker('healer', payload)
+    generated = context.run_worker('compute', payload)
     candidates, exclusions = filter_library(generated['products'], seed, constraints)
     return {'kind': 'candidate_library', 'starting_smiles': seed, 'candidates': candidates,
             'constraints': constraints, 'exclusions': exclusions,

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "healer",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Enumerate reaction-based analogues with local HEALER, enforcing explicit scaffold and descriptor constraints.",
   "operations": [
     {
@@ -214,5 +214,24 @@
         ]
       }
     }
-  ]
+  ],
+  "workers": {
+    "compute": {
+      "file": "worker.py",
+      "handler": "run",
+      "timeout_seconds": 120,
+      "environment": [
+        "HEALER_DATA_DIR"
+      ]
+    }
+  },
+  "requirements": {
+    "modules": [
+      "healer"
+    ],
+    "probe": {
+      "file": "availability.py",
+      "handler": "available"
+    }
+  }
 }
