@@ -1,0 +1,702 @@
+{
+  "schema_version": 1,
+  "id": "openfe",
+  "version": "1.0.0",
+  "description": "Owned OpenFE campaigns with explicit phase jobs and scientifically typed collection.",
+  "operations": [
+    {
+      "id": "create",
+      "handler": "create",
+      "description": "Upload owned PDB/SDF artifacts into a new campaign; uses server default execution profile.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "protocol": {
+            "enum": [
+              "abfe",
+              "rbfe",
+              "septop"
+            ]
+          },
+          "protein_artifact_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "ligands": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+                },
+                "smiles": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "artifact_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "id",
+                "smiles",
+                "artifact_id"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 32
+          },
+          "reference": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+          },
+          "repeats": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          }
+        },
+        "required": [
+          "protocol",
+          "protein_artifact_id",
+          "ligands",
+          "repeats"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "remote_job"
+          },
+          "job_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "kind",
+          "job_id",
+          "status"
+        ]
+      }
+    },
+    {
+      "id": "advance",
+      "handler": "advance",
+      "description": "Start exactly one next phase from an owned completed OpenFE result.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "previous_action_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "stage": {
+            "enum": [
+              "prep",
+              "plan",
+              "submit"
+            ]
+          }
+        },
+        "required": [
+          "previous_action_id",
+          "stage"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "remote_job"
+          },
+          "job_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "kind",
+          "job_id",
+          "status"
+        ]
+      }
+    },
+    {
+      "id": "collect",
+      "handler": "collect",
+      "description": "Queue durable collection; polling materializes results without launching computation.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "previous_action_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "allow_failed_quality": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "previous_action_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "remote_job"
+          },
+          "job_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "kind",
+          "job_id",
+          "status"
+        ]
+      }
+    }
+  ],
+  "remote_jobs": {
+    "create": {
+      "file": "remote.py",
+      "submit": "submit_create",
+      "poll": "poll_create",
+      "service": "openfe",
+      "timeout_seconds": 120,
+      "poll_interval_seconds": 10,
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "openfe_campaign"
+          },
+          "campaign_name": {
+            "type": "string",
+            "pattern": "^sable_[a-f0-9]{32}$"
+          },
+          "origin_action_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "protocol": {
+            "enum": [
+              "abfe",
+              "rbfe",
+              "septop"
+            ]
+          },
+          "ligands": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+            },
+            "minItems": 1,
+            "maxItems": 32
+          },
+          "reference": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "repeats": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "stage": {
+            "enum": [
+              "created",
+              "prep",
+              "plan",
+              "submit"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "campaign_name",
+          "origin_action_id",
+          "protocol",
+          "ligands",
+          "reference",
+          "repeats",
+          "stage"
+        ]
+      }
+    },
+    "stage": {
+      "file": "remote.py",
+      "submit": "submit_stage",
+      "poll": "poll_stage",
+      "service": "openfe",
+      "timeout_seconds": 604800,
+      "poll_interval_seconds": 10,
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "openfe_campaign"
+          },
+          "campaign_name": {
+            "type": "string",
+            "pattern": "^sable_[a-f0-9]{32}$"
+          },
+          "origin_action_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "protocol": {
+            "enum": [
+              "abfe",
+              "rbfe",
+              "septop"
+            ]
+          },
+          "ligands": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+            },
+            "minItems": 1,
+            "maxItems": 32
+          },
+          "reference": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "repeats": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "stage": {
+            "enum": [
+              "created",
+              "prep",
+              "plan",
+              "submit"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "campaign_name",
+          "origin_action_id",
+          "protocol",
+          "ligands",
+          "reference",
+          "repeats",
+          "stage"
+        ]
+      }
+    },
+    "collect": {
+      "file": "remote.py",
+      "submit": "submit_collect",
+      "poll": "poll_collect",
+      "service": "openfe",
+      "timeout_seconds": 604800,
+      "poll_interval_seconds": 10,
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "free_energy"
+          },
+          "campaign_name": {
+            "type": "string",
+            "pattern": "^sable_[a-f0-9]{32}$"
+          },
+          "protocol": {
+            "enum": [
+              "abfe",
+              "rbfe",
+              "septop"
+            ]
+          },
+          "units": {
+            "const": "kcal/mol"
+          },
+          "reference": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "failed_runs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "minItems": 0,
+            "maxItems": 100
+          },
+          "quantity": {
+            "enum": [
+              "absolute_binding_free_energy",
+              "reference_relative_binding_free_energy"
+            ]
+          },
+          "measurements": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "ligand": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "value": {
+                      "type": "number"
+                    },
+                    "uncertainty": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "uncertainty_scope": {
+                      "const": "absolute_binding_free_energy"
+                    },
+                    "uncertainty_kind": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "repeats": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "required": [
+                    "ligand",
+                    "value",
+                    "uncertainty",
+                    "uncertainty_scope",
+                    "uncertainty_kind",
+                    "repeats"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "ligand": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "value": {
+                      "type": "number"
+                    },
+                    "fit_value": {
+                      "type": "number"
+                    },
+                    "uncertainty": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "uncertainty_scope": {
+                      "const": "network_mean_fit_not_reference_difference"
+                    },
+                    "uncertainty_kind": {
+                      "type": "null"
+                    }
+                  },
+                  "required": [
+                    "ligand",
+                    "value",
+                    "fit_value",
+                    "uncertainty",
+                    "uncertainty_scope",
+                    "uncertainty_kind"
+                  ]
+                }
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 32
+          },
+          "edges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "edge": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "ligand_a": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "ligand_b": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "ddg": {
+                  "type": "number"
+                },
+                "uncertainty": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "uncertainty_kind": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "edge",
+                "ligand_a",
+                "ligand_b",
+                "ddg",
+                "uncertainty",
+                "uncertainty_kind"
+              ]
+            },
+            "minItems": 0,
+            "maxItems": 1000
+          },
+          "quality_warnings": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "minItems": 0,
+            "maxItems": 100
+          },
+          "exclusions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "id",
+                "reason"
+              ]
+            },
+            "minItems": 0,
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "kind",
+          "campaign_name",
+          "protocol",
+          "units",
+          "reference",
+          "failed_runs",
+          "quantity",
+          "measurements",
+          "edges",
+          "quality_warnings",
+          "exclusions"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "protocol": {
+                  "const": "abfe"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "reference": {
+                  "type": "null"
+                },
+                "quantity": {
+                  "const": "absolute_binding_free_energy"
+                },
+                "measurements": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "ligand": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "value": {
+                        "type": "number"
+                      },
+                      "uncertainty": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "uncertainty_scope": {
+                        "const": "absolute_binding_free_energy"
+                      },
+                      "uncertainty_kind": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "repeats": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    },
+                    "required": [
+                      "ligand",
+                      "value",
+                      "uncertainty",
+                      "uncertainty_scope",
+                      "uncertainty_kind",
+                      "repeats"
+                    ]
+                  },
+                  "minItems": 1,
+                  "maxItems": 32
+                },
+                "edges": {
+                  "maxItems": 0
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "reference": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "quantity": {
+                  "const": "reference_relative_binding_free_energy"
+                },
+                "measurements": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "ligand": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "value": {
+                        "type": "number"
+                      },
+                      "fit_value": {
+                        "type": "number"
+                      },
+                      "uncertainty": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "uncertainty_scope": {
+                        "const": "network_mean_fit_not_reference_difference"
+                      },
+                      "uncertainty_kind": {
+                        "type": "null"
+                      }
+                    },
+                    "required": [
+                      "ligand",
+                      "value",
+                      "fit_value",
+                      "uncertainty",
+                      "uncertainty_scope",
+                      "uncertainty_kind"
+                    ]
+                  },
+                  "minItems": 1,
+                  "maxItems": 32
+                }
+              }
+            }
+          }
+        ]
+      },
+      "reconcilable": true
+    }
+  },
+  "requirements": {
+    "modules": [
+      "httpx",
+      "rdkit"
+    ],
+    "services": [
+      "openfe"
+    ]
+  }
+}
