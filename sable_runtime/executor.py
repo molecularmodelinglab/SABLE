@@ -19,6 +19,7 @@ class ExecutionError(RuntimeError):
 @dataclass(frozen=True)
 class ServiceBinding:
     endpoint: str
+    credential: str | None = None
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,8 @@ class ExecutionContext:
     secret: SecretStr | None = field(default=None, repr=False)
     results: Mapping = field(default_factory=dict, repr=False)
     run_worker: Callable | None = field(default=None, repr=False)
+    submit_job: Callable | None = field(default=None, repr=False)
+    read_artifact: Callable | None = field(default=None, repr=False)
 
 
 def contains_secret(value, secret):
@@ -44,12 +47,14 @@ def contains_secret(value, secret):
 class Executor:
     def __init__(self, registry, ledger, *, grants: Mapping[str, frozenset],
                  services: Mapping[str, ServiceBinding] | None = None,
-                 credentials: Callable[[str, str], SecretStr] | None = None):
+                 credentials: Callable[[str, str], SecretStr] | None = None, jobs=None, artifacts=None):
         self.registry = registry
         self.ledger = ledger
         self.grants = {owner: frozenset(allowed) for owner, allowed in grants.items()}
         self.services = MappingProxyType(dict(services or {}))
         self.credentials = credentials
+        self.jobs = jobs
+        self.artifacts = artifacts
 
     def execute(self, request: Action, *, owner: str):
         # owner and grants come from trusted application authentication, never tool input.
@@ -99,9 +104,15 @@ class Executor:
                 rows = db.execute('SELECT id,result FROM actions WHERE campaign=? AND status=?',
                                   (action.campaign_id, 'succeeded')).fetchall()
                 results = {row['id']: json.loads(row['result']) for row in rows}
+                if self.jobs:
+                    for job in self.jobs.list(action.campaign_id, owner):
+                        if job['status'] in {'succeeded', 'partial'}:
+                            results[job['action']] = job['result']
             context = ExecutionContext(action.campaign_id, action.action_id, service, secret,
                                        MappingProxyType(results),
-                                       lambda name, payload: run_worker(skill, name, payload))
+                                       lambda name, payload: run_worker(skill, name, payload),
+                                       (lambda name, payload: self.jobs.enqueue(action, skill, name, payload, owner)) if self.jobs else None,
+                                       (lambda artifact_id: self.artifacts.read(action.campaign_id, owner, artifact_id)) if self.artifacts else None)
             result = self.registry.handler(skill, operation)(action.inputs, context)
             # Convert to JSON values before validation, storage and caller exposure.
             result = json.loads(json.dumps(result, allow_nan=False))
