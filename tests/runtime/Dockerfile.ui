@@ -1,0 +1,6 @@
+FROM node:22-slim
+WORKDIR /workspace/ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY ui/ ./
+CMD ["sh", "-c", "npx tsc --noEmit && npm run build"]

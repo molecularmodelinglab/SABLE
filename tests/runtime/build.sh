@@ -3,5 +3,5 @@
 set -euo pipefail
 runtime_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 tar -C "$runtime_root" --exclude='__pycache__' --exclude='*.pyc' \
-  --exclude='.pytest_cache' -cf - sable_runtime skills tests/runtime \
+  --exclude='.pytest_cache' -cf - sable_runtime skills tests/runtime server/routers/agent_campaigns.py \
   | docker build -f tests/runtime/Dockerfile -t sable-runtime-tests -
