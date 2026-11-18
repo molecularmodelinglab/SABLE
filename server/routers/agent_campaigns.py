@@ -10,10 +10,21 @@ from sable_runtime.campaigns import CampaignConflict, CampaignService
 from sable_runtime.agent_model import OpenAIModel
 from sable_runtime.ledger import Ledger
 from sable_runtime.registry import SkillRegistry
+from sable_runtime.jobs import JobConflict
+from sable_runtime.service_config import load_services
 
 
 class CampaignInput(Contract):
     message: str = Field(min_length=1, max_length=10000)
+
+
+class ReconcileInput(Contract):
+    remote_id: str = Field(min_length=1, max_length=512)
+
+
+class ArtifactInput(Contract):
+    name: str = Field(min_length=1, max_length=200)
+    content: str = Field(min_length=1, max_length=3_000_000)
 
 
 @lru_cache(maxsize=1)
@@ -25,8 +36,9 @@ def _configured_service():
     path.parent.mkdir(parents=True, exist_ok=True)
     registry = SkillRegistry()
     root = Path(__file__).resolve().parents[2] / 'skills'
-    allowed = registry.install_directory(root)
-    return CampaignService(Ledger(path), registry, allowed)
+    services, credentials = load_services(os.getenv('SABLE_SERVICE_BINDINGS_PATH'))
+    allowed = registry.install_directory(root, services)
+    return CampaignService(Ledger(path), registry, allowed, services=services, credentials=credentials)
 
 
 def configured_service():
@@ -51,7 +63,7 @@ def make_router(user_dependency, service_dependency=configured_service, model_fa
             return function(*args)
         except PermissionError:
             raise HTTPException(404, 'Campaign not found') from None
-        except CampaignConflict as exc:
+        except (CampaignConflict, JobConflict) as exc:
             raise HTTPException(409, str(exc)) from None
 
     @router.post('')
@@ -84,5 +96,36 @@ def make_router(user_dependency, service_dependency=configured_service, model_fa
     @router.post('/{campaign_id}/messages')
     def message(campaign_id: str, payload: CampaignInput, user=Depends(user_dependency), service=Depends(service_dependency)):
         return invoke(service.message, campaign_id, str(user.id), payload.message)
+
+    @router.get('/{campaign_id}/jobs')
+    def jobs(campaign_id: str, user=Depends(user_dependency), service=Depends(service_dependency)):
+        return invoke(service.jobs.list, campaign_id, str(user.id))
+
+    @router.post('/{campaign_id}/artifacts')
+    def upload_artifact(campaign_id: str, payload: ArtifactInput,
+                        user=Depends(user_dependency), service=Depends(service_dependency)):
+        return invoke(service.upload_artifact, campaign_id, str(user.id), payload.name, payload.content)
+
+    @router.post('/{campaign_id}/jobs/{job_id}/poll')
+    def poll(campaign_id: str, job_id: str, user=Depends(user_dependency), service=Depends(service_dependency)):
+        return invoke(service.job_operation, campaign_id, job_id, str(user.id), 'poll')
+
+    @router.post('/{campaign_id}/jobs/{job_id}/cancel')
+    def cancel(campaign_id: str, job_id: str, user=Depends(user_dependency), service=Depends(service_dependency)):
+        return invoke(service.job_operation, campaign_id, job_id, str(user.id), 'cancel')
+
+    @router.post('/{campaign_id}/jobs/{job_id}/reconcile')
+    def reconcile(campaign_id: str, job_id: str, payload: ReconcileInput,
+                  user=Depends(user_dependency), service=Depends(service_dependency)):
+        # Shared provider credentials cannot prove ownership of an arbitrary remote ID.
+        if not callable(getattr(user, 'has_role', None)) or not user.has_role('admin'):
+            raise HTTPException(403, 'An administrator must verify remote job ownership before reconciliation')
+        with service.ledger.connect() as db:
+            row = db.execute('SELECT owner FROM campaigns WHERE id=?', (campaign_id,)).fetchone()
+            if row is not None:
+                service.ledger.event(db, campaign_id, job_id, 'operator_reconciliation_requested', {'actor_id': str(user.id)})
+        if row is None:
+            raise HTTPException(404, 'Campaign not found')
+        return invoke(service.job_operation, campaign_id, job_id, row['owner'], 'reconcile', payload.remote_id)
 
     return router
