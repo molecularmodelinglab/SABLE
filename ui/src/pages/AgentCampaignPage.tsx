@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { API_BASE, getAccessToken } from '../api'
 
 type Observation = { input_smiles: string; canonical_smiles: string; method: string; method_version: string; values: { property: string; value: number; unit: string }[] }
-type Campaign = { id: string; status: string; busy: boolean; question: string | null; error: string | null; turns: number; max_turns: number; report: { summary: string; evidence: string[] } | null; results: Record<string, { observations?: Observation[]; [key: string]: unknown }> }
+type ScientificResult = { observations?: Observation[]; kind?: string; candidates?: { id: string; smiles: string }[]; round?: number; stop_reason?: string | null; evaluated_candidates?: number; library_size?: number; constraints?: unknown; exclusions?: unknown[]; rankings?: { molecule_id: string; smiles: string; objective_values: Record<string, number>; rank: number | null; pareto_front: number | null }[]; [key: string]: unknown }
+type Campaign = { id: string; status: string; busy: boolean; question: string | null; error: string | null; turns: number; max_turns: number; report: { summary: string; evidence: string[] } | null; results: Record<string, ScientificResult> }
 type Event = { event_id: string; action: string; sequence: number; timestamp: string; kind: string; payload: unknown }
 
 async function request<T>(path = '', body?: unknown): Promise<T> {
@@ -58,7 +59,7 @@ export function AgentCampaignPage() {
 
   return <section className="agent-campaign">
     <h1>Scientific agent campaigns</h1>
-    <p>Describe your objective and supply molecular structures. The agent can calculate descriptors, ask for clarification, and report results with evidence.</p>
+    <p>Describe your objective, molecular structures, constraints, and evaluation budget. With the available skills, the agent can explore analogues, calculate descriptors, choose evaluation batches, and report observed results.</p>
     {error && <p role="alert">{error}</p>}
     <form onSubmit={e => { e.preventDefault(); perform(async () => run(await request<Campaign>('', { message: prompt }))) }}>
       <label htmlFor="agent-prompt">New campaign</label><br />
@@ -89,7 +90,15 @@ export function AgentCampaignPage() {
         {result.observations ? result.observations.map((observation, index) => <div key={index}>
           <p>{observation.canonical_smiles} · {observation.method} {observation.method_version} · computed</p>
           <table><thead><tr><th>Property</th><th>Value</th><th>Unit</th></tr></thead><tbody>{observation.values.map(value => <tr key={value.property}><td>{value.property}</td><td>{value.value.toPrecision(6)}</td><td>{value.unit}</td></tr>)}</tbody></table>
-        </div>) : <pre>{JSON.stringify(result, null, 2)}</pre>}
+        </div>) : result.candidates ? <>
+          <p>{result.kind === 'recommendation' ? `Round ${result.round}: ${result.candidates.length} candidates recommended` : `${result.candidates.length} eligible candidates; ${result.exclusions?.length || 0} excluded`}</p>
+          {result.stop_reason && <p>Stopped: {result.stop_reason.replace(/_/g, ' ')}</p>}
+          {result.constraints !== undefined && <details><summary>Enforced constraints</summary><pre>{JSON.stringify(result.constraints, null, 2)}</pre></details>}
+          <table><thead><tr><th>Candidate</th><th>SMILES</th></tr></thead><tbody>{result.candidates.map(candidate => <tr key={candidate.id}><td>{candidate.id}</td><td>{candidate.smiles}</td></tr>)}</tbody></table>
+        </> : result.rankings ? <>
+          <p>{result.evaluated_candidates} of {result.library_size} library candidates evaluated. Rankings describe measured computational objectives.</p>
+          <table><thead><tr><th>Rank</th><th>Pareto front</th><th>SMILES</th><th>Observed objectives</th></tr></thead><tbody>{result.rankings.map(row => <tr key={row.molecule_id}><td>{row.rank ?? 'Unranked'}</td><td>{row.pareto_front ?? '—'}</td><td>{row.smiles}</td><td>{Object.entries(row.objective_values).map(([name, value]) => `${name}: ${value.toPrecision(6)}`).join('; ')}</td></tr>)}</tbody></table>
+        </> : <pre>{JSON.stringify(result, null, 2)}</pre>}
       </div>)}
       <h2>Trace</h2>
       {events.map(event => <details key={event.event_id}><summary>{new Date(event.timestamp).toLocaleTimeString()} · {event.kind} · {event.action}</summary><pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(event.payload, null, 2)}</pre></details>)}
