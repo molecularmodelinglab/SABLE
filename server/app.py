@@ -19,6 +19,8 @@ from server.routers.conversations import router as conversations_router
 from server.routers.runs import router as runs_router
 from server.routers.admin import router as admin_router
 from server.routers.provider_credentials import router as provider_credentials_router
+from server.routers.agent_campaigns import make_router as make_agent_campaign_router
+from server.auth.dependencies import get_current_active_user
 from server.services.scheduler_lifecycle import scheduler_lifespan
 
 
@@ -59,6 +61,7 @@ app.include_router(conversations_router)
 app.include_router(runs_router)
 app.include_router(admin_router)
 app.include_router(provider_credentials_router)
+app.include_router(make_agent_campaign_router(get_current_active_user))
 
 
 # ==================== Experiment Logging Endpoints ====================
