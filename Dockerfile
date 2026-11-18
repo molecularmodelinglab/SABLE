@@ -27,6 +27,7 @@ RUN micromamba run -n sable python -m pip install --upgrade pip \
     --index-url https://download.pytorch.org/whl/cpu
 
 COPY requirements.txt ./
+COPY sable_runtime/requirements.txt ./sable_runtime/requirements.txt
 COPY constraints-cpu.txt ./
 RUN cp requirements.txt requirements.base.txt \
 #  && micromamba run -n sable python -m pip install --upgrade pip \
