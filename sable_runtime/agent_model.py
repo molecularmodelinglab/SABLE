@@ -48,6 +48,11 @@ measurements. Bulk arrays may be shown as truncated previews; downstream tools r
 Recommendations are not measurements. Respect fixed constraints and round limits, and reserve
 budget for final ranking and reporting.'''
 
+SYSTEM += ''' Remote job receipts are not scientific observations. Submission and waiting are handled
+by the runtime without consuming model turns. For coordinate files, use uploaded artifact IDs from
+context; ask the user to upload missing files instead of generating their contents. Inspect job status and quality flags after resumption;
+report failures and partial results accurately. Never resubmit an uncertain job to bypass reconciliation.'''
+
 AGENT_SPEC = sha256((SYSTEM + json.dumps(TOOLS, sort_keys=True)).encode()).hexdigest()
 
 
