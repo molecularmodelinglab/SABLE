@@ -10,3 +10,5 @@ Evaluate the returned recommendation by calling RDKit with `source_action_id` eq
 Use `single` for one objective, `pareto` for multiple competing objectives, or `desirability` with explicit increasing bounds and positive weights. `MATCH` requires bounds and targets their midpoint. Desirability bounds normalize each objective before combining; they are not hard feasibility constraints. Objectives, strategy and maximum rounds are fixed after the first recommendation for a library. Do not silently change the optimization problem.
 
 Use `rank` on the same library and cumulative measurement references for the final report. It uses SABLE's existing ranking implementation and reports only measured candidates. Cite the ranking action and relevant measurement actions; do not describe a recommendation as an observed improvement. Comparisons to the starting molecule require a separately recorded baseline measurement. RDKit-derived objectives do not establish potency, safety, or experimental hit-to-lead success.
+
+The local implementation is declared in `manifest.json` and runs through `worker.py`; deployment requirements are checked before this capability is advertised.

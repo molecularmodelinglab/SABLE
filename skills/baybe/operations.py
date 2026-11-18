@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
 import importlib.metadata
-from sable_runtime.science import measurements, validate_targets, worker
+from sable_runtime.science import measurements, validate_targets
 from utils.objective_ranking import rank_experimental_results
 
 
@@ -30,7 +30,7 @@ def recommend(inputs, context):
     if completed_rounds >= inputs['max_rounds'] or not remaining:
         return {**base, 'stop_reason': 'round_budget' if completed_rounds >= inputs['max_rounds'] else 'search_space_exhausted'}
     size = min(inputs['batch_size'], len(remaining))
-    output = worker('baybe', {'targets': inputs['targets'], 'strategy': inputs['strategy'],
+    output = context.run_worker('compute', {'targets': inputs['targets'], 'strategy': inputs['strategy'],
                              'batch_size': size, 'search_space': {c['id']: c['smiles'] for c in library['candidates']},
                              'measurements': rows, 'seed': inputs.get('seed', 42)})
     ids = output['recommended_ids']
