@@ -1,0 +1,431 @@
+{
+  "schema_version": 1,
+  "id": "baybe",
+  "version": "1.0.0",
+  "description": "Recommend batches and rank recorded observations using Bayesian optimization with explicit objectives and budgets.",
+  "operations": [
+    {
+      "id": "recommend",
+      "description": "Select a new batch from a recorded library using recorded measurements only.",
+      "handler": "recommend",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "library_action_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "measurement_action_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "maxItems": 16,
+            "uniqueItems": true
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "enum": [
+                    "molecular_weight",
+                    "logp",
+                    "tpsa",
+                    "h_bond_donors",
+                    "h_bond_acceptors",
+                    "rotatable_bonds",
+                    "qed"
+                  ]
+                },
+                "mode": {
+                  "enum": [
+                    "MAX",
+                    "MIN",
+                    "MATCH"
+                  ]
+                },
+                "bounds": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                },
+                "weight": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": [
+                "name",
+                "mode"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 4
+          },
+          "strategy": {
+            "enum": [
+              "single",
+              "pareto",
+              "desirability"
+            ]
+          },
+          "batch_size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16
+          },
+          "max_rounds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4
+          },
+          "seed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        },
+        "required": [
+          "library_action_id",
+          "measurement_action_ids",
+          "targets",
+          "strategy",
+          "batch_size",
+          "max_rounds"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "recommendation"
+          },
+          "library_action_id": {
+            "type": "string"
+          },
+          "specification": {
+            "type": "object"
+          },
+          "round": {
+            "type": "integer"
+          },
+          "measurement_action_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "measurement_count": {
+            "type": "integer"
+          },
+          "incomplete_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "method": {
+            "const": "BayBE"
+          },
+          "method_version": {
+            "type": "string"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "smiles": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "smiles"
+              ]
+            },
+            "maxItems": 16
+          },
+          "stop_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "library_action_id",
+          "specification",
+          "round",
+          "measurement_action_ids",
+          "measurement_count",
+          "incomplete_ids",
+          "method",
+          "method_version",
+          "candidates",
+          "stop_reason"
+        ]
+      }
+    },
+    {
+      "id": "rank",
+      "description": "Rank measured library candidates and report objective tradeoffs without predicting unmeasured values.",
+      "handler": "rank",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "library_action_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "measurement_action_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "maxItems": 16,
+            "uniqueItems": true
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "enum": [
+                    "molecular_weight",
+                    "logp",
+                    "tpsa",
+                    "h_bond_donors",
+                    "h_bond_acceptors",
+                    "rotatable_bonds",
+                    "qed"
+                  ]
+                },
+                "mode": {
+                  "enum": [
+                    "MAX",
+                    "MIN",
+                    "MATCH"
+                  ]
+                },
+                "bounds": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                },
+                "weight": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": [
+                "name",
+                "mode"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 4
+          },
+          "strategy": {
+            "enum": [
+              "single",
+              "pareto",
+              "desirability"
+            ]
+          }
+        },
+        "required": [
+          "library_action_id",
+          "measurement_action_ids",
+          "targets",
+          "strategy"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "optimization_report"
+          },
+          "library_action_id": {
+            "type": "string"
+          },
+          "measurement_action_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "objectives": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "enum": [
+                    "molecular_weight",
+                    "logp",
+                    "tpsa",
+                    "h_bond_donors",
+                    "h_bond_acceptors",
+                    "rotatable_bonds",
+                    "qed"
+                  ]
+                },
+                "mode": {
+                  "enum": [
+                    "MAX",
+                    "MIN",
+                    "MATCH"
+                  ]
+                },
+                "bounds": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                },
+                "weight": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": [
+                "name",
+                "mode"
+              ]
+            }
+          },
+          "constraints": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "scaffold_smarts": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "property_filters": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "property": {
+                      "enum": [
+                        "molecular_weight",
+                        "logp",
+                        "tpsa",
+                        "h_bond_donors",
+                        "h_bond_acceptors",
+                        "rotatable_bonds",
+                        "qed"
+                      ]
+                    },
+                    "minimum": {
+                      "type": "number"
+                    },
+                    "maximum": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "property",
+                    "minimum",
+                    "maximum"
+                  ]
+                },
+                "maxItems": 7
+              }
+            },
+            "required": [
+              "scaffold_smarts",
+              "property_filters"
+            ]
+          },
+          "evaluated_candidates": {
+            "type": "integer"
+          },
+          "library_size": {
+            "type": "integer"
+          },
+          "incomplete_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "strategy": {
+            "type": "string"
+          },
+          "score_kind": {
+            "type": "string"
+          },
+          "rankings": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "baselines": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "kind",
+          "library_action_id",
+          "measurement_action_ids",
+          "objectives",
+          "constraints",
+          "evaluated_candidates",
+          "library_size",
+          "incomplete_ids",
+          "strategy",
+          "score_kind",
+          "rankings",
+          "baselines",
+          "warnings"
+        ]
+      }
+    }
+  ]
+}
