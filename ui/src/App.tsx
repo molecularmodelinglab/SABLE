@@ -108,8 +108,8 @@ function Header({ title, description, pathname }: { title: string; description: 
 function buildHeader(pathname: string) {
   if (pathname.startsWith('/runs/new')) {
     return {
-      title: 'New Run',
-      description: 'Describe a task and follow its progress, results, and activity.',
+      title: 'Campaigns',
+      description: 'Describe a task and follow its progress',
     }
   }
   if (pathname.startsWith('/runs/')) {
