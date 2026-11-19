@@ -1,5 +1,6 @@
 """Durable, bounded agent campaigns. One model decision per advance."""
 import json
+import os
 import time
 from uuid import uuid4
 
@@ -7,7 +8,7 @@ from jsonschema import Draft202012Validator
 from .agent_model import AGENT_SPEC, Decision, TOOLS
 from .contracts import Action, Budget
 from .executor import Executor, ExecutionError
-from .ledger import LedgerError
+from .ledger import LedgerError, BudgetExceeded
 from .jobs import JobManager, ACTIVE
 from .artifacts import ArtifactStore
 
@@ -32,6 +33,12 @@ class CampaignService:
                 id TEXT PRIMARY KEY, state TEXT NOT NULL, busy INTEGER NOT NULL DEFAULT 0)''')
             if 'lease_until' not in {r['name'] for r in db.execute('PRAGMA table_info(agent_campaigns)')}:
                 db.execute('ALTER TABLE agent_campaigns ADD COLUMN lease_until REAL NOT NULL DEFAULT 0')
+            columns = {r['name'] for r in db.execute('PRAGMA table_info(agent_campaigns)')}
+            for name, declaration in [('execution_mode', "TEXT NOT NULL DEFAULT 'manual'"),
+                                      ('next_run_at', 'REAL NOT NULL DEFAULT 0'),
+                                      ('last_run_at', 'REAL NOT NULL DEFAULT 0'), ('execution_error', 'TEXT')]:
+                if name not in columns:
+                    db.execute(f'ALTER TABLE agent_campaigns ADD COLUMN {name} {declaration}')
 
     def create(self, owner, prompt):
         campaign_id = 'campaign-' + uuid4().hex
@@ -43,7 +50,7 @@ class CampaignService:
             db.begin_write()
             db.execute('INSERT INTO campaigns(id,owner,max_actions,max_units) VALUES(?,?,?,?)',
                        (campaign_id, owner, 20, 50))
-            db.execute('INSERT INTO agent_campaigns(id,state) VALUES(?,?)', (campaign_id, json.dumps(state)))
+            db.execute("INSERT INTO agent_campaigns(id,state,execution_mode) VALUES(?,?,'draft')", (campaign_id, json.dumps(state)))
             self.ledger.event(db, campaign_id, 'campaign', 'campaign_created', {'prompt': prompt, 'skills': pins})
         return self.get(campaign_id, owner)
 
@@ -96,7 +103,8 @@ class CampaignService:
                        'operation_units':budget['used_units'],'max_operation_units':budget['max_units'],
                        'input_tokens':sum(u.get('input_tokens',0) for u in usage),
                        'output_tokens':sum(u.get('output_tokens',0) for u in usage)}
-            return {**state, 'busy': busy, 'jobs': jobs, 'artifacts': self.artifacts.list(campaign_id, owner), 'metrics':metrics}
+            execution = db.execute('SELECT execution_mode,execution_error FROM agent_campaigns WHERE id=?', (campaign_id,)).fetchone()
+            return {**state, 'execution_mode': execution['execution_mode'], 'execution_error': execution['execution_error'], 'busy': busy, 'jobs': jobs, 'artifacts': self.artifacts.list(campaign_id, owner), 'metrics':metrics}
 
     def catalog(self):
         return [dict(id=skill.manifest.id, version=skill.manifest.version,
@@ -123,8 +131,8 @@ class CampaignService:
 
     def list(self, owner):
         with self.ledger.connect() as db:
-            rows = db.execute(f'SELECT a.state,a.busy FROM agent_campaigns a JOIN campaigns c ON a.id=c.id WHERE c.owner=? ORDER BY a.{self.ledger.order_column} DESC LIMIT 100', (owner,)).fetchall()
-            return [{**json.loads(row['state']), 'busy': bool(row['busy'])} for row in rows]
+            rows = db.execute(f'SELECT a.state,a.busy,a.execution_mode FROM agent_campaigns a JOIN campaigns c ON a.id=c.id WHERE c.owner=? ORDER BY a.{self.ledger.order_column} DESC LIMIT 100', (owner,)).fetchall()
+            return [{**json.loads(row['state']), 'busy': bool(row['busy']), 'execution_mode': row['execution_mode']} for row in rows]
 
     def _save(self, state, owner, kind, payload, busy=False):
         with self.ledger.connect() as db:
@@ -146,19 +154,21 @@ class CampaignService:
                 raise CampaignConflict('Campaign is not awaiting clarification')
             state['history'].append({'role': 'user', 'content': message})
             state.update(status='ready', question=None)
-            db.execute('UPDATE agent_campaigns SET state=? WHERE id=?', (json.dumps(state), campaign_id))
+            db.execute('UPDATE agent_campaigns SET state=?,next_run_at=0 WHERE id=?', (json.dumps(state), campaign_id))
             self.ledger.event(db, campaign_id, 'clarification', 'user_message', {'message': message})
         return self.get(campaign_id, owner)
 
-    def advance(self, campaign_id, owner, model):
+    def advance(self, campaign_id, owner, model, *, scheduled=False):
         self.get(campaign_id, owner)
         with self.ledger.connect() as db:
             db.begin_write()
             state, busy = self._read(db, campaign_id, owner)
+            if scheduled and db.execute('SELECT execution_mode FROM agent_campaigns WHERE id=?', (campaign_id,)).fetchone()[0] != 'running':
+                raise CampaignConflict('Campaign is paused')
             if busy or state['status'] != 'ready':
                 raise CampaignConflict('Campaign cannot advance in its current state')
             if state['turns'] >= state['max_turns']:
-                state['status'] = 'budget_exhausted'
+                state.update(status='budget_exhausted', budget_reason='model_decisions')
                 db.execute('UPDATE agent_campaigns SET state=? WHERE id=?', (json.dumps(state), campaign_id))
                 self.ledger.event(db, campaign_id, 'campaign', 'budget_exhausted', {})
                 return {**state, 'busy': False}
@@ -182,6 +192,7 @@ class CampaignService:
         try:
             # Deliberately omit internal lock/pending fields from model context.
             context = {key: compact(state[key]) for key in ('history', 'skills', 'loaded', 'results', 'turns', 'max_turns')}
+            context['budget'] = self.get(campaign_id, owner)['metrics']
             context['jobs'] = compact(self.jobs.list(campaign_id, owner))
             context['artifacts'] = self.artifacts.list(campaign_id, owner)
             decision = Decision.model_validate(model.decide(context))
@@ -238,15 +249,56 @@ class CampaignService:
             result = executor.execute(action, owner=owner)
         except ExecutionError:
             return {'error': 'invalid_input_or_operation_failed', 'action_id': action.action_id}
-        except LedgerError:
-            state['status'] = 'budget_exhausted'
+        except BudgetExceeded:
+            state.update(status='budget_exhausted', budget_reason='tool_actions_or_operation_units')
             return {'error': 'action_budget_exhausted'}
+        except LedgerError:
+            state.update(status='failed', error='action_requires_review')
+            return {'error': 'action_requires_review'}
         # An all-invalid structure batch is retained as tool output, not scientific evidence.
         if 'observations' not in result or result['observations']:
             state['results'][action.action_id] = result
         if result.get('kind') == 'remote_job':
             state['status'] = 'waiting_jobs'
         return {'action_id': action.action_id, 'output': result}
+
+    def execution(self, campaign_id, owner, mode):
+        """Start or pause future work without interrupting an in-flight operation."""
+        if mode not in {'running', 'paused'}:
+            raise ValueError('Invalid execution mode')
+        with self.ledger.connect() as db:
+            db.begin_write()
+            state, busy = self._read(db, campaign_id, owner)
+            if mode == 'running' and state['status'] not in {'ready', 'waiting_jobs', 'awaiting_user'}:
+                raise CampaignConflict('Resolve the campaign status before resuming')
+            db.execute('UPDATE agent_campaigns SET execution_mode=?,execution_error=NULL,next_run_at=0 WHERE id=?', (mode, campaign_id))
+            self.ledger.event(db, campaign_id, 'campaign', 'campaign_started' if mode == 'running' else 'campaign_paused',
+                              {'current_operation_may_finish': busy})
+        return self.get(campaign_id, owner)
+
+    def extend_budget(self, campaign_id, owner, max_turns, max_actions, max_units):
+        """Apply an owner's explicit approval of new total campaign limits."""
+        limits = (max_turns, max_actions, max_units)
+        caps = (int(os.getenv('SABLE_MAX_CAMPAIGN_DECISIONS', '1000')),
+                int(os.getenv('SABLE_MAX_CAMPAIGN_ACTIONS', '200')),
+                int(os.getenv('SABLE_MAX_CAMPAIGN_UNITS', '500')))
+        if any(type(value) is not int or value < 1 or value > cap for value, cap in zip(limits, caps)):
+            raise CampaignConflict('Requested budget exceeds deployment limits')
+        with self.ledger.connect() as db:
+            db.begin_write()
+            state, busy = self._read(db, campaign_id, owner)
+            budget = self.ledger.owned(db, campaign_id, owner)
+            before = (state['max_turns'], budget['max_actions'], budget['max_units'])
+            if busy or state['status'] != 'budget_exhausted':
+                raise CampaignConflict('Campaign is not awaiting a budget increase')
+            if any(after < old for after, old in zip(limits, before)) or limits == before:
+                raise CampaignConflict('Increase at least one limit without reducing the others')
+            state.update(max_turns=max_turns, status='ready', budget_reason=None)
+            db.execute('UPDATE campaigns SET max_actions=?,max_units=? WHERE id=?', (max_actions, max_units, campaign_id))
+            db.execute("UPDATE agent_campaigns SET state=?,execution_mode='running',execution_error=NULL,next_run_at=0 WHERE id=?", (json.dumps(state), campaign_id))
+            self.ledger.event(db, campaign_id, 'campaign', 'budget_increase_approved',
+                              {'before': list(before), 'after': list(limits), 'actor_id': str(owner)})
+        return self.get(campaign_id, owner)
 
     def job_operation(self, campaign_id, job_id, owner, operation, remote_id=None):
         state = self.get(campaign_id, owner)
@@ -263,7 +315,7 @@ class CampaignService:
         if state['busy']:
             raise CampaignConflict('Wait for the current decision before uploading an artifact')
         try:
-            self.artifacts.put(campaign_id, owner, name, content)
+            self.artifacts.put(campaign_id, owner, name, content, require_idle=True)
         except ValueError as exc:
             raise CampaignConflict(str(exc)) from None
         return self.get(campaign_id, owner)
@@ -272,7 +324,7 @@ class CampaignService:
 def compact(value):
     """Keep recorded results intact while bounding bulk data in model context."""
     if isinstance(value, dict):
-        return {key: ({'retained_row_count': len(item)} if key == 'reaction_rows' and isinstance(item, list)
+        return {key: ({'format': 'png', 'available': True} if key == 'figure_png_base64' else {'retained_row_count': len(item)} if key == 'reaction_rows' and isinstance(item, list)
                       else compact(item)) for key, item in value.items()}
     if isinstance(value, list):
         if len(value) > 16:

@@ -11,6 +11,10 @@ class LedgerError(RuntimeError):
     pass
 
 
+class BudgetExceeded(LedgerError):
+    pass
+
+
 class SQLiteConnection(sqlite3.Connection):
     """Local transaction support for isolated tests."""
     write = False
@@ -116,7 +120,7 @@ class Ledger:
                     raise LedgerError('Action already attempted; reconciliation is required')
                 return json.loads(previous['result'])
             if campaign['used_actions'] >= campaign['max_actions'] or campaign['used_units'] + units > campaign['max_units']:
-                raise LedgerError('Campaign budget exhausted')
+                raise BudgetExceeded('Campaign budget exhausted')
             db.execute('UPDATE campaigns SET used_actions=used_actions+1,used_units=used_units+? WHERE id=?',
                        (units, action.campaign_id))
             db.execute('INSERT INTO actions(campaign,id,fingerprint,status) VALUES(?,?,?,?)',

@@ -117,6 +117,9 @@ class Executor:
             # Convert to JSON values before validation, storage and caller exposure.
             result = json.loads(json.dumps(result, allow_nan=False))
             Draft202012Validator(operation.output_schema).validate(result)
+            if 'presentation' in result:
+                from .presentation import validate_presentation
+                validate_presentation(result['presentation'])
             if secret and contains_secret(result, secret.get_secret_value()):
                 raise ValueError('Credential appeared in output')
         except Exception:
