@@ -46,7 +46,7 @@ function harness(initial, admin = true, activity = [], nextDecision = null) {
   function nodes(node) { if (arguments.length === 0) node = tree; if (!node || typeof node !== 'object') return []; if (Array.isArray(node)) return node.flatMap(n => nodes(n)); return [node, ...nodes(node.props?.children)] }
   function text(node) { if (arguments.length === 0) node = tree; if (node == null || typeof node === 'boolean') return ''; if (typeof node !== 'object') return String(node); if (Array.isArray(node)) return node.map(text).join(' '); return text(node.props?.children) }
   return { posts, gets, downloads, nodes, text, setCurrent(v) { current = v }, fail(v) { failure = v },
-    async start() { render(); await settle(); nodes().find(n => n.type === 'select').props.onChange({ target: { value: 'c1' } }); await settle() },
+    async start(openCampaign = true) { render(); await settle(); if (openCampaign) { nodes().find(n => n.type === 'button' && n.props.className === 'workspace-history-item').props.onClick(); await settle() } },
     async tick(ms) { now += ms; const due = [...timers].filter(([, t]) => t.at <= now); for (const [id, t] of due) { timers.delete(id); await t.fn(); await settle() } },
     async click(label) { const button = nodes().find(n => n.type === 'button' && text(n).replace(/\s+/g, ' ').trim() === label); assert.ok(button, label); assert.equal(button.props.disabled, false); button.props.onClick(); await settle() },
     async submitPrompt() { const input = nodes().find(n => n.props?.id === 'agent-prompt'); const form = nodes().find(n => n.type === 'form' && nodes(n).includes(input)); form.props.onSubmit({ preventDefault() {} }); await settle() },
@@ -87,7 +87,7 @@ function checkEntryRoutes() {
 ;(async () => {
   checkEntryRoutes()
   const entry = harness({ ...campaign([]), status: 'ready' }, false, [], { ...campaign([]), status: 'awaiting_user', question: 'Which target?' })
-  await entry.start()
+  await entry.start(false)
   assert.equal(entry.nodes().find(n => n.props?.id === 'agent-prompt').props.value, '')
   assert.equal(entry.nodes().find(n => n.type === 'button' && entry.text(n) === 'Start campaign').props.disabled, true)
   await entry.prompt('  Screen these molecules  '); await entry.submitPrompt()
@@ -166,7 +166,7 @@ function checkEntryRoutes() {
     assert.equal(view.nodes().find(n => n.props?.id === 'campaign-artifact').props.disabled, true); view.stop()
   }
   const create = harness({ ...campaign([]), status: 'ready' })
-  await create.start(); await create.prompt('Calculate molecular weight for CCO'); await create.click('Create campaign to add files')
+  await create.start(false); await create.prompt('Calculate molecular weight for CCO'); await create.click('Add files first')
   assert.equal(create.posts.length, 1); assert.equal(create.posts[0].url, '/v2/campaigns'); assert.ok(create.posts[0].body.message); create.stop()
   console.log('PASS: 10 artifact scenarios: 4 allowed statuses, file byte cap before read, encoded text cap, API error display, busy/completed gating, create without advance.')
   for (const [status, canCancel, canReconcile, cancelVisible, reconcileVisible] of [
