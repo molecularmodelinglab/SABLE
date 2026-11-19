@@ -134,6 +134,23 @@ class CampaignService:
             rows = db.execute(f'SELECT a.state,a.busy,a.execution_mode FROM agent_campaigns a JOIN campaigns c ON a.id=c.id WHERE c.owner=? ORDER BY a.{self.ledger.order_column} DESC LIMIT 100', (owner,)).fetchall()
             return [{**json.loads(row['state']), 'busy': bool(row['busy']), 'execution_mode': row['execution_mode']} for row in rows]
 
+    def delete(self, campaign_id, owner):
+        """Permanently remove an owned, idle campaign and its stored records."""
+        with self.ledger.connect() as db:
+            db.begin_write()
+            state, busy = self._read(db, campaign_id, owner)
+            mode = db.execute('SELECT execution_mode FROM agent_campaigns WHERE id=?', (campaign_id,)).fetchone()[0]
+            if busy or (mode == 'running' and state['status'] in {'ready', 'waiting_jobs', 'awaiting_user'}):
+                raise CampaignConflict('Pause the campaign and wait for the current operation to finish before deleting it')
+            jobs = db.execute('SELECT status FROM remote_jobs WHERE campaign=?', (campaign_id,)).fetchall()
+            if any(row['status'] in ACTIVE for row in jobs):
+                raise CampaignConflict('Finish or cancel outstanding calculations before deleting this campaign; uncertain submissions must be resolved first')
+            for table in ('remote_jobs', 'campaign_artifacts', 'events', 'actions'):
+                db.execute(f'DELETE FROM {table} WHERE campaign=?', (campaign_id,))
+            db.execute('DELETE FROM agent_campaigns WHERE id=?', (campaign_id,))
+            db.execute('DELETE FROM campaigns WHERE id=?', (campaign_id,))
+        return {'id': campaign_id, 'deleted': True}
+
     def _save(self, state, owner, kind, payload, busy=False):
         with self.ledger.connect() as db:
             db.begin_write()

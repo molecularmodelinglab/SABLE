@@ -87,6 +87,10 @@ def make_router(user_dependency, service_dependency=configured_service, model_fa
     def get(campaign_id: str, user=Depends(user_dependency), service=Depends(service_dependency)):
         return invoke(service.get, campaign_id, str(user.id))
 
+    @router.delete('/{campaign_id}')
+    def delete(campaign_id: str, user=Depends(user_dependency), service=Depends(service_dependency)):
+        return invoke(service.delete, campaign_id, str(user.id))
+
     @router.get('/{campaign_id}/events')
     def events(campaign_id: str, after: int = Query(default=0, ge=0),
                limit: int = Query(default=200, ge=1, le=500), preview: bool = False,
