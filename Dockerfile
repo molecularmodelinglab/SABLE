@@ -29,9 +29,7 @@ RUN micromamba run -n sable python -m pip install --upgrade pip \
 COPY requirements.txt ./
 COPY sable_runtime/requirements.txt ./sable_runtime/requirements.txt
 COPY constraints-cpu.txt ./
-RUN cp requirements.txt requirements.base.txt \
-#  && micromamba run -n sable python -m pip install --upgrade pip \
- && micromamba run -n sable python -m pip install --no-cache-dir -r requirements.base.txt --constraint constraints-cpu.txt
+RUN micromamba run -n sable python -m pip install --no-cache-dir -r requirements.txt --constraint constraints-cpu.txt
 
 RUN micromamba run -n sable python -m pip install baybe[chem]==0.14.1 --no-cache-dir
 
