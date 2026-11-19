@@ -1,35 +1,43 @@
-"""Single-phase Boltz HTTP handlers with separate provider metric semantics."""
+"""Single-phase Boltz SDK handlers with separate provider metric semantics."""
 import json
 import math
 import re
 import time
 
 import httpx
+from boltz_api import Boltz
 
 
-SCREEN = '/compute/v1/small-molecule/library-screen'
 METRICS = ('binding_confidence', 'optimization_score', 'structure_confidence',
            'ptm', 'iptm', 'complex_plddt', 'complex_iplddt')
 
 
-def _request(context, method, path, **kwargs):
-    headers = {'Accept': 'application/json'}
-    if context.secret:
-        headers['Authorization'] = 'Bearer ' + context.secret.get_secret_value()
+def _call(context, operation, *args, **kwargs):
+    if not context.secret:
+        raise ValueError('Boltz Platform requires a saved credential')
     deadline = time.monotonic() + 30
+    def check_status(response):
+        # Reject error/redirect bodies before the SDK reads them to construct an exception.
+        if not 200 <= response.status_code < 300:
+            response.close()
+            raise RuntimeError('Remote status error')
     try:
         with httpx.Client(timeout=httpx.Timeout(20, connect=5), follow_redirects=False,
-                          transport=httpx.HTTPTransport(retries=0), trust_env=False) as client:
-            with client.stream(method, context.service.endpoint.rstrip('/') + path,
-                               headers=headers, **kwargs) as response:
-                if not 200 <= response.status_code < 300:
-                    raise ValueError()
-                content = bytearray()
-                for chunk in response.iter_bytes():
-                    content.extend(chunk)
-                    if len(content) > 4_000_000 or time.monotonic() > deadline:
-                        raise ValueError()
-                return json.loads(content)
+                          transport=httpx.HTTPTransport(retries=0), trust_env=False,
+                          event_hooks={'response': [check_status]}) as http_client:
+            # The SDK also reads BOLTZ_BASE_URL, used by the separate self-hosted service.
+            # Keep saved Platform credentials on the hosted origin without an operator setting.
+            with Boltz(api_key=context.secret.get_secret_value(), base_url='https://api.boltz.bio',
+                       default_headers={'x-api-key': context.secret.get_secret_value()}, max_retries=0,
+                       timeout=httpx.Timeout(20, connect=5), http_client=http_client) as client:
+                resource = client.small_molecule.library_screen.with_streaming_response
+                with getattr(resource, operation)(*args, **kwargs) as response:
+                    content = bytearray()
+                    for chunk in response.iter_bytes():
+                        content.extend(chunk)
+                        if len(content) > 4_000_000 or time.monotonic() > deadline:
+                            raise ValueError()
+                    return json.loads(content)
     except Exception:
         raise RuntimeError('Remote request failed; inspect job before resubmitting') from None
 
@@ -56,8 +64,7 @@ def submit(payload, context):
                 {'type': 'protein', 'chain_ids': [p['chain_id']], 'value': p['sequence']}
                 for p in payload['proteins']]},
             'molecule_filters': {'boltz_smarts_catalog_filter_level': 'disabled'}}
-    # Match BoltzPlatformAdapter's request shape, using the verified SDK REST path.
-    response = _request(context, 'POST', SCREEN, json=body)
+    response = _call(context, 'start', **body)
     return {'remote_id': _id(response.get('id'))}
 
 
@@ -70,8 +77,8 @@ def _status(value):
 
 
 def poll(remote_id, payload, context):
-    path = SCREEN + '/' + _id(remote_id)
-    status = _status(_request(context, 'GET', path).get('status'))
+    remote_id = _id(remote_id)
+    status = _status(_call(context, 'retrieve', remote_id).get('status'))
     if status != 'succeeded':
         return {'status': status}
     by_id = {row['id']: row for row in payload['molecules']}
@@ -84,7 +91,7 @@ def poll(remote_id, payload, context):
         params = {'limit': 100}
         if cursor:
             params['after_id'] = cursor
-        page = _request(context, 'GET', path + '/results', params=params)
+        page = _call(context, 'list_results', remote_id, **params)
         if not isinstance(page.get('data'), list):
             raise ValueError('Invalid Boltz result page')
         rows.extend(page['data'])
@@ -135,7 +142,7 @@ def poll(remote_id, payload, context):
 
 
 def cancel(remote_id, payload, context):
-    response = _request(context, 'POST', SCREEN + '/' + _id(remote_id) + '/stop')
+    response = _call(context, 'stop', _id(remote_id))
     status = _status(response.get('status'))
     # A cancellation can race completion; collect through the normal validated path.
     return poll(remote_id, payload, context) if status == 'succeeded' else {'status': status}

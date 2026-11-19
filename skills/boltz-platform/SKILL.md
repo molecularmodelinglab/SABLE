@@ -5,8 +5,10 @@ description: Screen an owned candidate library against explicit protein sequence
 
 Use `screen` with a successful `candidate_library` action reference and explicit
 protein sequences and unique chain IDs. Maximum 100 molecules. Service
-`boltz-platform` binds the Platform origin (normally https://api.boltz.bio) and a
-credential reference. Neither endpoints nor secrets belong in model inputs.
+`boltz-platform` uses the Boltz SDK and the active credential selected in the
+user's Account settings. Ask the user to select Boltz Platform and an active saved
+credential there if it is unavailable. Neither endpoints nor secrets belong in
+model inputs. No Platform endpoint or deployment API key is required.
 
 Keep all comparisons within the returned protein scope. `optimization_score` is a
 ranking score, not affinity or binding free energy. Its range is not specified by
@@ -15,9 +17,9 @@ are documented by the installed Platform SDK as 0–1. Do not multiply or reinte
 them as self-hosted metrics. Missing molecules are explicit exclusions. Duplicate,
 ambiguous or conflicting identities fail collection. Structures are not downloaded.
 
-The handlers reproduce `tools/boltz/platform.py` request and metric semantics using
-the verified SDK REST routes, avoiding its automatic retries and unbounded
-pagination. The package supports explicit unmodified protein sequences only;
+The handlers use the SDK streaming interface with automatic retries disabled and
+explicitly bounded pagination. The hosted origin is fixed inside the skill so
+the self-hosted service's `BOLTZ_BASE_URL` cannot redirect saved Platform keys. The package supports explicit unmodified protein sequences only;
 UniProt resolution, templates, custom constraints, workspaces and modified or
 cyclic proteins are outside this input contract. SMARTS filtering is disabled as
 in the existing adapter so submitted candidates are not silently filtered.
@@ -29,3 +31,8 @@ not confirmation. There are no retries, redirects, downloads or polling loops.
 Each request has 20-second I/O timeout, 30-second elapsed response check and 4 MB
 decoded-response limit. A failed page limit or malformed result is an error, never
 a silently truncated success. Local timeout does not cancel remote work.
+
+Jobs pin the selected credential ID and a key fingerprint when queued. Account
+selection changes apply to new jobs. Deleted, inactive, foreign-owned or replaced
+credentials block further provider requests; they never fall back to a deployment
+key. A queued job can still be cancelled locally without its credential.
