@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import time
 
-from sable_runtime.agent_model import AGENT_SPEC, Decision, OpenAIModel
+from sable_runtime.agent_model import AGENT_SPEC, Decision, create_agent_model
 from sable_runtime.campaigns import CampaignService
 from sable_runtime.ledger import Ledger
 from sable_runtime.registry import SkillRegistry
@@ -168,9 +168,7 @@ def main():
             if separator and not key.strip().startswith('#'):
                 config[key.strip()] = value.strip().strip('"').strip("'")
         def factory(case):
-            return OpenAIModel(api_key=config.get('OPENAI_API_KEY'),
-                               model=config.get('SABLE_V2_MODEL') or config.get('OPENAI_MODEL'),
-                               base_url=config.get('OPENAI_URL') or None)
+            return create_agent_model(config)
         mode = 'live-model'
     else:
         factory, mode = ReplayModel, 'scripted-runtime'

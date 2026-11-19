@@ -2,11 +2,11 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const vm = require('node:vm')
 const ts = require('/workspace/ui/node_modules/typescript')
-const source = fs.readFileSync('/workspace/ui/src/pages/AgentCampaignPage.tsx', 'utf8')
+const source = fs.readFileSync('/workspace/ui/src/pages/NewRunPage.tsx', 'utf8')
 const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020 } }).outputText
 const job = (status, extra = {}) => ({ id: 'j1', campaign: 'c1', action: 'a1', skill_id: 'remote.skill', remote_id: null, status, can_cancel: true, can_reconcile: status === 'unknown', created: 1000, updated: 1000, next_poll: 1000, deadline: 2000, ...extra })
 const campaign = jobs => ({ id: 'c1', status: 'waiting_jobs', busy: false, turns: 1, max_turns: 8, results: {}, jobs })
-function harness(initial, admin = true, activity = []) {
+function harness(initial, admin = true, activity = [], nextDecision = null) {
   let state = [], effects = [], refs = [], index = 0, pending = [], dirty = false, tree, now = 1000000, timerId = 0
   let current = initial, failure = null, posts = [], gets = [], downloads = [], timers = new Map()
   const react = {
@@ -33,6 +33,7 @@ function harness(initial, admin = true, activity = []) {
     if (options.method === 'POST') { posts.push({ url, body: JSON.parse(options.body) }); if (failure) return { ok: false, status: 409, json: async () => ({ detail: failure }) } }
     if (options.method === 'GET') gets.push(url)
     let data = url === '/v2/campaigns' && options.method !== 'POST' ? [current] : current
+    if (url.endsWith('/advance') && nextDecision) data = nextDecision
     if (url.endsWith('/capabilities')) data = [{ id: 'example', version: '1.0.0', description: 'Example capability', available: true, resumable: true, operations: [] }]
     if (url.includes('/events?')) { const after = Number(new URLSearchParams(url.split('?')[1]).get('after')); data = activity.filter(event => event.sequence > after).slice(0, 200) }
     if (/\/events\/\d+$/.test(url)) data = activity.find(event => event.sequence === Number(url.split('/').pop()))
@@ -40,7 +41,7 @@ function harness(initial, admin = true, activity = []) {
     if (url.includes('/artifacts/') && options.method === 'GET') data = { content: 'coordinate text' }
     return { ok: true, json: async () => data }
   } })
-  function render() { index = 0; dirty = false; tree = exports.AgentCampaignPage(); const jobs = pending; pending = []; jobs.forEach(fn => fn()) }
+  function render() { index = 0; dirty = false; tree = exports.NewRunPage(); const jobs = pending; pending = []; jobs.forEach(fn => fn()) }
   async function settle() { for (let i = 0; i < 15; i++) { await Promise.resolve(); if (dirty) render() } }
   function nodes(node) { if (arguments.length === 0) node = tree; if (!node || typeof node !== 'object') return []; if (Array.isArray(node)) return node.flatMap(n => nodes(n)); return [node, ...nodes(node.props?.children)] }
   function text(node) { if (arguments.length === 0) node = tree; if (node == null || typeof node === 'boolean') return ''; if (typeof node !== 'object') return String(node); if (Array.isArray(node)) return node.map(text).join(' '); return text(node.props?.children) }
@@ -48,6 +49,8 @@ function harness(initial, admin = true, activity = []) {
     async start() { render(); await settle(); nodes().find(n => n.type === 'select').props.onChange({ target: { value: 'c1' } }); await settle() },
     async tick(ms) { now += ms; const due = [...timers].filter(([, t]) => t.at <= now); for (const [id, t] of due) { timers.delete(id); await t.fn(); await settle() } },
     async click(label) { const button = nodes().find(n => n.type === 'button' && text(n).replace(/\s+/g, ' ').trim() === label); assert.ok(button, label); assert.equal(button.props.disabled, false); button.props.onClick(); await settle() },
+    async submitPrompt() { const input = nodes().find(n => n.props?.id === 'agent-prompt'); const form = nodes().find(n => n.type === 'form' && nodes(n).includes(input)); form.props.onSubmit({ preventDefault() {} }); await settle() },
+    async prompt(value) { nodes().find(n => n.props?.id === 'agent-prompt').props.onChange({ target: { value } }); await settle() },
     async search(value) { nodes().find(n => n.props?.id === 'trace-search').props.onChange({ target: { value } }); await settle() },
     async category(value) { nodes().find(n => n.props?.id === 'trace-category').props.onChange({ target: { value } }); await settle() },
     async upload(file) { const input = nodes().find(n => n.props?.id === 'campaign-artifact'); assert.equal(input.props.disabled, false); input.props.onChange({ currentTarget: { files: [file], value: 'selected' } }); await settle() },
@@ -55,7 +58,45 @@ function harness(initial, admin = true, activity = []) {
     stop() { effects.forEach(e => e?.cleanup?.()) },
   }
 }
+function checkEntryRoutes() {
+  const react = { useMemo: fn => fn(), useState: value => [typeof value === 'function' ? value() : value, () => {}], useEffect() {} }
+  const jsx = { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) }
+  function load(file) {
+    const output = ts.transpileModule(fs.readFileSync(`/workspace/ui/src/${file}`, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020 } }).outputText
+    const exports = {}
+    vm.runInNewContext(output, { exports, require(name) {
+      if (name === 'react') return react
+      if (name === 'react/jsx-runtime') return jsx
+      if (name === 'react-router-dom') return { Route: 'Route', Routes: 'Routes', Navigate: 'Navigate', NavLink: 'NavLink', useLocation: () => ({ pathname: '/runs/new' }), useNavigate: () => () => {} }
+      if (name === '@tanstack/react-query') return { useQueryClient: () => ({}) }
+      if (name.endsWith('/useAuthProfile')) return { useAuthProfile: () => ({ data: null }) }
+      return new Proxy({}, { get: (_, key) => key })
+    } })
+    return exports
+  }
+  function nodes(node) { if (!node || typeof node !== 'object') return []; if (Array.isArray(node)) return node.flatMap(nodes); return [node, ...nodes(node.props?.children), ...nodes(node.props?.element)] }
+  const routes = nodes(load('App.tsx').App()).filter(node => node.type === 'Route')
+  assert.equal(routes.find(route => route.props.path === '/runs/new').props.element.type, 'NewRunPage')
+  const redirect = routes.find(route => route.props.path === '/agent').props.element
+  assert.equal(redirect.type, 'Navigate'); assert.equal(redirect.props.to, '/runs/new'); assert.equal(redirect.props.replace, true)
+  const links = nodes(load('components/AppShell.tsx').AppShell({})).filter(node => node.type === 'NavLink')
+  assert.equal(links.filter(link => link.props.to === '/runs/new').length, 1)
+  assert.equal(links.filter(link => link.props.to === '/agent').length, 0)
+  console.log('PASS: one New Run navigation entry, flexible-agent route, and redirect from /agent.')
+}
 ;(async () => {
+  checkEntryRoutes()
+  const entry = harness({ ...campaign([]), status: 'ready' }, false, [], { ...campaign([]), status: 'awaiting_user', question: 'Which target?' })
+  await entry.start()
+  assert.equal(entry.nodes().find(n => n.props?.id === 'agent-prompt').props.value, '')
+  assert.equal(entry.nodes().find(n => n.type === 'button' && entry.text(n) === 'Start campaign').props.disabled, true)
+  await entry.prompt('  Screen these molecules  '); await entry.submitPrompt()
+  assert.equal(entry.posts[0].url, '/v2/campaigns')
+  assert.equal(entry.posts[0].body.message, 'Screen these molecules')
+  assert.equal(entry.posts[1].url, '/v2/campaigns/c1/advance')
+  assert.match(entry.text(), /Which target/)
+  entry.stop()
+  console.log('PASS: unified prompt submits to the flexible agent and displays its clarification.')
   const queued = harness(campaign([job('queued')]))
   await queued.start(); await queued.tick(4999); assert.equal(queued.posts.length, 0)
   await queued.tick(1); assert.equal(queued.posts.length, 1); assert.match(queued.posts[0].url, /\/jobs\/j1\/poll$/)
@@ -125,7 +166,7 @@ function harness(initial, admin = true, activity = []) {
     assert.equal(view.nodes().find(n => n.props?.id === 'campaign-artifact').props.disabled, true); view.stop()
   }
   const create = harness({ ...campaign([]), status: 'ready' })
-  await create.start(); await create.click('Create campaign to add files')
+  await create.start(); await create.prompt('Calculate molecular weight for CCO'); await create.click('Create campaign to add files')
   assert.equal(create.posts.length, 1); assert.equal(create.posts[0].url, '/v2/campaigns'); assert.ok(create.posts[0].body.message); create.stop()
   console.log('PASS: 10 artifact scenarios: 4 allowed statuses, file byte cap before read, encoded text cap, API error display, busy/completed gating, create without advance.')
   for (const [status, canCancel, canReconcile, cancelVisible, reconcileVisible] of [

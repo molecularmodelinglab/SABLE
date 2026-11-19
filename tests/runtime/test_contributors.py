@@ -168,8 +168,8 @@ def test_catalog_pagination_exports_and_artifact_access(tmp_path):
 def test_running_api_refreshes_activation_and_revocation(tmp_path,monkeypatch):
     from server.routers.agent_campaigns import configured_service, _configured_service
     package=create_package('example',tmp_path/'source');store=SkillStore(tmp_path/'store');store.install(package,activate=True)
-    monkeypatch.setenv('SABLE_V2_ENABLED','1')
-    monkeypatch.setenv('SABLE_V2_LEDGER_PATH',str(tmp_path/'campaign.sqlite'))
+    monkeypatch.setenv('SABLE_AGENT_ENABLED','1')
+    monkeypatch.setenv('SABLE_LEDGER_PATH',str(tmp_path/'campaign.sqlite'))
     monkeypatch.setenv('SABLE_SKILL_STORE_PATH',str(store.root))
     monkeypatch.delenv('SABLE_SERVICE_BINDINGS_PATH',raising=False)
     _configured_service.cache_clear()

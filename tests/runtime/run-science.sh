@@ -7,5 +7,5 @@ for source_path in sable_runtime skills tools schemas utils nodes config tests/r
   mounts+=(--mount "type=bind,src=$runtime_root/$source_path,dst=/workspace/$source_path,readonly")
 done
 exec docker run --rm --network none --read-only --tmpfs /tmp \
-  -e SABLE_V2_WORKER_ENV_ALLOWLIST=HEALER_DATA_DIR -e MPLCONFIGDIR=/tmp/matplotlib -e XDG_CACHE_HOME=/tmp/cache \
+  -e SABLE_WORKER_ENV_ALLOWLIST=HEALER_DATA_DIR -e MPLCONFIGDIR=/tmp/matplotlib -e XDG_CACHE_HOME=/tmp/cache \
   "${mounts[@]}" sable-science-tests "$@"

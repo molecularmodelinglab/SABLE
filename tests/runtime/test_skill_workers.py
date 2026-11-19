@@ -55,7 +55,7 @@ def test_worker_timeout_errors_and_environment(tmp_path, monkeypatch):
         run_snapshot(entry, b'def run(payload):\n raise ValueError("private details")\n', {})
     monkeypatch.setenv('OPENAI_API_KEY', 'private-test-value')
     monkeypatch.setenv('EXAMPLE_DATA', 'fixture')
-    monkeypatch.setenv('SABLE_V2_WORKER_ENV_ALLOWLIST', 'EXAMPLE_DATA')
+    monkeypatch.setenv('SABLE_WORKER_ENV_ALLOWLIST', 'EXAMPLE_DATA')
     entry = entry.model_copy(update={'environment': ['EXAMPLE_DATA']})
     assert run_snapshot(entry, b'import os\ndef run(payload):\n return {"data": os.getenv("EXAMPLE_DATA"), "secret": os.getenv("OPENAI_API_KEY")}\n', {}) == {'data': 'fixture', 'secret': None}
     with pytest.raises(ValueError, match='not authorized'):
@@ -94,7 +94,7 @@ def test_worker_environment_controls_availability(tmp_path, monkeypatch):
     manifest['workers']['compute']['environment'] = ['EXAMPLE_DATA']
     (folder / 'manifest.json').write_text(json.dumps(manifest))
     registry = SkillRegistry(); registry.install(folder)
-    monkeypatch.delenv('SABLE_V2_WORKER_ENV_ALLOWLIST', raising=False)
+    monkeypatch.delenv('SABLE_WORKER_ENV_ALLOWLIST', raising=False)
     assert registry.available() == set()
-    monkeypatch.setenv('SABLE_V2_WORKER_ENV_ALLOWLIST', 'EXAMPLE_DATA')
+    monkeypatch.setenv('SABLE_WORKER_ENV_ALLOWLIST', 'EXAMPLE_DATA')
     assert registry.available() == {('example', '1.0.0')}

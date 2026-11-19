@@ -2,7 +2,7 @@
 from pathlib import Path
 import json
 import sys
-from sable_runtime.agent_model import OpenAIModel
+from sable_runtime.agent_model import create_agent_model
 from sable_runtime.campaigns import CampaignService
 from sable_runtime.ledger import Ledger
 from test_discovery import registry
@@ -14,9 +14,7 @@ def main():
         key, separator, value = line.partition('=')
         if separator and not key.strip().startswith('#'):
             config[key.strip()] = value.strip().strip('"').strip("'")
-    model = OpenAIModel(api_key=config.get('OPENAI_API_KEY'),
-                        model=config.get('SABLE_V2_MODEL') or config.get('OPENAI_MODEL'),
-                        base_url=config.get('OPENAI_URL') or None)
+    model = create_agent_model(config)
     try:
         service = CampaignService(Ledger('/tmp/live-discovery.sqlite'), registry(),
                     {('healer','1.1.0'),('baybe','1.1.0'),('rdkit-descriptors','1.2.0'),('hit-to-lead','1.2.0')})
