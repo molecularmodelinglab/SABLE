@@ -31,8 +31,10 @@ class JobManager:
         self.ledger, self.registry = ledger, registry
         self.services, self.credentials = dict(services or {}), credentials
         self.allowed, self.clock = allowed, clock
+        if ledger.postgres:
+            return
         with ledger.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
+            db.begin_write()
             db.execute('''CREATE TABLE IF NOT EXISTS remote_jobs (
                 id TEXT PRIMARY KEY, campaign TEXT NOT NULL, action TEXT NOT NULL,
                 skill_id TEXT NOT NULL, version TEXT NOT NULL, digest TEXT NOT NULL,
@@ -68,7 +70,7 @@ class JobManager:
         serialized = json.dumps(payload, sort_keys=True, allow_nan=False)
         now = self.clock()
         with self.ledger.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
+            db.begin_write()
             self.ledger.owned(db, action.campaign_id, owner)
             existing = db.execute('SELECT * FROM remote_jobs WHERE campaign=? AND action=?',
                                   (action.campaign_id, action.action_id)).fetchone()
@@ -150,7 +152,7 @@ class JobManager:
         """Perform at most one remote request phase under a fenced local lease."""
         now = self.clock()
         with self.ledger.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
+            db.begin_write()
             row = self._read(db, campaign, job_id, owner)
             was_cancelling = row['status'] == 'cancelling'
             if row['lease_until'] > now:
@@ -224,7 +226,7 @@ class JobManager:
         elif status == 'running' and (cancel or was_cancelling):
             status = 'cancelling'
         with self.ledger.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
+            db.begin_write()
             current = self._read(db, campaign, job_id, owner)
             if current['token'] != token:
                 raise JobConflict('Job operation lease was superseded')
@@ -247,7 +249,7 @@ class JobManager:
         if not isinstance(remote_id, str) or not remote_id.strip() or len(remote_id) > 512:
             raise JobConflict('A valid remote identifier is required')
         with self.ledger.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
+            db.begin_write()
             row = self._read(db, campaign, job_id, owner)
             _, spec = self._configuration(row)
             if not spec.reconcilable:

@@ -1,4 +1,4 @@
-"""Transactional local ledger. SQLite must reside on a local durable filesystem."""
+"""Transactional campaign ownership, action budgets, and durable events."""
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
@@ -11,9 +11,25 @@ class LedgerError(RuntimeError):
     pass
 
 
+class SQLiteConnection(sqlite3.Connection):
+    """Local transaction support for isolated tests and import sources."""
+    write = False
+
+    def begin_write(self):
+        self.execute('BEGIN IMMEDIATE')
+        self.write = True
+
+
 class Ledger:
     def __init__(self, path):
-        self.path = str(Path(path))
+        self.postgres = str(path).startswith(('postgresql://', 'postgresql+psycopg2://'))
+        self.path = str(path) if self.postgres else str(Path(path))
+        self.order_column = 'created_sequence' if self.postgres else 'rowid'
+        if self.postgres:
+            with self.connect() as db:
+                if db.execute("SELECT to_regclass('sable_campaigns.campaigns')").fetchone()[0] is None:
+                    raise RuntimeError('Campaign schema is missing; run alembic upgrade head')
+            return
         with self.connect() as db:
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS campaigns (
@@ -31,17 +47,42 @@ class Ledger:
 
     @contextmanager
     def connect(self):
-        db = sqlite3.connect(self.path, timeout=30)
-        db.row_factory = sqlite3.Row
-        db.execute('PRAGMA synchronous=FULL')
-        try:
-            yield db
-            db.commit()
-        except BaseException:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+        if self.postgres:
+            from .database import PostgresConnection, engine_for
+            raw = engine_for(self.path).raw_connection()
+            db = None
+            try:
+                db = PostgresConnection(raw)
+                yield db
+                raw.commit()
+            except BaseException:
+                raw.rollback()
+                raise
+            finally:
+                if db is not None:
+                    db.close()
+                raw.close()
+        else:
+            db = sqlite3.connect(self.path, timeout=30, factory=SQLiteConnection)
+            db.row_factory = sqlite3.Row
+            db.execute('PRAGMA synchronous=FULL')
+            try:
+                yield db
+                db.commit()
+            except BaseException:
+                db.rollback()
+                raise
+            finally:
+                db.close()
+
+    @classmethod
+    def configured(cls):
+        """Use the same PostgreSQL database as authenticated user accounts."""
+        import os
+        url = os.environ.get('DATABASE_URL', '')
+        if not url.startswith(('postgresql://', 'postgresql+psycopg2://')):
+            raise ValueError('Configure DATABASE_URL with a PostgreSQL database')
+        return cls(url)
 
     def create_campaign(self, campaign_id, owner, budget):
         with self.connect() as db:
@@ -50,7 +91,8 @@ class Ledger:
 
     @staticmethod
     def owned(db, campaign_id, owner):
-        row = db.execute('SELECT * FROM campaigns WHERE id=? AND owner=?', (campaign_id, owner)).fetchone()
+        lock = ' FOR UPDATE' if db.write and not isinstance(db, SQLiteConnection) else ''
+        row = db.execute('SELECT * FROM campaigns WHERE id=? AND owner=?' + lock, (campaign_id, owner)).fetchone()
         if row is None:
             raise PermissionError('Campaign is not available')
         return row
@@ -63,7 +105,7 @@ class Ledger:
 
     def claim(self, action, owner, fingerprint, units, payload):
         with self.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
+            db.begin_write()
             campaign = self.owned(db, action.campaign_id, owner)
             previous = db.execute('SELECT * FROM actions WHERE campaign=? AND id=?',
                                   (action.campaign_id, action.action_id)).fetchone()
@@ -84,7 +126,7 @@ class Ledger:
 
     def finish(self, action, owner, status, result):
         with self.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
+            db.begin_write()
             self.owned(db, action.campaign_id, owner)
             changed = db.execute('UPDATE actions SET status=?,result=? WHERE campaign=? AND id=? AND status=?',
                                 (status, json.dumps(result, allow_nan=False), action.campaign_id, action.action_id, 'running'))

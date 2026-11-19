@@ -6,6 +6,8 @@ from uuid import uuid4
 class ArtifactStore:
     def __init__(self, ledger):
         self.ledger = ledger
+        if ledger.postgres:
+            return
         with ledger.connect() as db:
             db.execute('''CREATE TABLE IF NOT EXISTS campaign_artifacts (
                 id TEXT PRIMARY KEY, campaign TEXT NOT NULL, name TEXT NOT NULL,
@@ -18,13 +20,13 @@ class ArtifactStore:
         if not encoded or len(encoded)>3_000_000:
             raise ValueError('Artifact must contain at most 3 MB of text')
         with self.ledger.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
+            db.begin_write()
             self.ledger.owned(db,campaign,owner)
             count,size=db.execute('SELECT count(*),coalesce(sum(size_bytes),0) FROM campaign_artifacts WHERE campaign=?',(campaign,)).fetchone()
             if count>=16 or size+len(encoded)>32_000_000:
                 raise ValueError('Campaign artifact allowance exceeded')
             record={'id':'artifact-'+uuid4().hex,'name':name,'size_bytes':len(encoded),'sha256':sha256(encoded).hexdigest()}
-            db.execute('INSERT INTO campaign_artifacts VALUES(?,?,?,?,?,?)',
+            db.execute('INSERT INTO campaign_artifacts(id,campaign,name,content,size_bytes,sha256) VALUES(?,?,?,?,?,?)',
                        (record['id'],campaign,name,content,record['size_bytes'],record['sha256']))
             self.ledger.event(db,campaign,record['id'],'artifact_uploaded',record)
         return record
@@ -32,7 +34,7 @@ class ArtifactStore:
     def list(self,campaign,owner):
         with self.ledger.connect() as db:
             self.ledger.owned(db,campaign,owner)
-            return [dict(r) for r in db.execute('SELECT id,name,size_bytes,sha256 FROM campaign_artifacts WHERE campaign=? ORDER BY rowid',(campaign,))]
+            return [dict(r) for r in db.execute(f'SELECT id,name,size_bytes,sha256 FROM campaign_artifacts WHERE campaign=? ORDER BY {self.ledger.order_column}',(campaign,))]
 
     def read(self,campaign,owner,artifact_id):
         with self.ledger.connect() as db:

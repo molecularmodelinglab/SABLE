@@ -16,14 +16,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--once', action='store_true')
     args = parser.parse_args()
-    path = Path(os.environ.get('SABLE_LEDGER_PATH', ''))
-    if not path.is_absolute():
-        parser.error('SABLE_LEDGER_PATH must be an absolute durable local path')
-    path.parent.mkdir(parents=True, exist_ok=True)
     services, credentials = load_services(os.getenv('SABLE_SERVICE_BINDINGS_PATH'))
     revision = deployment_revision()
     registry, allowed, _ = load_deployment_skills(Path(__file__).resolve().parents[1] / 'skills', services)
-    jobs = JobManager(Ledger(path), registry, services=services, credentials=credentials, allowed=allowed)
+    jobs = JobManager(Ledger.configured(), registry, services=services, credentials=credentials, allowed=allowed)
     stopped = Event()
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, lambda *_: stopped.set())

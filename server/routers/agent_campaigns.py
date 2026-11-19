@@ -31,14 +31,10 @@ class ArtifactInput(Contract):
 @lru_cache(maxsize=1)
 def _configured_service(revision=None):
     """Return the configured campaign service."""
-    path = Path(os.environ.get('SABLE_LEDGER_PATH', ''))
-    if not path.is_absolute():
-        raise HTTPException(503, 'Configure an absolute SABLE_LEDGER_PATH on a durable local volume')
-    path.parent.mkdir(parents=True, exist_ok=True)
     root = Path(__file__).resolve().parents[2] / 'skills'
     services, credentials = load_services(os.getenv('SABLE_SERVICE_BINDINGS_PATH'))
     registry, allowed, selected = load_deployment_skills(root, services)
-    return CampaignService(Ledger(path), registry, allowed, services=services, credentials=credentials,
+    return CampaignService(Ledger.configured(), registry, allowed, services=services, credentials=credentials,
                            discovery_allowed=selected)
 
 
