@@ -11,7 +11,7 @@ from sable_runtime.agent_model import OpenAIModel
 from sable_runtime.ledger import Ledger
 from sable_runtime.registry import SkillRegistry
 from sable_runtime.jobs import JobConflict
-from sable_runtime.service_config import load_services
+from server.services.campaign_credentials import load_campaign_services as load_services
 from sable_runtime.skill_store import load_deployment_skills, deployment_revision
 
 
