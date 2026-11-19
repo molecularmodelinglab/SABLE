@@ -8,7 +8,7 @@ from threading import Event
 from .jobs import JobManager
 from .ledger import Ledger
 from .registry import SkillRegistry
-from .service_config import load_services
+from server.services.campaign_credentials import load_campaign_services as load_services
 from .skill_store import load_deployment_skills, deployment_revision
 
 
