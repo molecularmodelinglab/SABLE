@@ -95,7 +95,7 @@ class GeminiClient:
 def _create_openai_client() -> Optional[LLMClient]:
     api_key = os.environ.get("OPENAI_API_KEY")
     base_url = os.environ.get("OPENAI_URL")
-    model = os.environ.get("OPENAI_MODEL", "gpt-5-chat")
+    model = (os.environ.get("OPENAI_MODEL") or "gpt-5-chat")
     if not api_key:
         print("Warning: LLM_PROVIDER is 'openai' but OPENAI_API_KEY is not set.")
         return None
@@ -109,7 +109,7 @@ def _create_gemini_client() -> Optional[LLMClient]:
         print("Warning: LLM_PROVIDER is 'gemini' but GOOGLE_API_KEY is not set.")
         return None
     print("Initializing Gemini client...")
-    return GeminiClient(api_key=api_key)
+    return GeminiClient(api_key=api_key, model=os.environ.get("GEMINI_MODEL") or "gemini-2.5-pro")
 
 
 LLM_PROVIDER_FACTORIES: dict[str, Callable[[], Optional[LLMClient]]] = {
@@ -120,7 +120,7 @@ LLM_PROVIDER_FACTORIES: dict[str, Callable[[], Optional[LLMClient]]] = {
 
 def create_llm_client(provider: Optional[str] = None) -> Optional[LLMClient]:
     """Create an LLM client by provider id."""
-    provider_id = (provider or os.environ.get("LLM_PROVIDER", "gemini")).lower()
+    provider_id = (provider or os.environ.get("LLM_PROVIDER") or "gemini").strip().lower()
     factory = LLM_PROVIDER_FACTORIES.get(provider_id)
     if not factory:
         print(
