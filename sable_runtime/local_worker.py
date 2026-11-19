@@ -10,7 +10,7 @@ import sys
 
 def run_snapshot(entry, code, payload):
     base_names = {'PATH', 'PYTHONPATH', 'PYTHONDONTWRITEBYTECODE', 'LANG'}
-    allowed = set(os.getenv('SABLE_V2_WORKER_ENV_ALLOWLIST', '').split(','))
+    allowed = set(os.getenv('SABLE_WORKER_ENV_ALLOWLIST', '').split(','))
     requested = set(entry.environment)
     if requested - allowed:
         raise ValueError('Worker environment is not authorized by the deployment')

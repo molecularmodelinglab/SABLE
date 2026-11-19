@@ -128,7 +128,7 @@ class SkillRegistry:
                 required_services = set(requirements.services) | {j.service for j in skill.manifest.remote_jobs.values()}
                 if not required_services <= set(services):
                     continue
-                allowed_env = set(os.getenv('SABLE_V2_WORKER_ENV_ALLOWLIST', '').split(','))
+                allowed_env = set(os.getenv('SABLE_WORKER_ENV_ALLOWLIST', '').split(','))
                 if any(set(worker.environment) - allowed_env for worker in skill.manifest.workers.values()):
                     continue
                 if not all(find_spec(name) is not None for name in requirements.modules):
