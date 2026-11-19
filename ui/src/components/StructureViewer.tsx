@@ -4,7 +4,8 @@ import { Maximize2, Pause, Play, RotateCcw } from 'lucide-react'
 import { getCheckpointText } from '../api'
 
 type StructureViewerProps = {
-  runId: string
+  runId?: string
+  content?: string
   filename: string
 }
 
@@ -55,7 +56,7 @@ function applyStructureStyle(
   viewer.render()
 }
 
-export function StructureViewer({ runId, filename }: StructureViewerProps) {
+export function StructureViewer({ runId, filename, content }: StructureViewerProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<GLViewer | null>(null)
@@ -105,10 +106,11 @@ export function StructureViewer({ runId, filename }: StructureViewerProps) {
     viewer.clear()
     viewer.render()
 
-    getCheckpointText(runId, filename)
-      .then((structure) => {
+    const loading = (content !== undefined ? Promise.resolve(content) : runId ? getCheckpointText(runId, filename) : Promise.reject(new Error('No structure content supplied')))
+    loading.then((structure) => {
         if (cancelled) return
-        const format = filename.toLowerCase().endsWith('.pdb') ? 'pdb' : 'cif'
+        const extension = filename.toLowerCase().split('.').pop()
+        const format = extension === 'sdf' || extension === 'mol' ? 'sdf' : extension === 'pdb' ? 'pdb' : 'cif'
         viewer.addModel(structure, format)
         applyStructureStyle(viewer, representation, colorMode)
         viewer.zoomTo()
@@ -124,7 +126,7 @@ export function StructureViewer({ runId, filename }: StructureViewerProps) {
     return () => {
       cancelled = true
     }
-  }, [filename, runId])
+  }, [filename, runId, content])
 
   useEffect(() => {
     const viewer = viewerRef.current
