@@ -28,10 +28,16 @@ async def scheduler_lifespan(app):
         target=_reconcile_loop, args=(stop,), name="run-reconciler", daemon=True
     )
     thread.start()
+    from server.services.campaign_runner import campaign_loop
+    campaign_threads = [threading.Thread(target=campaign_loop, args=(stop,), name=f'campaign-runner-{i}', daemon=True) for i in range(2)]
+    for campaign_thread in campaign_threads:
+        campaign_thread.start()
     try:
         yield
     finally:
         stop.set()
         await asyncio.to_thread(thread.join, SHUTDOWN_TIMEOUT_SECONDS)
+        for campaign_thread in campaign_threads:
+            await asyncio.to_thread(campaign_thread.join, SHUTDOWN_TIMEOUT_SECONDS)
         if thread.is_alive():
             logger.warning("Run reconciliation still finishing during API shutdown")

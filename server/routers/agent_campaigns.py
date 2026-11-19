@@ -19,6 +19,12 @@ class CampaignInput(Contract):
     message: str = Field(min_length=1, max_length=10000)
 
 
+class BudgetInput(Contract):
+    max_turns: int = Field(ge=1, le=10000, strict=True)
+    max_actions: int = Field(ge=1, le=10000, strict=True)
+    max_units: int = Field(ge=1, le=10000, strict=True)
+
+
 class ReconcileInput(Contract):
     remote_id: str = Field(min_length=1, max_length=512)
 
@@ -113,6 +119,18 @@ def make_router(user_dependency, service_dependency=configured_service, model_fa
     @router.get('/{campaign_id}/artifacts/{artifact_id}')
     def artifact(campaign_id: str, artifact_id: str, user=Depends(user_dependency), service=Depends(service_dependency)):
         return {'content':invoke(service.artifacts.read, campaign_id, str(user.id), artifact_id)}
+
+    @router.post('/{campaign_id}/start')
+    def start(campaign_id: str, user=Depends(user_dependency), service=Depends(service_dependency)):
+        return invoke(service.execution, campaign_id, str(user.id), 'running')
+
+    @router.post('/{campaign_id}/pause')
+    def pause(campaign_id: str, user=Depends(user_dependency), service=Depends(service_dependency)):
+        return invoke(service.execution, campaign_id, str(user.id), 'paused')
+
+    @router.post('/{campaign_id}/budget')
+    def budget(campaign_id: str, payload: BudgetInput, user=Depends(user_dependency), service=Depends(service_dependency)):
+        return invoke(service.extend_budget, campaign_id, str(user.id), payload.max_turns, payload.max_actions, payload.max_units)
 
     @router.post('/{campaign_id}/advance')
     def advance(campaign_id: str, user=Depends(user_dependency), service=Depends(service_dependency)):
