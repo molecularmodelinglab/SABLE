@@ -37,7 +37,7 @@ export function DashboardPage() {
           <h1>Optimization Campaigns</h1>
           <p>Monitor, inspect, and relaunch molecular optimization workflows with real-time visibility.</p>
         </div>
-        <button className="primary" onClick={() => navigate('/runs/new')}>New Optimization</button>
+        <button className="primary" onClick={() => navigate('/runs/new')}>New Run</button>
       </div>
 
       <section className="dashboard__setup" aria-label="Boltz configuration">

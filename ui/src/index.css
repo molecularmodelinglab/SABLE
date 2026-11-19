@@ -2608,3 +2608,31 @@ button.secondary:hover:not(:disabled) {
     transition: none;
   }
 }
+
+/* Campaign controls use the same form, panel, and color styles as the run workspace. */
+.campaign-page { min-width: 0; }
+.campaign-page__panel {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding: 24px;
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg);
+}
+.campaign-page__panel h2, .campaign-page__panel h3,
+.campaign-page__panel p, .campaign-page .prompt-examples p { margin: 0; }
+.campaign-page__panel > div, .campaign-page__job { display: grid; gap: 12px; min-width: 0; }
+.campaign-page__job { padding: 16px; margin-top: 12px; border: 1px solid var(--panel-border); }
+.campaign-page details { min-width: 0; }
+.campaign-page summary { cursor: pointer; color: var(--navy); font-weight: 600; padding: 8px 0; }
+.campaign-page pre, .campaign-page code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.campaign-page pre { max-height: 420px; overflow: auto; padding: 12px; background: var(--franklin-fog); }
+.campaign-page table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.campaign-page th, .campaign-page td { padding: 10px; border-bottom: 1px solid var(--panel-border); text-align: left; }
+.campaign-page button { justify-self: start; }
+.campaign-page [role="alert"] { color: #b91c1c; }
+.campaign-page .new-run__actions { flex-wrap: wrap; }
+@media (max-width: 760px) {
+  .campaign-page .prompt-run__layout { grid-template-columns: minmax(0, 1fr); }
+  .campaign-page__panel { padding: 16px; }
+}

@@ -11,7 +11,6 @@ import { RegisterPage } from './pages/RegisterPage'
 import { AdminDashboardPage } from './pages/AdminDashboardPage'
 import { AccountPage } from './pages/AccountPage'
 import { LandingPage } from './pages/LandingPage'
-import { AgentCampaignPage } from './pages/AgentCampaignPage'
 import { useAuthProfile } from './hooks/useAuthProfile'
 
 export function App() {
@@ -30,7 +29,7 @@ export function App() {
             <AppShell header={<Header title={headerContent.title} description={headerContent.description} pathname={location.pathname} />}>
               <Routes>
                 <Route path="/dashboard" element={<DashboardPage />} />
-                <Route path="/agent" element={<AgentCampaignPage />} />
+                <Route path="/agent" element={<Navigate to="/runs/new" replace />} />
                 <Route path="/runs/new" element={<NewRunPage />} />
                 <Route path="/runs/:id" element={<RunDetailPage />} />
                 <Route path="/account" element={<AccountPage />} />
@@ -109,8 +108,8 @@ function Header({ title, description, pathname }: { title: string; description: 
 function buildHeader(pathname: string) {
   if (pathname.startsWith('/runs/new')) {
     return {
-      title: 'Launch Optimization',
-      description: 'Provide the agent with a fresh optimization brief and parameters.',
+      title: 'New Run',
+      description: 'Describe a task and follow its progress, results, and activity.',
     }
   }
   if (pathname.startsWith('/runs/')) {
