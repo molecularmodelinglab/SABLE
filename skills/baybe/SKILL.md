@@ -5,6 +5,8 @@ description: Recommend experimental batches and rank recorded molecular observat
 
 Use `recommend` with a HEALER `library_action_id`, objective targets, `batch_size`, `max_rounds`, and all relevant RDKit `measurement_action_ids`. Start with an empty measurement list for an initial design. Never supply invented measurement values or copy values from prose: the runtime resolves recorded observations by reference, enforcing identity, method, units and completeness.
 
+Both `batch_size` and `max_rounds` support values from 1 to 100. Recommendation and ranking inputs accept up to 100 cumulative measurement references. Campaign action/unit budgets and available library candidates still constrain execution.
+
 Evaluate the returned recommendation by calling RDKit with `source_action_id` equal to the recommendation action ID. All previous recommendations must have complete objective observations before another batch is requested. Keep cumulative measurement references; leaving out earlier batches is rejected. Stop when `stop_reason` is present, the library is exhausted, or the chosen round limit is reached. The final batch may be smaller than the requested size.
 
 Use `single` for one objective, `pareto` for multiple competing objectives, or `desirability` with explicit increasing bounds and positive weights. `MATCH` requires bounds and targets their midpoint. Desirability bounds normalize each objective before combining; they are not hard feasibility constraints. Objectives, strategy and maximum rounds are fixed after the first recommendation for a library. Do not silently change the optimization problem.
