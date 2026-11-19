@@ -124,7 +124,7 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
       </aside>
       <div className="app-shell__main">
         <header className="app-shell__header">{header}</header>
-        <main className="app-shell__content">{children}</main>
+        <main className={`app-shell__content${location.pathname.replace(/\/$/, '') === '/runs/new' ? ' app-shell__content--workspace' : ''}`}>{children}</main>
       </div>
     </div>
   )

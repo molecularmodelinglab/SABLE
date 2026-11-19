@@ -7,7 +7,7 @@ type ScientificResult = { observations?: unknown; kind?: string; candidates?: { 
 type JobStatus = 'queued' | 'submitting' | 'unknown' | 'running' | 'succeeded' | 'partial' | 'failed' | 'cancelled' | 'timed_out' | 'cancelling'
 type Job = { id: string; campaign: string; action: string; skill_id: string; remote_id: string | null; status: JobStatus; can_cancel: boolean; can_reconcile: boolean; created: string | number; updated: string | number; next_poll: string | number | null; deadline: string | number | null; result?: unknown; error?: unknown; diagnostics?: Record<string, unknown> }
 type Artifact = { id: string; name: string; size_bytes: number; sha256: string }
-type Campaign = { id: string; status: string; busy: boolean; question: string | null; error: string | null; turns: number; max_turns: number; report: { summary: string; evidence: string[] } | null; results: Record<string, ScientificResult>; jobs?: Job[]; artifacts?: Artifact[]; skills?: { id: string; version: string; digest: string }[]; model?: string; metrics?: { tool_actions: number; max_tool_actions: number; operation_units: number; max_operation_units: number; input_tokens: number; output_tokens: number } }
+type Campaign = { history?: { role: string; content?: string; decision?: { name: string; arguments: { question?: string } } }[]; id: string; status: string; busy: boolean; question: string | null; error: string | null; turns: number; max_turns: number; report: { summary: string; evidence: string[] } | null; results: Record<string, ScientificResult>; jobs?: Job[]; artifacts?: Artifact[]; skills?: { id: string; version: string; digest: string }[]; model?: string; metrics?: { tool_actions: number; max_tool_actions: number; operation_units: number; max_operation_units: number; input_tokens: number; output_tokens: number } }
 type Capability = { id: string; version: string; description: string; digest: string; available: boolean; resumable: boolean; requirements: unknown; operations: { id: string; description: string }[] }
 type Event = { event_id: string; action: string; sequence: number; timestamp: string; kind: string; payload: unknown; preview?: boolean }
 
@@ -39,6 +39,9 @@ async function request<T>(path = '', body?: unknown): Promise<T> {
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   })
   if (!response.ok) {
+    if (response.status === 404 && (path === '' || path === '/capabilities')) {
+      throw new Error('The campaign service is unavailable. Ask your administrator to update or restart the API.')
+    }
     const data = await response.json().catch(() => ({}))
     throw new Error(data.detail ? detail(data.detail) : `Request failed (${response.status})`)
   }
@@ -51,12 +54,14 @@ export function NewRunPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [campaign, setCampaign] = useState<Campaign | null>(null)
   const [events, setEvents] = useState<Event[]>([])
-  const [capabilities, setCapabilities] = useState<Capability[]>([])
+  const [capabilities, setCapabilities] = useState<Capability[] | null>(null)
+  const [capabilityError, setCapabilityError] = useState('')
   const [traceFilter, setTraceFilter] = useState('all')
   const [traceSearch, setTraceSearch] = useState('')
   const [fullEvent, setFullEvent] = useState<Event | null>(null)
   const [prompt, setPrompt] = useState('')
   const [reply, setReply] = useState('')
+  const [showDetails, setShowDetails] = useState(false)
   const [working, setWorking] = useState(false)
   const [error, setError] = useState('')
   const [jobError, setJobError] = useState('')
@@ -66,10 +71,18 @@ export function NewRunPage() {
   const retryAfter = useRef(0)
   const lastPoll = useRef<Record<string, number>>({})
   const controlsBusy = working || jobWorking
+  const canStartCampaign = !controlsBusy && !!capabilities?.some(capability => capability.available)
   const canUpload = !!campaign && !campaign.busy && ['ready', 'awaiting_user', 'waiting', 'waiting_jobs'].includes(campaign.status)
+  const conversationEnd = useRef<HTMLDivElement | null>(null)
+  useEffect(() => { conversationEnd.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }, [campaign?.history?.length, campaign?.question, campaign?.report])
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; request<Campaign[]>().then(setCampaigns).catch(e => setError(e.message)); return () => { mounted.current = false } }, [])
-  useEffect(() => { request<Capability[]>('/capabilities').then(data => { if (Array.isArray(data)) setCapabilities(data) }).catch(e => setError(e.message)) }, [])
+  useEffect(() => {
+    request<Capability[]>('/capabilities').then(data => {
+      if (!Array.isArray(data)) throw new Error('The capability catalog returned an invalid response.')
+      if (mounted.current) setCapabilities(data)
+    }).catch(e => { if (mounted.current) setCapabilityError(e.message) })
+  }, [])
   useEffect(() => {
     if (!campaign) return
     const id = campaign.id
@@ -187,60 +200,61 @@ export function NewRunPage() {
     })
   }
 
-  return <section className="new-run campaign-page">
-    <div className="new-run__header"><div>
-      <h1>Start a run</h1>
-      <p>Describe the molecular design or analysis task you want SABLE to run.</p>
-    </div></div>
-    <div className="prompt-run__layout">
-      <form className="new-run__form prompt-run__form" onSubmit={e => { e.preventDefault(); perform(async () => run(await request<Campaign>('', { message: prompt.trim() }))) }}>
-        <label htmlFor="agent-prompt">Prompt
-          <textarea id="agent-prompt" value={prompt} onChange={e => setPrompt(e.target.value)} required maxLength={10000} rows={10}
-            placeholder="Describe your objective, molecular structures, and any constraints."
-            disabled={controlsBusy} />
-        </label>
-        {error && <p className="new-run__error" role="alert">{error}</p>}
-        <div className="new-run__actions">
-          <button className="primary" disabled={controlsBusy || !prompt.trim()} type="submit">Start campaign</button>
-          <button disabled={controlsBusy || !prompt.trim()} type="button" onClick={() => perform(async () => {
-            const next = await request<Campaign>('', { message: prompt.trim() })
-            if (mounted.current) { setEvents([]); setCampaign(next) }
-            const history = await request<Campaign[]>()
-            if (mounted.current) setCampaigns(history)
-          })}>Create campaign to add files</button>
-        </div>
-      </form>
-      <aside className="prompt-examples" aria-label="Run guidance">
-        <div><p className="prompt-examples__eyebrow">Get started</p><h2>Describe your task</h2></div>
-        <p>Include the structures or data you have, the outcome you want, and any limits on the work. SABLE will ask for missing information.</p>
-        <p>For tasks that need files, create the campaign first, upload your files, then continue.</p>
-    <details><summary>Available capabilities ({capabilities.filter(c => c.available).length})</summary>
-      {capabilities.map(c => <article key={`${c.id}@${c.version}`}><h3>{c.id} · {c.version}</h3>
-        <p>{c.description}</p><p>{c.available ? 'Available for new campaigns' : c.resumable ? 'Retained for existing campaigns' : 'Unavailable: check deployment requirements'}</p>
-        <ul>{c.operations.map(op => <li key={op.id}>{op.id}: {op.description}</li>)}</ul>
-        <details><summary>Requirements and package identity</summary><pre>{JSON.stringify({ requirements: c.requirements, digest: c.digest }, null, 2)}</pre></details>
-      </article>)}
-    </details>
+  const title = (item: Campaign) => item.history?.find(message => message.role === 'user')?.content || `Campaign ${item.id.slice(-8)}`
+  const status = campaign ? campaign.busy || working ? 'Working on your campaign' : ({ awaiting_user: 'Your input is needed', waiting_jobs: 'Waiting for results', ready: 'Ready to continue', completed: 'Campaign complete', failed: 'Campaign needs attention' }[campaign.status] || campaign.status.replace(/_/g, ' ')) : 'New campaign'
+
+  return <section className="campaign-page science-workspace">
+    <header className="workspace-header">
+      <div><p className="workspace-eyebrow">Campaign workspace</p><h1>{campaign ? 'Your campaign' : 'Start a campaign'}</h1></div>
+      <button aria-expanded={showDetails} aria-controls="campaign-details" onClick={() => setShowDetails(value => !value)}>{showDetails ? 'Hide details' : 'Campaign details'}</button>
+    </header>
+    <div className={`workspace-layout${showDetails ? ' workspace-layout--details' : ''}`}>
+      <aside className="workspace-history" aria-label="Campaign history">
+        <button className="workspace-new" disabled={controlsBusy} onClick={() => { setCampaign(null); setEvents([]); setPrompt(''); setReply(''); setError(''); }}>+ New campaign</button>
+        <details open><summary>Recent campaigns <span>{campaigns.length}</span></summary>
+          {campaigns.length === 0 && <p className="workspace-muted">Your campaigns will appear here.</p>}
+          <nav aria-label="Previous campaigns">{campaigns.map(item => <button key={item.id} className="workspace-history-item" aria-current={campaign?.id === item.id ? 'page' : undefined} disabled={controlsBusy} onClick={() => perform(async () => { setReply(''); setEvents([]); setCampaign(await request<Campaign>(`/${item.id}`)) })}>
+            <span>{title(item)}</span><small>{item.status.replace(/_/g, ' ')}</small>
+          </button>)}</nav>
+        </details>
       </aside>
-    </div>
-    <section className="campaign-page__panel" aria-label="Campaign history">
-    <label htmlFor="agent-history">Previous campaigns </label>
-    <select id="agent-history" value={campaign?.id || ''} disabled={controlsBusy} onChange={e => {
-      const id = e.target.value
-      if (id) perform(async () => { setEvents([]); setCampaign(await request<Campaign>(`/${id}`)) })
-    }}><option value="">Select a campaign</option>{campaigns.map(c => <option key={c.id} value={c.id}>{c.id} — {c.status}</option>)}</select>
-    </section>
-    {campaign && <section className="campaign-page__panel" aria-label="Campaign activity">
-      <h2>Campaign activity</h2>
-      {campaign.metrics && <p>Tool actions: {campaign.metrics.tool_actions}/{campaign.metrics.max_tool_actions} · Operation units: {campaign.metrics.operation_units}/{campaign.metrics.max_operation_units} · Tokens: {campaign.metrics.input_tokens.toLocaleString()} input / {campaign.metrics.output_tokens.toLocaleString()} output</p>}
-      <details><summary>Model and pinned skills</summary><p>{campaign.model || 'No model decision yet'}</p><ul>{campaign.skills?.map(skill => <li key={skill.id}>{skill.id} {skill.version}<br /><code>{skill.digest}</code></li>)}</ul></details>
-      <button disabled={controlsBusy} onClick={() => perform(async () => download(`${campaign.id}.json`, await request(`/${campaign.id}/export`)))}>Download campaign record</button>
-      <p>The record contains user and tool text. Review it before sharing or dataset use.</p>
-      <p role="status">{campaign.busy || working ? 'Working' : campaign.status.replace(/_/g, ' ')} · {campaign.turns}/{campaign.max_turns} decisions{jobWorking ? ' · Updating remote jobs' : ''}</p>
-      {campaign.error && <p role="alert">The agent step failed: {campaign.error}. Review the recorded activity; no automatic retry was submitted.</p>}
+      <section className="workspace-conversation" aria-label="Campaign conversation">
+        <header className="workspace-conversation-header"><strong>{campaign ? title(campaign) : 'SABLE'}</strong><span role="status" className="workspace-status">{status}</span></header>
+        <div className="workspace-messages">
+          {!campaign && <div className="workspace-welcome"><p className="workspace-eyebrow">From question to discovery</p><h2>What would you like to investigate?</h2><p>Describe your goal in your own words. SABLE will help you choose the next steps and ask for anything missing.</p>
+            <div className="workspace-suggestions" aria-label="Example tasks">{['Compare the properties of these molecules', 'Help me plan a hit-to-lead campaign', 'Screen solvents for my material'].map(example => <button key={example} disabled={controlsBusy} onClick={() => setPrompt(example)}>{example} <span aria-hidden="true">↗</span></button>)}</div>
+          </div>}
+          {campaign?.history?.map((message, index) => message.role === 'user' && message.content ? <article className="workspace-message workspace-message--user" key={index}><strong>You</strong><p>{message.content}</p></article> : message.decision?.name === 'ask_user' && message.decision.arguments.question ? <article className="workspace-message" key={index}><strong>SABLE</strong><p>{message.decision.arguments.question}</p></article> : null)}
+          {campaign?.question && !campaign.history?.some(message => message.decision?.name === 'ask_user' && message.decision.arguments.question === campaign.question) && <article className="workspace-message"><strong>SABLE</strong><p>{campaign.question}</p></article>}
+          {campaign?.report && <article className="workspace-message workspace-report"><strong>SABLE · Campaign report</strong><p>{campaign.report.summary}</p><button onClick={() => setShowDetails(true)}>Explore results and evidence</button></article>}
+          {campaign && !campaign.question && !campaign.report && <p className="workspace-progress" role="status">{working ? 'SABLE is working. You can follow its progress in Campaign details.' : campaign.status === 'waiting_jobs' ? 'Your calculations are running. Results will appear as jobs finish.' : campaign.status === 'ready' ? 'Your campaign is ready. Add any files in Campaign details, or continue when you’re ready.' : status}</p>}
+          {campaign?.error && <p role="alert">The agent step failed: {campaign.error}. Open Activity in Campaign details to review what happened.</p>}
+          <div ref={conversationEnd} />
+        </div>
+        <div className="workspace-composer">
+          {error && <p role="alert">{error}</p>}
+          {capabilityError && <p role="alert">{capabilityError}</p>}
+          {!campaign && <p className="workspace-muted">{capabilities === null ? capabilityError ? 'Capabilities unavailable' : 'Loading capabilities…' : capabilities.some(item => item.available) ? 'Start with a goal, or add files before SABLE begins.' : 'No capabilities are available in this deployment.'}</p>}
+          {!campaign ? <form onSubmit={e => { e.preventDefault(); if (!canStartCampaign || !prompt.trim()) return; perform(async () => run(await request<Campaign>('', { message: prompt.trim() }))) }}>
+            <label htmlFor="agent-prompt">Your research goal</label>
+            <textarea id="agent-prompt" value={prompt} onChange={e => setPrompt(e.target.value)} required maxLength={10000} rows={3} placeholder="What do you want to discover? Include structures, data, or constraints if you have them." disabled={controlsBusy} />
+            <div className="workspace-composer-actions"><button disabled={!canStartCampaign || !prompt.trim()} type="button" onClick={() => perform(async () => {
+              const next = await request<Campaign>('', { message: prompt.trim() }); setCampaign(next); setShowDetails(true); setCampaigns(await request<Campaign[]>())
+            })}>Add files first</button><button className="primary" disabled={!canStartCampaign || !prompt.trim()} type="submit">Start campaign</button></div>
+          </form> : campaign.question ? <form onSubmit={e => { e.preventDefault(); if (!reply.trim() || controlsBusy) return; perform(async () => { const next = await request<Campaign>(`/${campaign.id}/messages`, { message: reply.trim() }); setReply(''); await run(next) }) }}>
+            <label htmlFor="agent-reply">Your reply</label><textarea id="agent-reply" required rows={3} maxLength={10000} value={reply} onChange={e => setReply(e.target.value)} disabled={controlsBusy} placeholder="Add the information SABLE needs…" />
+            <div className="workspace-composer-actions"><button type="button" onClick={() => setShowDetails(true)}>Files and details</button><button className="primary" disabled={controlsBusy || !reply.trim()} type="submit">Send answer</button></div>
+          </form> : campaign.status === 'ready' ? <button className="primary" disabled={controlsBusy || campaign.busy} onClick={() => perform(() => run(campaign))}>Continue campaign</button> : <p className="workspace-muted">{campaign.status === 'completed' ? 'Review your report, explore the results, or start a new campaign.' : status}</p>}
+        </div>
+      </section>
+      <aside id="campaign-details" className="workspace-details" hidden={!showDetails} aria-label="Campaign details">
+        <h2>Campaign details</h2>
+        {!campaign && <details><summary>Settings</summary><p>Model and tool availability are configured for this workspace.</p><a href="/account">Manage account and API credentials</a></details>}
+        {campaign ? <>
+          <details open><summary>Files <span>{campaign.artifacts?.length || 0}</span></summary>
       <div>
-        <h2>Campaign files</h2>
-        <p>Upload OpenFE coordinate files as PDB, SDF, or text, one file at a time (up to 3 MB). The agent receives file names and artifact IDs automatically.</p>
+        
+        <p>Add structures or supporting data as PDB, SDF, or text files. Maximum 3 MB per file.</p>
         <label htmlFor="campaign-artifact">Choose a file to upload </label>
         <input id="campaign-artifact" type="file" accept=".pdb,.sdf,.txt,text/plain" disabled={controlsBusy || !canUpload} onChange={e => {
           const file = e.currentTarget.files?.[0]
@@ -253,9 +267,30 @@ export function NewRunPage() {
           <details><summary>SHA-256</summary><code style={{ overflowWrap: 'anywhere' }}>{artifact.sha256}</code></details>
         </li>)}</ul> : <p>No files uploaded yet.</p>}
       </div>
+          </details>
+          <details open={!!campaign.report}><summary>Results <span>{Object.keys(campaign.results).length}</span></summary>
+            {Object.keys(campaign.results).length === 0 && <p className="workspace-muted">Results will appear as your campaign progresses.</p>}
+            {campaign.report && <p>Report evidence: {campaign.report.evidence.join(', ')}</p>}
+      {Object.entries(campaign.results).map(([id, result]) => <details id={`result-${id}`} key={id} className="workspace-result">
+        <summary>Result {id}</summary>
+        {result.observations !== undefined ? descriptorObservations(result.observations) ? result.observations.map((observation, index) => <div key={index}>
+          <p>{observation.canonical_smiles} · {observation.method} {observation.method_version} · computed</p>
+          <table><thead><tr><th>Property</th><th>Value</th><th>Unit</th></tr></thead><tbody>{observation.values.map(value => <tr key={value.property}><td>{value.property}</td><td>{value.value.toPrecision(6)}</td><td>{value.unit}</td></tr>)}</tbody></table>
+        </div>) : <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(result, null, 2)}</pre> : result.candidates ? <>
+          <p>{result.kind === 'recommendation' ? `Round ${result.round}: ${result.candidates.length} candidates recommended` : `${result.candidates.length} eligible candidates; ${result.exclusions?.length || 0} excluded`}</p>
+          {result.stop_reason && <p>Stopped: {result.stop_reason.replace(/_/g, ' ')}</p>}
+          {result.constraints !== undefined && <details><summary>Enforced constraints</summary><pre>{JSON.stringify(result.constraints, null, 2)}</pre></details>}
+          <table><thead><tr><th>Candidate</th><th>SMILES</th></tr></thead><tbody>{result.candidates.map(candidate => <tr key={candidate.id}><td>{candidate.id}</td><td>{candidate.smiles}</td></tr>)}</tbody></table>
+        </> : result.rankings ? <>
+          <p>{result.evaluated_candidates} of {result.library_size} library candidates evaluated. Rankings describe measured computational objectives.</p>
+          <table><thead><tr><th>Rank</th><th>Pareto front</th><th>SMILES</th><th>Observed objectives</th></tr></thead><tbody>{result.rankings.map(row => <tr key={row.molecule_id}><td>{row.rank ?? 'Unranked'}</td><td>{row.pareto_front ?? '—'}</td><td>{row.smiles}</td><td>{Object.entries(row.objective_values).map(([name, value]) => `${name}: ${value.toPrecision(6)}`).join('; ')}</td></tr>)}</tbody></table>
+        </> : <pre>{JSON.stringify(result, null, 2)}</pre>}
+      </details>)}
+          </details>
+          <details><summary>Jobs <span>{campaign.jobs?.length || 0}</span></summary>
       {(campaign.status === 'waiting_jobs' || !!campaign.jobs?.length) && <div>
-        <h2>Remote jobs</h2>
-        {campaign.status === 'waiting_jobs' && <p>Waiting for remote work. Due active jobs are checked one at a time, at most once every 5 seconds, with a 30-second pause after errors. These checks do not consume model decisions. When ready, use Continue campaign to resume.</p>}
+        
+        {campaign.status === 'waiting_jobs' && <p>Jobs update automatically. When they finish, continue the campaign to review the results.</p>}
         <p>Cancellation requests may be unsupported or may remain pending. A timeout does not confirm that remote work stopped.</p>
         {jobError && <p role="alert">{jobError}</p>}
         {!campaign.jobs?.length && <p>No remote jobs recorded yet.</p>}
@@ -284,32 +319,15 @@ export function NewRunPage() {
           </form>}
         </article>)}
       </div>}
-      {campaign.status === 'ready' && <button className="primary" disabled={controlsBusy || campaign.busy} onClick={() => perform(() => run(campaign))}>Continue campaign</button>}
-      {campaign.question && <form className="new-run__form prompt-run__form" onSubmit={e => { e.preventDefault(); perform(async () => {
-        const next = await request<Campaign>(`/${campaign.id}/messages`, { message: reply }); setReply(''); await run(next)
-      }) }}>
-        <p>{campaign.question}</p><label htmlFor="agent-reply">Your answer</label><br />
-        <textarea id="agent-reply" required maxLength={10000} value={reply} onChange={e => setReply(e.target.value)} disabled={controlsBusy} />
-        <button disabled={controlsBusy || !reply.trim()} type="submit">Send answer</button>
-      </form>}
-      {campaign.report && <div><h2>Report</h2><p style={{ whiteSpace: 'pre-wrap' }}>{campaign.report.summary}</p>
-        <p>Evidence: {campaign.report.evidence.map(id => <a key={id} href={`#result-${id}`} style={{ marginRight: 12 }}>{id}</a>)}</p></div>}
-      {Object.entries(campaign.results).map(([id, result]) => <div id={`result-${id}`} key={id}>
-        <h3>Result {id}</h3>
-        {result.observations !== undefined ? descriptorObservations(result.observations) ? result.observations.map((observation, index) => <div key={index}>
-          <p>{observation.canonical_smiles} · {observation.method} {observation.method_version} · computed</p>
-          <table><thead><tr><th>Property</th><th>Value</th><th>Unit</th></tr></thead><tbody>{observation.values.map(value => <tr key={value.property}><td>{value.property}</td><td>{value.value.toPrecision(6)}</td><td>{value.unit}</td></tr>)}</tbody></table>
-        </div>) : <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(result, null, 2)}</pre> : result.candidates ? <>
-          <p>{result.kind === 'recommendation' ? `Round ${result.round}: ${result.candidates.length} candidates recommended` : `${result.candidates.length} eligible candidates; ${result.exclusions?.length || 0} excluded`}</p>
-          {result.stop_reason && <p>Stopped: {result.stop_reason.replace(/_/g, ' ')}</p>}
-          {result.constraints !== undefined && <details><summary>Enforced constraints</summary><pre>{JSON.stringify(result.constraints, null, 2)}</pre></details>}
-          <table><thead><tr><th>Candidate</th><th>SMILES</th></tr></thead><tbody>{result.candidates.map(candidate => <tr key={candidate.id}><td>{candidate.id}</td><td>{candidate.smiles}</td></tr>)}</tbody></table>
-        </> : result.rankings ? <>
-          <p>{result.evaluated_candidates} of {result.library_size} library candidates evaluated. Rankings describe measured computational objectives.</p>
-          <table><thead><tr><th>Rank</th><th>Pareto front</th><th>SMILES</th><th>Observed objectives</th></tr></thead><tbody>{result.rankings.map(row => <tr key={row.molecule_id}><td>{row.rank ?? 'Unranked'}</td><td>{row.pareto_front ?? '—'}</td><td>{row.smiles}</td><td>{Object.entries(row.objective_values).map(([name, value]) => `${name}: ${value.toPrecision(6)}`).join('; ')}</td></tr>)}</tbody></table>
-        </> : <pre>{JSON.stringify(result, null, 2)}</pre>}
-      </div>)}
-      <h2>Activity timeline</h2>
+          </details>
+          <details><summary>Settings and usage</summary>
+            <p>Model: {campaign.model || 'Not selected yet'}</p><p>Decisions: {campaign.turns}/{campaign.max_turns}</p>
+            {campaign.metrics && <p>Tool actions: {campaign.metrics.tool_actions}/{campaign.metrics.max_tool_actions}<br />Operation units: {campaign.metrics.operation_units}/{campaign.metrics.max_operation_units}<br />Tokens: {campaign.metrics.input_tokens.toLocaleString()} input / {campaign.metrics.output_tokens.toLocaleString()} output</p>}
+            <a href="/account">Manage account and API credentials</a>
+            <details><summary>Pinned skills</summary>{campaign.skills?.map(skill => <p key={skill.id}>{skill.id} · {skill.version}<br /><code>{skill.digest}</code></p>)}</details>
+          </details>
+          <details><summary>Activity <span>{events.length}</span></summary>
+      
       <label htmlFor="trace-category">Category </label><select id="trace-category" value={traceFilter} onChange={e => setTraceFilter(e.target.value)}>
         {['all', 'model', 'tool', 'job', 'file', 'campaign'].map(group => <option key={group} value={group}>{group}</option>)}
       </select>{' '}
@@ -322,6 +340,18 @@ export function NewRunPage() {
           {campaign.results[event.action] && <a href={`#result-${event.action}`}>View result</a>}
         </details>)}
       {fullEvent && <section aria-label="Full event"><h3>{fullEvent.kind} · {fullEvent.action}</h3><button onClick={() => setFullEvent(null)}>Close event</button><pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(fullEvent.payload, null, 2)}</pre></section>}
-    </section>}
+          </details>
+          <details><summary>Export campaign</summary><p>Download the full record, including results and activity. Review user and tool text before sharing or dataset use.</p><button disabled={controlsBusy} onClick={() => perform(async () => download(`${campaign.id}.json`, await request(`/${campaign.id}/export`)))}>Download campaign record</button></details>
+        </> : <p className="workspace-muted">Start with a goal. You can add files before running and review results here as the campaign progresses.</p>}
+    <details><summary>{capabilities === null ? capabilityError ? 'Capabilities unavailable' : 'Loading capabilities…' : `Available capabilities (${capabilities.filter(c => c.available).length})`}</summary>
+      {capabilities !== null && !capabilities.some(c => c.available) && <p>No capabilities are available in this deployment.</p>}
+      {capabilities?.map(c => <article key={`${c.id}@${c.version}`}><h3>{c.id} · {c.version}</h3>
+        <p>{c.description}</p><p>{c.available ? 'Available for new campaigns' : c.resumable ? 'Retained for existing campaigns' : 'Unavailable: check deployment requirements'}</p>
+        <ul>{c.operations.map(op => <li key={op.id}>{op.id}: {op.description}</li>)}</ul>
+        <details><summary>Requirements and package identity</summary><pre>{JSON.stringify({ requirements: c.requirements, digest: c.digest }, null, 2)}</pre></details>
+      </article>)}
+    </details>
+      </aside>
+    </div>
   </section>
 }
