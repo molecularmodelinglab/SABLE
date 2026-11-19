@@ -205,7 +205,6 @@ export function NewRunPage() {
 
   return <section className="campaign-page science-workspace">
     <header className="workspace-header">
-      <div><p className="workspace-eyebrow">Campaign workspace</p><h1>{campaign ? 'Your campaign' : 'Start a campaign'}</h1></div>
       <button aria-expanded={showDetails} aria-controls="campaign-details" onClick={() => setShowDetails(value => !value)}>{showDetails ? 'Hide details' : 'Campaign details'}</button>
     </header>
     <div className={`workspace-layout${showDetails ? ' workspace-layout--details' : ''}`}>
@@ -221,7 +220,7 @@ export function NewRunPage() {
       <section className="workspace-conversation" aria-label="Campaign conversation">
         <header className="workspace-conversation-header"><strong>{campaign ? title(campaign) : 'SABLE'}</strong><span role="status" className="workspace-status">{status}</span></header>
         <div className="workspace-messages">
-          {!campaign && <div className="workspace-welcome"><p className="workspace-eyebrow">From question to discovery</p><h2>What would you like to investigate?</h2><p>Describe your goal in your own words. SABLE will help you choose the next steps and ask for anything missing.</p>
+          {!campaign && <div className="workspace-welcome"><h2>What would you like to investigate?</h2><p>Describe your goal in your own words. SABLE will help you choose the next steps and ask for anything missing.</p>
             <div className="workspace-suggestions" aria-label="Example tasks">{['Compare the properties of these molecules', 'Help me plan a hit-to-lead campaign', 'Screen solvents for my material'].map(example => <button key={example} disabled={controlsBusy} onClick={() => setPrompt(example)}>{example} <span aria-hidden="true">↗</span></button>)}</div>
           </div>}
           {campaign?.history?.map((message, index) => message.role === 'user' && message.content ? <article className="workspace-message workspace-message--user" key={index}><strong>You</strong><p>{message.content}</p></article> : message.decision?.name === 'ask_user' && message.decision.arguments.question ? <article className="workspace-message" key={index}><strong>SABLE</strong><p>{message.decision.arguments.question}</p></article> : null)}

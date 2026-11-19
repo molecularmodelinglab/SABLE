@@ -2644,7 +2644,7 @@ button.secondary:hover:not(:disabled) {
 
 /* Conversation workspace: keep supporting information out of the reading flow. */
 .science-workspace { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-.workspace-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.workspace-header { display: flex; align-items: center; justify-content: flex-end; gap: 16px; }
 .workspace-header h1 { margin: 0; font-size: 1.6rem; }
 .workspace-eyebrow { margin: 0 0 6px; color: var(--old-well-basin); font-size: .75rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .workspace-layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 20px; align-items: start; }
