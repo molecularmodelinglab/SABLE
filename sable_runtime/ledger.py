@@ -12,7 +12,7 @@ class LedgerError(RuntimeError):
 
 
 class SQLiteConnection(sqlite3.Connection):
-    """Local transaction support for isolated tests and import sources."""
+    """Local transaction support for isolated tests."""
     write = False
 
     def begin_write(self):
