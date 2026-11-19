@@ -19,6 +19,9 @@ async function view(scenario) {
     if (name === 'react') return react
     if (name === 'react/jsx-runtime') return { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) }
     if (name === '../hooks/useAuthProfile') return { useAuthProfile: () => ({ data: null }) }
+    if (name === '../components/campaign/CampaignResult') return { CampaignResult: 'CampaignResult' }
+    if (name === '../components/StructureViewer') return { StructureViewer: 'StructureViewer' }
+    if (name === '../components/campaign/presentation') return { readable: value => value.replace(/_/g, ' '), present: value => ({ title: 'Molecular properties' }) }
     if (name === '../api') return { API_BASE: '', getAccessToken: () => 'test-token' }
     throw Error(name)
   }, fetch: async (url, options) => {
