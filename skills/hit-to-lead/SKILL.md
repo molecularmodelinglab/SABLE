@@ -18,3 +18,5 @@ A typical campaign is:
 One to three rounds with a batch of two or three is a useful first campaign. Every HEALER call costs two operation units; each RDKit or BayBE call costs one. Loading instructions and clarifications consume model decisions. Reserve an operation for final ranking and a model decision for the report. Do not enumerate repeatedly to evade a library's fixed round limit.
 
 If the constrained library is empty, explain that outcome and ask whether the user wants to revise constraints. If no installed tool measures a requested endpoint, state the gap and ask how to proceed. The workflow does not require a fixed sequence when the user's task only needs a subset of these capabilities.
+
+For a named starting compound, load the available `name-to-smiles` skill and resolve the name before asking the user for SMILES. Use the exact returned structure only for a single resolved match; retain its PubChem CID and source action as evidence. Ask for clarification for ambiguous matches, unresolved names, or a salt/mixture that the next operation cannot accept. Never infer stereochemistry or strip components silently.
