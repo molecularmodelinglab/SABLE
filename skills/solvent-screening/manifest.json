@@ -1,0 +1,291 @@
+{
+  "schema_version": 1,
+  "id": "solvent-screening",
+  "version": "1.0.0",
+  "description": "Screen sourced Hansen solvent parameters against an explicit target sphere; report compatibility estimates and exclusions.",
+  "operations": [
+    {
+      "id": "screen",
+      "handler": "screen",
+      "description": "Rank up to 64 supplied solvent candidates by Hansen distance and RED, retaining provenance.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "delta_d": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "delta_p": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "delta_h": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "source": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "delta_d",
+              "delta_p",
+              "delta_h",
+              "source"
+            ]
+          },
+          "radius": {
+            "type": "number",
+            "minimum": 1e-06,
+            "maximum": 100
+          },
+          "radius_source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "temperature_k": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 2000
+          },
+          "candidates": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9_-]{1,64}$"
+                },
+                "delta_d": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "delta_p": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "delta_h": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "source": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                }
+              },
+              "required": [
+                "id",
+                "delta_d",
+                "delta_p",
+                "delta_h",
+                "source"
+              ]
+            }
+          },
+          "excluded_ids": {
+            "type": "array",
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]{1,64}$"
+            }
+          }
+        },
+        "required": [
+          "target",
+          "radius",
+          "radius_source",
+          "temperature_k",
+          "candidates"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "solvent_screen"
+          },
+          "method": {
+            "const": "Hansen distance"
+          },
+          "method_version": {
+            "const": "1"
+          },
+          "parameter_unit": {
+            "const": "MPa^0.5"
+          },
+          "temperature_k": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 2000
+          },
+          "target": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "delta_d": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "delta_p": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "delta_h": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "source": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "delta_d",
+              "delta_p",
+              "delta_h",
+              "source"
+            ]
+          },
+          "radius": {
+            "type": "number",
+            "minimum": 1e-06,
+            "maximum": 100
+          },
+          "radius_source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "ranking": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9_-]{1,64}$"
+                },
+                "distance": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "relative_energy_difference": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "sphere_position": {
+                  "enum": [
+                    "inside",
+                    "boundary",
+                    "outside"
+                  ]
+                },
+                "parameters": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z0-9_-]{1,64}$"
+                    },
+                    "delta_d": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    "delta_p": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    "delta_h": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    "source": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "delta_d",
+                    "delta_p",
+                    "delta_h",
+                    "source"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "distance",
+                "relative_energy_difference",
+                "sphere_position",
+                "parameters"
+              ]
+            }
+          },
+          "excluded_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]{1,64}$"
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          }
+        },
+        "required": [
+          "kind",
+          "method",
+          "method_version",
+          "parameter_unit",
+          "temperature_k",
+          "target",
+          "radius",
+          "radius_source",
+          "ranking",
+          "excluded_ids",
+          "limitations"
+        ]
+      },
+      "budget_units": 1
+    }
+  ]
+}
