@@ -1,0 +1,20 @@
+{
+  "healer-api": {
+    "endpoint_env": "HEALER_ENDPOINT"
+  },
+  "stoplight": {
+    "endpoint_env": "STOPLIGHT_URL"
+  },
+  "boltz": {
+    "credential_env": "BOLTZ_API_TOKEN",
+    "endpoint_env": "BOLTZ_BASE_URL"
+  },
+  "openfe": {
+    "credential_env": "OPENFE_API_TOKEN",
+    "endpoint_env": "OPENFE_BASE_URL"
+  },
+  "boltz-platform": {
+    "transport": "sdk",
+    "credential_provider": "boltz_platform"
+  }
+}

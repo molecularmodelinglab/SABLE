@@ -18,7 +18,7 @@ class ExecutionError(RuntimeError):
 
 @dataclass(frozen=True)
 class ServiceBinding:
-    endpoint: str
+    endpoint: str | None
     credential: str | None = None
 
 
