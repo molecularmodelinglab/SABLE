@@ -2711,3 +2711,30 @@ button.secondary:hover:not(:disabled) {
   .workspace-conversation-header, .workspace-composer { padding: 16px; }
   .workspace-details { max-height: none; }
 }
+
+.campaign-result-card { border: 1px solid var(--panel-border); border-radius: 10px; padding: 20px; background: var(--white); min-width: 0; scroll-margin: 20px; }
+.campaign-result-card > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.campaign-result-card h3, .campaign-result-card h4 { margin: 0 0 10px; }
+.campaign-result-card > header p { margin: 0 0 4px; }
+.campaign-result-card > section { margin-top: 18px; min-width: 0; }
+.campaign-result-card > footer { margin: 20px 0 8px; }
+.campaign-result-card--expanded { border: none; }
+.campaign-result-dialog { width: 90vw; max-width: 1500px; max-height: 90vh; padding: 0; border: 1px solid var(--panel-border); border-radius: 12px; }
+.campaign-result-dialog::backdrop { background: rgba(0,0,0,.4); }
+.campaign-result-card--expanded > header { position: sticky; top: -20px; background: var(--white); padding: 12px 0; z-index: 1; }
+.campaign-result-toolbar, .campaign-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0; font-size: .85rem; }
+.campaign-result-toolbar select { max-width: min(300px, 100%); }
+.campaign-molecule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 12px; margin-top: 12px; }
+.campaign-chart { margin: 0; min-width: 0; }
+.campaign-chart figcaption { font-size: .85rem; margin-bottom: 12px; }
+.campaign-inline-activity, .campaign-inline-jobs { padding: 12px 16px; border: 1px solid var(--panel-border); border-radius: 8px; }
+.workspace-report nav { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+.workspace-report a { text-decoration: underline; }
+.workspace-messages > * { flex-shrink: 0; }
+.campaign-budget-request { display: grid; gap: 12px; }
+.campaign-budget-request input { display: block; width: 100%; }
+@media (max-width: 760px) {
+  .campaign-result-card { padding: 14px; }
+  .campaign-result-card > header { flex-wrap: wrap; }
+  .campaign-result-card--expanded { inset: 2vh 2vw 10vh; }
+}
