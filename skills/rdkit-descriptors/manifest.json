@@ -8,7 +8,7 @@
       "id": "calculate",
       "handler": "calculate",
       "budget_units": 1,
-      "description": "Calculate requested descriptors for up to 32 single-component molecular structures.",
+      "description": "Calculate requested descriptors for up to 32 explicit molecular structures or 100 recorded candidates.",
       "input_schema": {
         "type": "object",
         "additionalProperties": false,
@@ -72,7 +72,7 @@
               "maxLength": 64
             },
             "minItems": 1,
-            "maxItems": 32,
+            "maxItems": 100,
             "uniqueItems": true
           }
         },

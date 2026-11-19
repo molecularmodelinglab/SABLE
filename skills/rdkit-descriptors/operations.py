@@ -14,8 +14,8 @@ def calculate(inputs, context):
         library_id = inputs['source_action_id'] if source['kind'] == 'candidate_library' else source['library_action_id']
         by_id = {c['id']: c for c in source['candidates']}
         ids = inputs.get('candidate_ids', list(by_id))
-        if not ids or len(ids) > 32 or not set(ids) <= by_id.keys():
-            raise ValueError('Select one to 32 candidates from the recorded source')
+        if not ids or len(ids) > 100 or not set(ids) <= by_id.keys():
+            raise ValueError('Select one to 100 candidates from the recorded source')
         selected = [by_id[i] for i in ids]
         smiles_inputs = [c['smiles'] for c in selected]
     else:
