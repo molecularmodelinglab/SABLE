@@ -1,5 +1,6 @@
 """Bounded native tool calling with explicit provider construction."""
 import json
+import os
 from hashlib import sha256
 from typing import Any, Literal
 from pydantic import Field
@@ -58,15 +59,16 @@ AGENT_SPEC = sha256((SYSTEM + json.dumps(TOOLS, sort_keys=True)).encode()).hexdi
 
 
 class OpenAIModel:
-    def __init__(self, *, api_key, model, base_url=None, client=None):
+    def __init__(self, *, api_key, model, base_url=None, client=None, provider='openai', token_parameter='max_completion_tokens'):
         if not api_key or not model:
-            raise ValueError('V2 requires an OpenAI API key and model')
+            raise ValueError('A model and provider API key are required')
         if client is None:
             from openai import OpenAI
             client = OpenAI(api_key=api_key, base_url=base_url, timeout=30, max_retries=0)
         self.client, self.model, self.api_key = client, model, api_key
+        self.token_parameter = token_parameter
         endpoint_hash = sha256((base_url or 'https://api.openai.com/v1').encode()).hexdigest()[:12]
-        self.identity = f'openai:{model}:{endpoint_hash}'
+        self.identity = f'{provider}:{model}:{endpoint_hash}'
 
     def close(self):
         self.client.close()
@@ -75,7 +77,7 @@ class OpenAIModel:
         response = self.client.chat.completions.create(
             model=self.model, messages=[{'role': 'system', 'content': SYSTEM},
                                        {'role': 'user', 'content': json.dumps(context, allow_nan=False)}],
-            tools=TOOLS, tool_choice='required', parallel_tool_calls=False, max_completion_tokens=2000)
+            tools=TOOLS, tool_choice='required', parallel_tool_calls=False, **{self.token_parameter: 2000})
         message = response.choices[0].message
         calls = message.tool_calls or []
         if len(calls) != 1:
@@ -88,3 +90,25 @@ class OpenAIModel:
         return Decision(name=call.name, arguments=arguments,
                         usage={} if usage is None else {'input_tokens': usage.prompt_tokens,
                                                        'output_tokens': usage.completion_tokens})
+
+
+class GeminiModel(OpenAIModel):
+    """Use Gemini's OpenAI-compatible endpoint for bounded tool decisions."""
+    def __init__(self, *, api_key, model, client=None):
+        super().__init__(api_key=api_key, model=model, client=client, provider='gemini',
+                         base_url='https://generativelanguage.googleapis.com/v1beta/openai/',
+                         token_parameter='max_tokens')
+
+
+def create_agent_model(config=None):
+    """Select a tool-calling client from the application's provider settings."""
+    config = os.environ if config is None else config
+    provider = (config.get('LLM_PROVIDER') or 'gemini').strip().lower()
+    if provider == 'openai':
+        return OpenAIModel(api_key=config.get('OPENAI_API_KEY'),
+                           model=config.get('OPENAI_MODEL') or 'gpt-5-chat',
+                           base_url=config.get('OPENAI_URL') or None)
+    if provider == 'gemini':
+        return GeminiModel(api_key=config.get('GOOGLE_API_KEY'),
+                           model=config.get('GEMINI_MODEL') or 'gemini-2.5-pro')
+    raise ValueError('Unsupported LLM_PROVIDER; supported providers are openai and gemini')

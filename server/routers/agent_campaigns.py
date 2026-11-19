@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import Field
 from sable_runtime.contracts import Contract
 from sable_runtime.campaigns import CampaignConflict, CampaignService
-from sable_runtime.agent_model import OpenAIModel
+from sable_runtime.agent_model import create_agent_model
 from sable_runtime.ledger import Ledger
 from sable_runtime.registry import SkillRegistry
 from sable_runtime.jobs import JobConflict
@@ -31,9 +31,9 @@ class ArtifactInput(Contract):
 @lru_cache(maxsize=1)
 def _configured_service(revision=None):
     """Return the configured campaign service."""
-    path = Path(os.environ.get('SABLE_V2_LEDGER_PATH', ''))
+    path = Path(os.environ.get('SABLE_LEDGER_PATH', ''))
     if not path.is_absolute():
-        raise HTTPException(503, 'Configure an absolute SABLE_V2_LEDGER_PATH on a durable local volume')
+        raise HTTPException(503, 'Configure an absolute SABLE_LEDGER_PATH on a durable local volume')
     path.parent.mkdir(parents=True, exist_ok=True)
     root = Path(__file__).resolve().parents[2] / 'skills'
     services, credentials = load_services(os.getenv('SABLE_SERVICE_BINDINGS_PATH'))
@@ -43,8 +43,8 @@ def _configured_service(revision=None):
 
 
 def configured_service():
-    if os.getenv('SABLE_V2_ENABLED') != '1':
-        raise HTTPException(503, 'V2 campaigns are not enabled on this deployment')
+    if os.getenv('SABLE_AGENT_ENABLED') != '1':
+        raise HTTPException(503, 'Agent campaigns are not enabled on this deployment')
     try:
         return _configured_service(deployment_revision())
     except (ValueError, OSError):
@@ -53,10 +53,9 @@ def configured_service():
 
 def configured_model():
     try:
-        return OpenAIModel(api_key=os.getenv('OPENAI_API_KEY'), model=os.getenv('SABLE_V2_MODEL'),
-                           base_url=os.getenv('OPENAI_URL') or None)
+        return create_agent_model()
     except Exception:
-        raise HTTPException(503, 'Configure OPENAI_API_KEY and SABLE_V2_MODEL for v2 tool calling') from None
+        raise HTTPException(503, 'Configure LLM_PROVIDER and its model and API key settings for tool calling') from None
 
 
 def make_router(user_dependency, service_dependency=configured_service, model_factory=configured_model):
