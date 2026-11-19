@@ -92,7 +92,7 @@ def test_durable_enqueue_then_drive_uses_service_credential(api, tmp_path):
     ledger.create_campaign('campaign', 'alice', Budget(max_actions=2, max_units=4))
     now = [100.0]
     services = {'healer-api': ServiceBinding('https://healer.example', credential='healer-token')}
-    credentials = Mock(return_value=SecretStr('test-service-secret'))
+    credentials = Mock(spec=lambda owner, reference: None, return_value=SecretStr('test-service-secret'))
     jobs = JobManager(ledger, registry, services=services, credentials=credentials, clock=lambda: now[0])
     executor = Executor(registry, ledger, grants={'alice': {('healer-api', '1.0.0', 'enumerate')}},
                         services=services, jobs=jobs)

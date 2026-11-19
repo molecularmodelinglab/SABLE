@@ -57,7 +57,7 @@ def no_network(monkeypatch):
 def test_packages_install_and_every_schema_is_closed(skill):
     registry = SkillRegistry()
     registry.install(ROOT / skill)
-    package = registry.get(skill, '1.0.0')
+    package = registry.get(skill, manifest(skill)['version'])
     assert 'remote.py' in package.files
     assert package.manifest.requirements.services == [skill]
     def walk(value):
@@ -80,17 +80,24 @@ def test_http_single_attempt_bounded_and_sanitized(skill, monkeypatch):
     def respond(request):
         calls.append(request)
         return httpx.Response(503, text='private-fixture-token')
-    def client(**kwargs):
-        settings.append(kwargs)
-        kwargs['transport'].close()
-        kwargs['transport'] = httpx.MockTransport(respond)
-        return real_client(**kwargs)
+    class client(real_client):
+        def __init__(self, **kwargs):
+            settings.append(kwargs.copy())
+            kwargs['transport'].close()
+            kwargs['transport'] = httpx.MockTransport(respond)
+            super().__init__(**kwargs)
     monkeypatch.setattr(remote.httpx, 'Client', client)
     with pytest.raises(RuntimeError) as error:
-        remote._request(context(), 'POST', '/submit', json={})
+        if skill == 'boltz-platform':
+            remote._call(context(), 'retrieve', 'job-a')
+        else:
+            remote._request(context(), 'POST', '/submit', json={})
     assert len(calls) == 1
     assert 'private-fixture-token' not in str(error.value)
-    assert calls[0].headers['Authorization'] == 'Bearer private-fixture-token'
+    if skill == 'boltz-platform':
+        assert calls[0].headers['x-api-key'] == 'private-fixture-token'
+    else:
+        assert calls[0].headers['Authorization'] == 'Bearer private-fixture-token'
     assert settings[0]['follow_redirects'] is False
     assert settings[0]['timeout'].connect == 5
     assert settings[0]['timeout'].read == 20
@@ -131,9 +138,9 @@ def screen_row(**kwargs):
 def test_platform_request_and_scientific_semantics(monkeypatch):
     remote = module('boltz-platform')
     request = Mock(side_effect=[{'id': 'job-a'}, {'status': 'succeeded'}, {'data': [screen_row()], 'has_more': False}])
-    monkeypatch.setattr(remote, '_request', request)
+    monkeypatch.setattr(remote, '_call', request)
     assert remote.submit(screen_payload(), context()) == {'remote_id': 'job-a'}
-    assert request.call_args.kwargs['json']['target']['entities'][0]['value'] == 'MKTV'
+    assert request.call_args.kwargs['target']['entities'][0]['value'] == 'MKTV'
     output = validate('boltz-platform', 'screen', remote.poll('job-a', screen_payload(), context()))
     metrics = output['result']['measurements'][0]['metrics']
     assert metrics == {'optimization_score': 4.2, 'complex_plddt': 0.91}
@@ -145,7 +152,7 @@ def test_platform_request_and_scientific_semantics(monkeypatch):
                                 screen_row(metrics={'optimization_score': float('nan')})])
 def test_platform_rejects_identity_and_invalid_metrics(row, monkeypatch):
     remote = module('boltz-platform')
-    monkeypatch.setattr(remote, '_request', Mock(side_effect=[{'status': 'succeeded'}, {'data': [row], 'has_more': False}]))
+    monkeypatch.setattr(remote, '_call', Mock(side_effect=[{'status': 'succeeded'}, {'data': [row], 'has_more': False}]))
     with pytest.raises(ValueError):
         remote.poll('job-a', screen_payload(), context())
 
@@ -154,7 +161,7 @@ def test_platform_pagination_is_bounded_and_cancel_requires_confirmation(monkeyp
     remote = module('boltz-platform')
     request = Mock(side_effect=[{'status': 'succeeded'}, {'data': [], 'has_more': True, 'last_id': 'one'},
                                {'data': [], 'has_more': True, 'last_id': 'two'}])
-    monkeypatch.setattr(remote, '_request', request)
+    monkeypatch.setattr(remote, '_call', request)
     with pytest.raises(ValueError, match='bounds'):
         remote.poll('job-a', screen_payload(), context())
     assert request.call_count == 3
