@@ -5,4 +5,5 @@ runtime_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 exec docker run --rm --network none --tmpfs /tmp \
   --mount "type=bind,src=$runtime_root/ui/src,dst=/workspace/ui/src,readonly" \
   --mount "type=bind,src=$runtime_root/tests/runtime/check-campaign-ui.cjs,dst=/tmp/check-campaign-ui.cjs,readonly" \
-  sable-agent-ui-tests sh -c './node_modules/.bin/tsc --noEmit && npm run build && node /tmp/check-campaign-ui.cjs'
+  --mount "type=bind,src=$runtime_root/tests/runtime/check-campaign-availability.cjs,dst=/tmp/check-campaign-availability.cjs,readonly" \
+  sable-agent-ui-tests sh -c './node_modules/.bin/tsc --noEmit && npm run build && node /tmp/check-campaign-ui.cjs && node /tmp/check-campaign-availability.cjs'
