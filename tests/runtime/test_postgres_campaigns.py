@@ -79,6 +79,28 @@ def test_campaign_roundtrip_and_owner_isolation(storage):
         assert db.execute('SELECT count(*) FROM campaign_artifacts').fetchone()[0] == 0
 
 
+def test_permanent_campaign_deletion(storage):
+    ledger, alice, bob = storage
+    campaigns = service(ledger)
+    campaign = campaigns.create(alice, 'Remove these results')['id']
+    other = campaigns.create(bob, 'Keep these results')['id']
+    campaigns.artifacts.put(campaign, alice, 'input.txt', '1,2,3')
+    model = ScriptedModel([
+        decision('load_skill', skill_id='dataset-summary'),
+        decision('execute_operation', skill_id='dataset-summary', operation_id='summarize', inputs={'values': [1, 2, 3], 'unit': 'count'}),
+    ])
+    campaigns.advance(campaign, alice, model)
+    campaigns.advance(campaign, alice, model)
+    with pytest.raises(PermissionError):
+        campaigns.delete(campaign, bob)
+    campaigns.delete(campaign, alice)
+    assert campaigns.list(alice) == []
+    assert campaigns.get(other, bob)['id'] == other
+    with ledger.connect() as db:
+        for table in ('actions', 'events', 'remote_jobs', 'campaign_artifacts'):
+            assert db.execute(f'SELECT count(*) FROM {table} WHERE campaign=?', (campaign,)).fetchone()[0] == 0
+
+
 def test_concurrent_claims_cannot_overspend(storage):
     ledger, alice, _ = storage
     ledger.create_campaign('budget', alice, Budget(max_actions=1, max_units=1))

@@ -8,7 +8,7 @@ const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKi
 
 async function view(scenario) {
   const state = [], effects = [], refs = []; if (scenario.campaign) state[1] = scenario.campaign
-  let index = 0, pending = [], dirty = false, tree; const posts = [], timers = []
+  let index = 0, pending = [], dirty = false, tree; const posts = [], deletes = [], timers = []
   const react = {
     useState(value) { const i = index++; if (!(i in state)) state[i] = value; return [state[i], value => { state[i] = typeof value === 'function' ? value(state[i]) : value; dirty = true }] },
     useRef(value) { return refs[index++] ||= { current: value } },
@@ -25,20 +25,21 @@ async function view(scenario) {
     if (name === '../api') return { API_BASE: '', getAccessToken: () => 'test-token' }
     throw Error(name)
   }, fetch: async (url, options) => {
+    if (options.method === 'DELETE') { deletes.push(url); return { ok: !scenario.deleteError, status: scenario.deleteError ? 409 : 200, json: async () => scenario.deleteError ? { detail: scenario.deleteError } : { deleted: true } } }
     if (options.method === 'POST') { posts.push({ url, body: JSON.parse(options.body) }); return { ok: true, json: async () => scenario.nextCampaign || scenario.campaign } }
     if (url.endsWith('/capabilities')) {
       if (scenario.loading) return new Promise(() => {})
       return { ok: !scenario.status, status: scenario.status || 200, json: async () => scenario.status ? { detail: scenario.detail || 'Not Found' } : scenario.catalog }
     }
     if (url.includes('/events')) return { ok: true, json: async () => [] }
-    return { ok: true, json: async () => url === '/v2/campaigns' ? [] : scenario.nextCampaign || scenario.campaign }
+    return { ok: true, json: async () => url === '/v2/campaigns' ? (scenario.campaigns || []) : scenario.nextCampaign || scenario.campaign }
   } })
   function render() { index = 0; dirty = false; tree = exports.NewRunPage(); const tasks = pending; pending = []; tasks.forEach(fn => fn()) }
   async function settle() { for (let n = 0; n < 20; n++) { await Promise.resolve(); if (dirty) render() } }
   function nodes(node) { if (arguments.length === 0) node = tree; if (!node || typeof node !== 'object') return []; if (Array.isArray(node)) return node.flatMap(n => nodes(n)); return [node, ...nodes(node.props?.children || [])] }
   function text(node) { if (arguments.length === 0) node = tree; if (node == null || typeof node === 'boolean') return ''; if (typeof node !== 'object') return String(node); if (Array.isArray(node)) return node.map(n => text(n)).join(' '); return text(node.props?.children || '') }
   render(); await settle()
-  return { nodes, text, posts, async tick() { for (const fn of timers) await fn(); await settle() }, async click(label) { const button = nodes().find(node => node.type === 'button' && text(node).replace(/\s+/g, ' ').trim() === label.replace(/\s+/g, ' ').trim()); assert.ok(button, label); button.props.onClick(); await settle() } }
+  return { nodes, text, posts, deletes, async remove() { nodes().find(node => node.props?.title === 'Delete campaign').props.onClick(); await settle() }, async tick() { for (const fn of timers) await fn(); await settle() }, async click(label) { const button = nodes().find(node => node.type === 'button' && text(node).replace(/\s+/g, ' ').trim() === label.replace(/\s+/g, ' ').trim()); assert.ok(button, label); button.props.onClick(); await settle() } }
 
 }
 
@@ -81,5 +82,21 @@ async function view(scenario) {
   const pausing = await view({ catalog, campaign: { ...drafted, execution_mode: 'running' }, nextCampaign: { ...drafted, execution_mode: 'paused' } })
   await pausing.click('Pause campaign')
   assert.match(pausing.posts[0].url, /\/pause$/); assert.match(pausing.text(), /Resume campaign/)
+  const deleting = await view({ catalog, campaign: drafted, campaigns: [drafted] })
+  await deleting.remove()
+  assert.equal(deleting.deletes.length, 0)
+  assert.match(deleting.text(), /This cannot be undone/)
+  await deleting.click('Delete campaign')
+  assert.deepEqual(deleting.deletes, ['/v2/campaigns/test-campaign'])
+  assert.match(deleting.text(), /What would you like to investigate/)
+  assert.equal(deleting.nodes().filter(node => node.props?.title === 'Delete campaign').length, 0)
+  const cancelled = await view({ catalog, campaign: drafted, campaigns: [drafted] })
+  await cancelled.remove(); await cancelled.click('Cancel'); assert.equal(cancelled.deletes.length, 0)
+  assert.doesNotMatch(cancelled.text(), /This cannot be undone/)
+  const rejected = await view({ catalog, campaign: drafted, campaigns: [drafted], deleteError: 'Pause the campaign first' })
+  await rejected.remove(); await rejected.click('Delete campaign')
+  assert.match(rejected.text(), /Pause the campaign first/)
+  assert.match(rejected.text(), /This cannot be undone/)
+  assert.equal(rejected.nodes().filter(node => node.props?.title === 'Delete campaign').length, 1)
   console.log('PASS: collapsed details, example prompts, single conversation composer, durable question history, and report access.')
 })().catch(error => { console.error(error); process.exitCode = 1 })

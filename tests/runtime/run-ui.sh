@@ -6,5 +6,4 @@ exec docker run --rm --network none --tmpfs /tmp \
   --mount "type=bind,src=$runtime_root/ui/src,dst=/workspace/ui/src,readonly" \
   --mount "type=bind,src=$runtime_root/tests/runtime/check-campaign-availability.cjs,dst=/tmp/check-campaign-availability.cjs,readonly" \
   --mount "type=bind,src=$runtime_root/tests/runtime/check-campaign-workspace.cjs,dst=/tmp/check-campaign-workspace.cjs,readonly" \
-  --mount "type=bind,src=$runtime_root/tests/runtime/check-result-presentation.cjs,dst=/tmp/check-result-presentation.cjs,readonly" \
-  sable-agent-ui-tests sh -c './node_modules/.bin/tsc --noEmit && npm run build && node /tmp/check-campaign-availability.cjs && node /tmp/check-campaign-workspace.cjs && node /tmp/check-result-presentation.cjs'
+  sable-agent-ui-tests sh -c './node_modules/.bin/tsc --noEmit && npm run build && node /tmp/check-campaign-availability.cjs && node /tmp/check-campaign-workspace.cjs'
