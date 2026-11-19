@@ -7,5 +7,6 @@ COPY sable_runtime /workspace/sable_runtime
 COPY skills /workspace/skills
 COPY tests/runtime /workspace/tests/runtime
 COPY server/routers/agent_campaigns.py /workspace/server/routers/agent_campaigns.py
+COPY server/services/campaign_credentials.py /workspace/server/services/campaign_credentials.py
 ENV PYTHONPATH=/workspace PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 CMD ["python", "-m", "pytest", "-c", "tests/runtime/pytest.ini", "--confcutdir=tests/runtime", "tests/runtime", "-q"]

@@ -3,7 +3,7 @@
 set -euo pipefail
 runtime_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 mounts=()
-for source_path in sable_runtime skills tools schemas utils nodes config tests/runtime tests/unit server/routers/agent_campaigns.py server/schemas; do
+for source_path in sable_runtime skills tools schemas utils nodes config tests/runtime tests/unit server/routers/agent_campaigns.py server/services/campaign_credentials.py server/services/credential_service.py server/models server/database.py server/schemas; do
   mounts+=(--mount "type=bind,src=$runtime_root/$source_path,dst=/workspace/$source_path,readonly")
 done
 exec docker run --rm --network none --read-only --tmpfs /tmp \

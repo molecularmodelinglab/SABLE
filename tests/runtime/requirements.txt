@@ -4,3 +4,4 @@ rdkit==2025.3.6
 openai==2.8.1
 fastapi==0.115.5
 httpx==0.28.1
+boltz-api==0.49.0
