@@ -36,11 +36,11 @@ class CampaignService:
         pins = self.registry.discover(self.discovery_allowed)
         state = dict(id=campaign_id, status='ready', history=[{'role': 'user', 'content': prompt}],
                      skills=pins, loaded={}, results={}, report=None, question=None,
-                     turns=0, max_turns=24, model=None, pending=None, error=None, agent_spec=AGENT_SPEC)
+                     turns=0, max_turns=100, model=None, pending=None, error=None, agent_spec=AGENT_SPEC)
         with self.ledger.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             db.execute('INSERT INTO campaigns(id,owner,max_actions,max_units) VALUES(?,?,?,?)',
-                       (campaign_id, owner, 16, 20))
+                       (campaign_id, owner, 20, 50))
             db.execute('INSERT INTO agent_campaigns(id,state) VALUES(?,?)', (campaign_id, json.dumps(state)))
             self.ledger.event(db, campaign_id, 'campaign', 'campaign_created', {'prompt': prompt, 'skills': pins})
         return self.get(campaign_id, owner)
