@@ -34,7 +34,7 @@ export function DistributionChart({ label, values }: { label: string; values: nu
         <AreaChart data={data} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(19, 41, 75, 0.2)" />
           <XAxis dataKey="bucket" tick={{ fontSize: 12 }} />
-          <YAxis tick={{ fontSize: 12 }} allowDecimals />
+          <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
           <Tooltip formatter={(value: number) => value.toString()} />
           <Area type="monotone" dataKey="count" stroke="#13294B" fill="#4B9CD3" fillOpacity={0.35} />
         </AreaChart>
