@@ -162,3 +162,38 @@ def test_foreign_key_and_transaction_rollback(storage):
     with ledger.connect() as db:
         assert ledger.owned(db, 'valid', alice)['used_actions'] == 0
     assert ledger.events('valid', alice) == []
+
+
+def test_background_execution_intent_and_concurrent_runners(storage):
+    from sable_runtime.runner import CampaignRunner
+    ledger, alice, bob = storage
+    campaigns = service(ledger)
+    state = campaigns.create(alice, 'Summarize observations')
+    model = ScriptedModel([decision('load_skill', skill_id='dataset-summary'), decision('ask_user', question='Which values?')])
+    runner = CampaignRunner(campaigns, lambda:model)
+    runner.tick()
+    assert campaigns.get(state['id'], alice)['turns'] == 0
+    with pytest.raises(PermissionError):
+        campaigns.execution(state['id'], bob, 'running')
+    campaigns.execution(state['id'], alice, 'running')
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        list(workers.map(lambda _: runner.tick(), range(2)))
+    assert len(model.contexts) == 1
+    campaigns.execution(state['id'], alice, 'paused')
+    runner.tick()
+    assert len(model.contexts) == 1
+    campaigns.execution(state['id'], alice, 'running')
+    runner.tick()
+    assert campaigns.get(state['id'], alice)['status'] == 'awaiting_user'
+
+
+def test_disabled_account_is_not_scheduled(storage):
+    from sable_runtime.runner import CampaignRunner
+    ledger, alice, _ = storage
+    campaigns = service(ledger)
+    state = campaigns.create(alice, 'Analyze')
+    campaigns.execution(state['id'], alice, 'running')
+    with ledger.connect() as db:
+        db.execute('UPDATE public.users SET is_active=false WHERE id=?', (alice,))
+    CampaignRunner(campaigns, lambda: pytest.fail('Disabled account must not incur model usage')).tick()
+    assert campaigns.get(state['id'], alice)['turns'] == 0
