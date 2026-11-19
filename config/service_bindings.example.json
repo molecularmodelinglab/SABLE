@@ -16,5 +16,8 @@
   "boltz-platform": {
     "transport": "sdk",
     "credential_provider": "boltz_platform"
+  },
+  "pubchem": {
+    "endpoint": "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
   }
 }
