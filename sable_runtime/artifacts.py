@@ -1,4 +1,5 @@
 """Owned text artifacts for scientific inputs that should not enter model context."""
+import json
 from hashlib import sha256
 from uuid import uuid4
 
@@ -13,7 +14,7 @@ class ArtifactStore:
                 id TEXT PRIMARY KEY, campaign TEXT NOT NULL, name TEXT NOT NULL,
                 content TEXT NOT NULL, size_bytes INTEGER NOT NULL, sha256 TEXT NOT NULL)''')
 
-    def put(self, campaign, owner, name, content):
+    def put(self, campaign, owner, name, content, *, require_idle=False):
         if not isinstance(content,str) or not isinstance(name,str) or not name.strip() or len(name)>200:
             raise ValueError('Artifact name and text content are required')
         encoded = content.encode()
@@ -22,6 +23,10 @@ class ArtifactStore:
         with self.ledger.connect() as db:
             db.begin_write()
             self.ledger.owned(db,campaign,owner)
+            if require_idle:
+                state = db.execute('SELECT state,busy,execution_mode FROM agent_campaigns WHERE id=?', (campaign,)).fetchone()
+                if state is None or state['busy'] or (state['execution_mode'] == 'running' and json.loads(state['state'])['status'] != 'awaiting_user'):
+                    raise ValueError('Pause the campaign before adding files, or wait for a request for information')
             count,size=db.execute('SELECT count(*),coalesce(sum(size_bytes),0) FROM campaign_artifacts WHERE campaign=?',(campaign,)).fetchone()
             if count>=16 or size+len(encoded)>32_000_000:
                 raise ValueError('Campaign artifact allowance exceeded')
