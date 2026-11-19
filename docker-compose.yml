@@ -87,7 +87,6 @@ services:
       - BOLTZ_API_TOKEN=${BOLTZ_API_TOKEN:-}
       - SABLE_SKILL_STORE_PATH=${SABLE_SKILL_STORE_PATH:-}
       - SABLE_AGENT_ENABLED=${SABLE_AGENT_ENABLED:-0}
-      - SABLE_LEDGER_PATH=${SABLE_LEDGER_PATH:-/app/data/campaigns.sqlite}
       - OPENAI_URL=${OPENAI_URL:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
