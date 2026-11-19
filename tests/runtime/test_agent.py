@@ -33,7 +33,7 @@ def decision(name, **arguments):
 def service(tmp_path):
     registry = SkillRegistry()
     registry.install(Path(__file__).resolve().parents[2] / 'skills/rdkit-descriptors')
-    return CampaignService(Ledger(tmp_path / 'agent.sqlite'), registry, {('rdkit-descriptors', '1.2.0')})
+    return CampaignService(Ledger(tmp_path / 'agent.sqlite'), registry, {('rdkit-descriptors', '1.3.0')})
 
 
 def scientific_steps():

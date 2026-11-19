@@ -20,7 +20,7 @@ def main():
         model = create_agent_model(config)
         registry = SkillRegistry()
         registry.install(Path('/workspace/skills/rdkit-descriptors'))
-        service = CampaignService(Ledger('/tmp/live-campaign.sqlite'), registry, {('rdkit-descriptors', '1.2.0')})
+        service = CampaignService(Ledger('/tmp/live-campaign.sqlite'), registry, {('rdkit-descriptors', '1.3.0')})
         state = service.create('smoke-test', 'Calculate molecular weight and QED for ethanol, SMILES CCO. Report the computed values with units and explain their limitations. No other properties or tools are needed.')
         for _ in range(6):
             if state['status'] != 'ready':
