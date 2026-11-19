@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "id": "name-to-smiles",
+  "version": "1.0.0",
+  "description": "Resolve chemical or drug names such as omeprazole to sourced, RDKit-validated SMILES using PubChem. Try this before asking users to supply a structure for a named compound.",
+  "operations": [
+    {
+      "id": "resolve",
+      "handler": "resolve",
+      "service": "pubchem",
+      "budget_units": 1,
+      "description": "Look up one complete chemical name; return sourced matches or explicit ambiguity/failure without guessing a structure.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "resolved",
+              "ambiguous",
+              "not_found",
+              "unavailable",
+              "invalid_response"
+            ]
+          },
+          "matches": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "cid": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "smiles": {
+                  "type": "string"
+                },
+                "source_smiles": {
+                  "type": "string"
+                },
+                "source_url": {
+                  "type": "string"
+                },
+                "inchikey": {
+                  "type": "string"
+                },
+                "iupac_name": {
+                  "type": "string"
+                },
+                "components": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "cid",
+                "smiles",
+                "source_smiles",
+                "source_url",
+                "inchikey",
+                "iupac_name",
+                "components"
+              ]
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "source": {
+            "const": "PubChem"
+          },
+          "retrieved_at": {
+            "type": "string"
+          },
+          "method_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "status",
+          "matches",
+          "truncated",
+          "source",
+          "retrieved_at",
+          "method_version"
+        ]
+      }
+    }
+  ],
+  "requirements": {
+    "modules": [
+      "requests",
+      "rdkit"
+    ],
+    "services": [
+      "pubchem"
+    ]
+  }
+}
