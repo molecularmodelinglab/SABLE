@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "id": "uniprot",
+  "version": "1.0.0",
+  "description": "Resolve UniProt accessions such as P21453 into sourced protein sequences for Boltz target scoring. Use before asking the user for a target sequence or receptor structure.",
+  "operations": [
+    {
+      "id": "resolve",
+      "handler": "resolve",
+      "service": "uniprot",
+      "budget_units": 1,
+      "description": "Resolve a canonical UniProt accession to its protein identity and exact sequence for sequence-based prediction tools.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "accession": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 10
+          }
+        },
+        "required": [
+          "accession"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "protein_target"
+          },
+          "source": {
+            "type": "string"
+          },
+          "identifier": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "retrieved_at": {
+            "type": "string"
+          },
+          "protein_name": {
+            "type": "string"
+          },
+          "organism": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "string"
+          },
+          "length": {
+            "type": "integer"
+          },
+          "sequence_version": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "source",
+          "identifier",
+          "source_url",
+          "retrieved_at",
+          "protein_name",
+          "organism",
+          "sequence",
+          "length",
+          "sequence_version"
+        ]
+      }
+    }
+  ],
+  "requirements": {
+    "modules": [
+      "requests"
+    ],
+    "services": [
+      "uniprot"
+    ]
+  }
+}
