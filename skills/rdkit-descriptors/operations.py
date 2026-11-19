@@ -23,11 +23,27 @@ def calculate(inputs, context):
     observations, failures = [], []
     properties = {
         'molecular_weight': (Descriptors.MolWt, 'g/mol'),
+        'exact_molecular_weight': (Descriptors.ExactMolWt, 'Da'),
+        'heavy_atom_molecular_weight': (Descriptors.HeavyAtomMolWt, 'g/mol'),
         'logp': (Descriptors.MolLogP, 'dimensionless'),
+        'molar_refractivity': (Descriptors.MolMR, 'cm^3/mol'),
         'tpsa': (Descriptors.TPSA, 'angstrom^2'),
+        'labute_asa': (Descriptors.LabuteASA, 'angstrom^2'),
         'h_bond_donors': (Descriptors.NumHDonors, 'count'),
         'h_bond_acceptors': (Descriptors.NumHAcceptors, 'count'),
+        'no_count': (Descriptors.NOCount, 'count'),
+        'nhoh_count': (Descriptors.NHOHCount, 'count'),
         'rotatable_bonds': (Descriptors.NumRotatableBonds, 'count'),
+        'ring_count': (Descriptors.RingCount, 'count'),
+        'aromatic_rings': (Descriptors.NumAromaticRings, 'count'),
+        'aliphatic_rings': (Descriptors.NumAliphaticRings, 'count'),
+        'saturated_rings': (Descriptors.NumSaturatedRings, 'count'),
+        'heteroatoms': (Descriptors.NumHeteroatoms, 'count'),
+        'heterocycles': (Descriptors.NumHeterocycles, 'count'),
+        'fraction_csp3': (Descriptors.FractionCSP3, 'dimensionless'),
+        'heavy_atom_count': (Descriptors.HeavyAtomCount, 'count'),
+        'valence_electrons': (Descriptors.NumValenceElectrons, 'count'),
+        'radical_electrons': (Descriptors.NumRadicalElectrons, 'count'),
         'qed': (QED.qed, 'dimensionless'),
     }
     for index, smiles in enumerate(smiles_inputs):

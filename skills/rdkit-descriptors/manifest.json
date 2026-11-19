@@ -1,8 +1,8 @@
 {
   "id": "rdkit-descriptors",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "schema_version": 1,
-  "description": "Compute RDKit molecular descriptors and QED from explicit SMILES, preserving method and units.",
+  "description": "Compute RDKit physicochemical, hydrogen-bond, topology, and complexity descriptors and QED from explicit SMILES, preserving method and units.",
   "operations": [
     {
       "id": "calculate",
@@ -33,14 +33,31 @@
             "items": {
               "enum": [
                 "molecular_weight",
+                "exact_molecular_weight",
+                "heavy_atom_molecular_weight",
                 "logp",
+                "molar_refractivity",
                 "tpsa",
+                "labute_asa",
                 "h_bond_donors",
                 "h_bond_acceptors",
+                "no_count",
+                "nhoh_count",
                 "rotatable_bonds",
+                "ring_count",
+                "aromatic_rings",
+                "aliphatic_rings",
+                "saturated_rings",
+                "heteroatoms",
+                "heterocycles",
+                "fraction_csp3",
+                "heavy_atom_count",
+                "valence_electrons",
+                "radical_electrons",
                 "qed"
               ]
-            }
+            },
+            "description": "Requested descriptor keys; see SKILL.md for RDKit function names, units, and reference ranges. Reference ranges are guidance, not filters."
           },
           "source_action_id": {
             "type": "string",
