@@ -27,9 +27,9 @@ function download(name: string, value: unknown, plain = false) {
 }
 const eventGroup = (kind: string) => kind.startsWith('model_') ? 'model' : kind.startsWith('action_') ? 'tool' : kind.startsWith('job_') ? 'job' : kind.startsWith('artifact_') ? 'file' : 'campaign'
 
-async function request<T>(path = '', body?: unknown): Promise<T> {
+async function request<T>(path = '', body?: unknown, method?: 'DELETE'): Promise<T> {
   const response = await fetch(`${API_BASE}/v2/campaigns${path}`, {
-    method: body === undefined ? 'GET' : 'POST',
+    method: method || (body === undefined ? 'GET' : 'POST'),
     headers: { Authorization: `Bearer ${getAccessToken() || ''}`, 'Content-Type': 'application/json' },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   })
@@ -64,6 +64,13 @@ export function NewRunPage() {
   const [structurePreview, setStructurePreview] = useState<{ name: string; content: string } | null>(null)
   const [budgetOpen, setBudgetOpen] = useState(false)
   const [budgetLimits, setBudgetLimits] = useState({ max_turns: 0, max_actions: 0, max_units: 0 })
+  const [deleteTarget, setDeleteTarget] = useState<Campaign | null>(null)
+  const [deleteError, setDeleteError] = useState('')
+  const deleteDialog = useRef<HTMLDialogElement | null>(null)
+  useEffect(() => {
+    if (deleteTarget) deleteDialog.current?.showModal()
+    else if (deleteDialog.current?.open) deleteDialog.current.close()
+  }, [deleteTarget])
   const followConversation = useRef(true)
   const [remoteIds, setRemoteIds] = useState<Record<string, string>>({})
   const requestBusy = useRef(false)
@@ -130,7 +137,7 @@ export function NewRunPage() {
       fetching = true
       try {
         const next = await request<Campaign>(`/${encodeURIComponent(id)}`)
-        if (active) { setCampaign(next); setJobError('') }
+        if (active && !requestBusy.current) { setCampaign(previous => previous?.id === id ? next : previous); setJobError('') }
       } catch (error) { if (active) setJobError(error instanceof Error ? error.message : 'Campaign refresh failed') }
       finally { fetching = false }
     }
@@ -184,6 +191,28 @@ export function NewRunPage() {
   }
 
   const title = (item: Campaign) => item.history?.find(message => message.role === 'user')?.content || `Campaign ${item.id.slice(-8)}`
+  async function deleteCampaign(item: Campaign) {
+    if (controlsBusy || requestBusy.current) return
+    requestBusy.current = true
+    setWorking(true); setDeleteError('')
+    try {
+      await request(`/${encodeURIComponent(item.id)}`, undefined, 'DELETE')
+      setCampaigns(previous => previous.filter(value => value.id !== item.id))
+      if (campaign?.id === item.id) {
+        setCampaign(null); setEvents([]); setFullEvent(null); setPrompt(''); setReply('')
+        if (window.location && window.history) {
+          const url = new URL(window.location.href)
+          url.searchParams.delete('campaign'); window.history.replaceState(null, '', url)
+        }
+      }
+      setDeleteTarget(null)
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : 'Campaign deletion failed')
+    } finally {
+      requestBusy.current = false
+      if (mounted.current) setWorking(false)
+    }
+  }
   const status = !campaign ? 'New campaign' : campaign.execution_mode === 'paused' ? campaign.busy ? 'Pausing after the current operation' : 'Paused by you or the scheduler' : campaign.busy ? 'SABLE is working' : ({ awaiting_user: 'Your input is needed', waiting_jobs: campaign.jobs?.some(job => job.status === 'unknown') ? 'A calculation needs review' : 'Calculations in progress', ready: campaign.execution_mode === 'running' ? 'SABLE is planning the next step' : 'Ready to start', completed: 'Campaign complete', failed: 'Campaign needs attention', budget_exhausted: 'Budget approval needed' }[campaign.status] || readable(campaign.status))
   const recordedResults = new Set(campaign?.history?.map(message => message.result?.action_id).filter(Boolean))
   const activityLabel = (event: Event) => {
@@ -196,6 +225,15 @@ export function NewRunPage() {
 
 
   return <section className="campaign-page science-workspace">
+    <dialog ref={deleteDialog} className="campaign-delete-dialog" aria-labelledby="campaign-delete-title" aria-describedby="campaign-delete-description" onCancel={event => { event.preventDefault(); if (!controlsBusy) setDeleteTarget(null) }}>
+      {deleteTarget && <>
+        <h2 id="campaign-delete-title">Delete campaign?</h2>
+        <p className="campaign-delete-name">{title(deleteTarget)}</p>
+        <p id="campaign-delete-description">This permanently removes the conversation, results, files, and activity. This cannot be undone.</p>
+        {deleteError && <p role="alert" className="campaign-delete-error">{deleteError}</p>}
+        <div className="campaign-delete-actions"><button autoFocus disabled={controlsBusy} onClick={() => setDeleteTarget(null)}>Cancel</button><button className="campaign-delete-confirm" disabled={controlsBusy} onClick={() => void deleteCampaign(deleteTarget)}>{working ? 'Deleting…' : 'Delete campaign'}</button></div>
+      </>}
+    </dialog>
     <header className="workspace-header">
       <button aria-expanded={showDetails} aria-controls="campaign-details" onClick={() => setShowDetails(value => !value)}>{showDetails ? 'Hide details' : 'Campaign details'}</button>
     </header>
@@ -204,9 +242,9 @@ export function NewRunPage() {
         <button className="workspace-new" disabled={controlsBusy} onClick={() => { if (window.location && window.history) { const url = new URL(window.location.href); url.searchParams.delete('campaign'); window.history.replaceState(null, '', url) }; setCampaign(null); setEvents([]); setPrompt(''); setReply(''); setError(''); }}>+ New campaign</button>
         <details open><summary>Recent campaigns <span>{campaigns.length}</span></summary>
           {campaigns.length === 0 && <p className="workspace-muted">Your campaigns will appear here.</p>}
-          <nav aria-label="Previous campaigns">{campaigns.map(item => <button key={item.id} className="workspace-history-item" aria-current={campaign?.id === item.id ? 'page' : undefined} disabled={controlsBusy} onClick={() => perform(async () => { setReply(''); setEvents([]); setCampaign(await request<Campaign>(`/${item.id}`)) })}>
+          <nav aria-label="Previous campaigns">{campaigns.map(item => <div key={item.id} className="workspace-history-row"><button className="workspace-history-item" aria-current={campaign?.id === item.id ? 'page' : undefined} disabled={controlsBusy} onClick={() => perform(async () => { setReply(''); setEvents([]); setCampaign(await request<Campaign>(`/${item.id}`)) })}>
             <span>{title(item)}</span><small>{item.execution_mode === 'running' && ['ready', 'waiting_jobs'].includes(item.status) ? 'In progress' : readable(item.status)}</small>
-          </button>)}</nav>
+          </button><button className="workspace-delete" aria-label={`Delete campaign: ${title(item)}`} title="Delete campaign" disabled={controlsBusy} onClick={() => { setDeleteError(''); setDeleteTarget(item) }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" /></svg></button></div>)}</nav>
         </details>
       </aside>
       <section className="workspace-conversation" aria-label="Campaign conversation">
