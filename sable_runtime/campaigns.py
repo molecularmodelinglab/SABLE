@@ -1,4 +1,4 @@
-"""Local durable, bounded agent campaigns. One model decision per advance."""
+"""Durable, bounded agent campaigns. One model decision per advance."""
 import json
 import time
 from uuid import uuid4
@@ -24,8 +24,10 @@ class CampaignService:
         self.services, self.credentials = dict(services or {}), credentials
         self.jobs = JobManager(ledger, registry, services=self.services, credentials=credentials, allowed=self.allowed)
         self.artifacts = ArtifactStore(ledger)
+        if ledger.postgres:
+            return
         with ledger.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
+            db.begin_write()
             db.execute('''CREATE TABLE IF NOT EXISTS agent_campaigns (
                 id TEXT PRIMARY KEY, state TEXT NOT NULL, busy INTEGER NOT NULL DEFAULT 0)''')
             if 'lease_until' not in {r['name'] for r in db.execute('PRAGMA table_info(agent_campaigns)')}:
@@ -38,7 +40,7 @@ class CampaignService:
                      skills=pins, loaded={}, results={}, report=None, question=None,
                      turns=0, max_turns=100, model=None, pending=None, error=None, agent_spec=AGENT_SPEC)
         with self.ledger.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
+            db.begin_write()
             db.execute('INSERT INTO campaigns(id,owner,max_actions,max_units) VALUES(?,?,?,?)',
                        (campaign_id, owner, 20, 50))
             db.execute('INSERT INTO agent_campaigns(id,state) VALUES(?,?)', (campaign_id, json.dumps(state)))
@@ -54,7 +56,7 @@ class CampaignService:
 
     def get(self, campaign_id, owner):
         with self.ledger.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
+            db.begin_write()
             state, busy = self._read(db, campaign_id, owner)
             lease = db.execute('SELECT lease_until FROM agent_campaigns WHERE id=?', (campaign_id,)).fetchone()[0]
             if busy and lease <= time.time():
@@ -121,12 +123,12 @@ class CampaignService:
 
     def list(self, owner):
         with self.ledger.connect() as db:
-            rows = db.execute('SELECT a.state,a.busy FROM agent_campaigns a JOIN campaigns c ON a.id=c.id WHERE c.owner=? ORDER BY a.rowid DESC LIMIT 100', (owner,)).fetchall()
+            rows = db.execute(f'SELECT a.state,a.busy FROM agent_campaigns a JOIN campaigns c ON a.id=c.id WHERE c.owner=? ORDER BY a.{self.ledger.order_column} DESC LIMIT 100', (owner,)).fetchall()
             return [{**json.loads(row['state']), 'busy': bool(row['busy'])} for row in rows]
 
     def _save(self, state, owner, kind, payload, busy=False):
         with self.ledger.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
+            db.begin_write()
             self.ledger.owned(db, state['id'], owner)
             current = db.execute('SELECT state,busy,lease_until FROM agent_campaigns WHERE id=?', (state['id'],)).fetchone()
             if (not current['busy'] or current['lease_until'] <= time.time()
@@ -138,7 +140,7 @@ class CampaignService:
 
     def message(self, campaign_id, owner, message):
         with self.ledger.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
+            db.begin_write()
             state, busy = self._read(db, campaign_id, owner)
             if busy or state['status'] != 'awaiting_user':
                 raise CampaignConflict('Campaign is not awaiting clarification')
@@ -151,7 +153,7 @@ class CampaignService:
     def advance(self, campaign_id, owner, model):
         self.get(campaign_id, owner)
         with self.ledger.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
+            db.begin_write()
             state, busy = self._read(db, campaign_id, owner)
             if busy or state['status'] != 'ready':
                 raise CampaignConflict('Campaign cannot advance in its current state')
