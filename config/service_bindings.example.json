@@ -19,5 +19,8 @@
   },
   "pubchem": {
     "endpoint": "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
+  },
+  "uniprot": {
+    "endpoint": "https://rest.uniprot.org"
   }
 }
