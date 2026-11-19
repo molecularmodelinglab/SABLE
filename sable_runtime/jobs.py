@@ -43,12 +43,14 @@ class JobManager:
                 token TEXT, UNIQUE(campaign,action))''')
             if 'diagnostics' not in {r['name'] for r in db.execute('PRAGMA table_info(remote_jobs)')}:
                 db.execute('ALTER TABLE remote_jobs ADD COLUMN diagnostics TEXT')
+            if 'credential_ref' not in {r['name'] for r in db.execute('PRAGMA table_info(remote_jobs)')}:
+                db.execute('ALTER TABLE remote_jobs ADD COLUMN credential_ref TEXT')
 
     def _binding(self, spec):
         service = self.services.get(spec.service)
         if service is None:
             raise JobConflict('Remote service is unavailable')
-        return sha256(service.endpoint.encode()).hexdigest()
+        return sha256((service.endpoint or 'sdk-managed').encode()).hexdigest()
 
     def enqueue(self, action, skill, name, payload, owner):
         spec = skill.manifest.remote_jobs.get(name)
@@ -56,7 +58,10 @@ class JobManager:
             raise JobConflict('Remote job is not declared')
         binding = self._binding(spec)
         # Resolve credentials before enqueueing; never persist their material.
-        context = self._context(action.campaign_id, action.action_id, owner, spec)
+        reference = spec.credential or self.services[spec.service].credential
+        if reference and callable(getattr(self.credentials, 'pin', None)):
+            reference = self.credentials.pin(owner, reference)
+        context = self._context(action.campaign_id, action.action_id, owner, spec, reference)
         from .executor import contains_secret
         if context.secret and contains_secret(payload, context.secret.get_secret_value()):
             raise JobConflict('Credential material is not a valid job input')
@@ -73,24 +78,30 @@ class JobManager:
                 return {'kind': 'remote_job', 'job_id': existing['id'], 'status': existing['status']}
             job_id = 'job-' + uuid4().hex
             db.execute('''INSERT INTO remote_jobs
-                (id,campaign,action,skill_id,version,digest,name,payload,binding,status,created,updated,deadline,next_poll)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (id,campaign,action,skill_id,version,digest,name,payload,binding,status,created,updated,deadline,next_poll,credential_ref)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                 (job_id, action.campaign_id, action.action_id, skill.manifest.id, skill.manifest.version,
-                 skill.digest, name, serialized, binding, 'queued', now, now, now + spec.timeout_seconds, now))
+                 skill.digest, name, serialized, binding, 'queued', now, now, now + spec.timeout_seconds, now, reference))
             self.ledger.event(db, action.campaign_id, action.action_id, 'job_queued',
                               {'job_id': job_id, 'name': name, 'inputs': trace_inputs(payload), 'service': spec.service,
                                'skill_id': skill.manifest.id, 'skill_version': skill.manifest.version,
                                'skill_digest': skill.digest, 'binding_digest': binding})
         return {'kind': 'remote_job', 'job_id': job_id, 'status': 'queued'}
 
-    def _context(self, campaign, action, owner, spec):
+    def _context(self, campaign, action, owner, spec, reference=None, *, pinned=False):
         from .executor import ExecutionContext
         from pydantic import SecretStr
         service = self.services.get(spec.service)
         if service is None:
             raise JobConflict('Remote service is unavailable')
-        reference = spec.credential or getattr(service, 'credential', None)
-        secret = self.credentials(owner, reference) if reference and self.credentials else None
+        configured = spec.credential or getattr(service, 'credential', None)
+        if pinned and reference is None and callable(getattr(self.credentials, 'requires_pin', None)) and self.credentials.requires_pin(configured):
+            raise JobConflict('Job has no pinned saved credential; review its original provider account')
+        reference = reference or configured
+        try:
+            secret = self.credentials(owner, reference) if reference and self.credentials else None
+        except Exception:
+            raise JobConflict('Remote credential is unavailable; check the saved account credential') from None
         if reference and (not isinstance(secret, SecretStr) or not secret.get_secret_value()):
             raise JobConflict('Remote credential is unavailable')
         return ExecutionContext(campaign, action, service, secret)
@@ -170,12 +181,13 @@ class JobManager:
             if action is None or action['status'] != 'succeeded':
                 raise JobConflict('Enqueue action has not committed successfully')
             phase = 'cancel' if cancel else ('submit' if row['status'] == 'queued' else 'poll')
+            # A missing/revoked credential must not turn an unsent job into an uncertain submission.
+            context = self._context(campaign, row['action'], owner, spec, row['credential_ref'], pinned=True)
             token = uuid4().hex
             db.execute('UPDATE remote_jobs SET status=?,token=?,lease_until=?,updated=? WHERE id=?',
                        ('submitting' if phase == 'submit' else 'cancelling' if cancel else row['status'], token, now+300, now, job_id))
             self.ledger.event(db, campaign, row['action'], 'job_' + phase + '_started', {'job_id': job_id})
         try:
-            context = self._context(campaign, row['action'], owner, spec)
             handler = self.registry.remote_handler(skill, spec, phase)
             payload = json.loads(row['payload'])
             output = handler(payload, context) if phase == 'submit' else handler(row['remote_id'], payload, context)
@@ -240,7 +252,7 @@ class JobManager:
             _, spec = self._configuration(row)
             if not spec.reconcilable:
                 raise JobConflict('This service has no safe lookup for an uncertain submission; operator review is required')
-            context = self._context(campaign, row['action'], owner, spec)
+            context = self._context(campaign, row['action'], owner, spec, row['credential_ref'], pinned=True)
             if context.secret and context.secret.get_secret_value() in remote_id:
                 raise JobConflict('Credential material is not a remote identifier')
             if row['lease_until'] > self.clock():
