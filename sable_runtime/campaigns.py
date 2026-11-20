@@ -64,12 +64,15 @@ class CampaignService:
             raise PermissionError('Campaign is not available')
         return json.loads(row['state']), bool(row['busy'])
 
-    def get(self, campaign_id, owner):
+    def get(self, campaign_id, owner, *, reconcile=True):
         with self.ledger.connect() as db:
-            db.begin_write()
+            if reconcile:
+                db.begin_write()
             state, busy = self._read(db, campaign_id, owner)
+            original = json.dumps(state)
+            original_busy = busy
             lease = db.execute('SELECT lease_until FROM agent_campaigns WHERE id=?', (campaign_id,)).fetchone()[0]
-            if busy and lease <= time.time():
+            if reconcile and busy and lease <= time.time():
                 pending = state.get('pending')
                 action_id = f"turn-{state['turns']}"
                 action = db.execute('SELECT * FROM actions WHERE campaign=? AND id=?', (campaign_id, action_id)).fetchone()
@@ -89,12 +92,13 @@ class CampaignService:
             before = {key: state['results'].get(key) for key in cited}
             from .job_results import resolved_job_results
             state['results'].update(resolved_job_results(jobs))
-            if state['status'] == 'completed' and any(before[key] != state['results'].get(key) for key in cited):
+            if reconcile and state['status'] == 'completed' and any(before[key] != state['results'].get(key) for key in cited):
                 self.ledger.event(db, campaign_id, 'campaign', 'report_invalidated', {'previous_report': state['report']})
                 state.update(status='ready', report=None)
             if not busy and state['status'] in {'ready', 'waiting_jobs'}:
                 state['status'] = 'waiting_jobs' if any(j['status'] in ACTIVE for j in jobs) else 'ready'
-            db.execute('UPDATE agent_campaigns SET state=?,busy=? WHERE id=?', (json.dumps(state), int(busy), campaign_id))
+            if reconcile and (json.dumps(state) != original or busy != original_busy):
+                db.execute('UPDATE agent_campaigns SET state=?,busy=? WHERE id=?', (json.dumps(state), int(busy), campaign_id))
             budget = self.ledger.owned(db,campaign_id,owner)
             usage = [json.loads(row['payload']).get('usage',{}) for row in db.execute(
                 "SELECT payload FROM events WHERE campaign=? AND kind='model_decision'",(campaign_id,))]
@@ -104,6 +108,16 @@ class CampaignService:
                        'output_tokens':sum(u.get('output_tokens',0) for u in usage)}
             execution = db.execute('SELECT execution_mode,execution_error FROM agent_campaigns WHERE id=?', (campaign_id,)).fetchone()
             return {**state, 'execution_mode': execution['execution_mode'], 'execution_error': execution['execution_error'], 'busy': busy, 'jobs': jobs, 'artifacts': self.artifacts.list(campaign_id, owner), 'metrics':metrics}
+
+    def snapshot(self, campaign_id, owner):
+        """Read current results without taking a campaign write lock."""
+        return self.get(campaign_id, owner, reconcile=False)
+
+    def revision(self, campaign_id, owner):
+        """Return a small durable change cursor for browser refreshes."""
+        with self.ledger.connect() as db:
+            self.ledger.owned(db, campaign_id, owner)
+            return {'revision': db.execute('SELECT coalesce(max(sequence),0) FROM events WHERE campaign=?', (campaign_id,)).fetchone()[0]}
 
     def _can_access(self, owner, skill_id):
         if self.authorize is None:
@@ -157,7 +171,7 @@ class CampaignService:
             db.begin_write()
             state, busy = self._read(db, campaign_id, owner)
             mode = db.execute('SELECT execution_mode FROM agent_campaigns WHERE id=?', (campaign_id,)).fetchone()[0]
-            if busy or (mode == 'running' and state['status'] in {'ready', 'waiting_jobs', 'awaiting_user'}):
+            if busy or (mode in {'running','step'} and state['status'] in {'ready', 'waiting_jobs', 'awaiting_user'}):
                 raise CampaignConflict('Pause the campaign and wait for the current operation to finish before deleting it')
             jobs = db.execute('SELECT status FROM remote_jobs WHERE campaign=?', (campaign_id,)).fetchall()
             if any(row['status'] in ACTIVE for row in jobs):
@@ -197,7 +211,7 @@ class CampaignService:
         with self.ledger.connect() as db:
             db.begin_write()
             state, busy = self._read(db, campaign_id, owner)
-            if scheduled and db.execute('SELECT execution_mode FROM agent_campaigns WHERE id=?', (campaign_id,)).fetchone()[0] != 'running':
+            if scheduled and db.execute('SELECT execution_mode FROM agent_campaigns WHERE id=?', (campaign_id,)).fetchone()[0] not in {'running', 'step'}:
                 raise CampaignConflict('Campaign is paused')
             if busy or state['status'] != 'ready':
                 raise CampaignConflict('Campaign cannot advance in its current state')
@@ -307,17 +321,19 @@ class CampaignService:
 
     def execution(self, campaign_id, owner, mode):
         """Start or pause future work without interrupting an in-flight operation."""
-        if mode not in {'running', 'paused'}:
+        if mode not in {'running', 'paused', 'step'}:
             raise ValueError('Invalid execution mode')
         with self.ledger.connect() as db:
             db.begin_write()
             state, busy = self._read(db, campaign_id, owner)
-            if mode == 'running' and state['status'] not in {'ready', 'waiting_jobs', 'awaiting_user'}:
+            if mode == 'step' and (busy or state['status'] != 'ready'):
+                raise CampaignConflict('Campaign cannot advance in its current state')
+            if mode in {'running', 'step'} and state['status'] not in {'ready', 'waiting_jobs', 'awaiting_user'}:
                 raise CampaignConflict('Resolve the campaign status before resuming')
             db.execute('UPDATE agent_campaigns SET execution_mode=?,execution_error=NULL,next_run_at=0 WHERE id=?', (mode, campaign_id))
-            self.ledger.event(db, campaign_id, 'campaign', 'campaign_started' if mode == 'running' else 'campaign_paused',
+            self.ledger.event(db, campaign_id, 'campaign', 'campaign_step_requested' if mode == 'step' else 'campaign_started' if mode == 'running' else 'campaign_paused',
                               {'current_operation_may_finish': busy})
-        return self.get(campaign_id, owner)
+        return self.snapshot(campaign_id, owner)
 
     def extend_budget(self, campaign_id, owner, max_turns, max_actions, max_units):
         """Apply an owner's explicit approval of new total campaign limits."""

@@ -1,5 +1,6 @@
 """Durable remote job submission, observation, and explicit reconciliation."""
 import json
+import os
 from contextlib import nullcontext
 import time
 from uuid import uuid4
@@ -31,6 +32,8 @@ class JobManager:
     def __init__(self, ledger, registry, *, services=None, credentials=None, allowed=None, clock=time.time, authorize=None):
         from .artifacts import ArtifactStore
         self.artifacts = ArtifactStore(ledger)
+        from .scheduling import ExecutionSlots
+        self.slots = ExecutionSlots(ledger)
         self.authorize = authorize
         self.ledger, self.registry = ledger, registry
         self.services, self.credentials = dict(services or {}), credentials
@@ -51,6 +54,8 @@ class JobManager:
                 db.execute('ALTER TABLE remote_jobs ADD COLUMN diagnostics TEXT')
             if 'credential_ref' not in {r['name'] for r in db.execute('PRAGMA table_info(remote_jobs)')}:
                 db.execute('ALTER TABLE remote_jobs ADD COLUMN credential_ref TEXT')
+            if 'requested_operation' not in {r['name'] for r in db.execute('PRAGMA table_info(remote_jobs)')}:
+                db.execute('ALTER TABLE remote_jobs ADD COLUMN requested_operation TEXT')
 
     def _binding(self, spec):
         service = self.services.get(spec.service)
@@ -181,12 +186,48 @@ class JobManager:
             raise JobConflict('Job service endpoint has changed')
         return skill, spec
 
+    def request(self, campaign, job_id, owner, operation):
+        """Persist a user control request without contacting the provider."""
+        if operation not in {'poll', 'cancel'}:
+            raise ValueError('Unsupported job control')
+        with self.ledger.connect() as db:
+            db.begin_write()
+            row = self._read(db, campaign, job_id, owner)
+            if row['status'] in {'succeeded','partial','failed','cancelled'}:
+                return self.public(row)
+            if row['status'] == 'unknown':
+                raise JobConflict('Submission requires reconciliation')
+            if operation == 'cancel' and not self.public(row)['can_cancel']:
+                raise JobConflict('The service does not support cancellation through this skill')
+            # A poll must never overwrite a previously requested cancellation.
+            requested = 'cancel' if row['requested_operation'] == 'cancel' else operation
+            if row['requested_operation'] == requested:
+                return self.public(row)
+            db.execute('UPDATE remote_jobs SET requested_operation=?,next_poll=? WHERE id=?', (requested,self.clock(),job_id))
+            self.ledger.event(db,campaign,row['action'],'job_control_requested',{'job_id':job_id,'operation':requested})
+        return self.public(row)
+
+    def _submission_available(self, db, row, owner):
+        from .scheduling import limit
+        configured = json.loads(os.getenv('SABLE_PROVIDER_JOB_LIMITS') or '{"boltz":1,"boltz-platform":4}')
+        capacity = configured.get(row['skill_id'], 4)
+        if type(capacity) is not int or not 1 <= capacity <= 1000:
+            raise ValueError('Provider job limits must be integers between 1 and 1000')
+        for resource in ('provider:'+row['skill_id']+':'+row['binding'], 'jobs-owner:'+str(owner)):
+            if self.ledger.postgres and not db.execute('SELECT pg_try_advisory_xact_lock(hashtextextended(?,0))',(resource,)).fetchone()[0]:
+                return False
+        active = "(status IN ('submitting','running','cancelling','unknown') OR (status='timed_out' AND remote_id IS NOT NULL))"
+        provider_count = db.execute(f'SELECT count(*) FROM remote_jobs WHERE skill_id=? AND binding=? AND {active}', (row['skill_id'],row['binding'])).fetchone()[0]
+        user_count = db.execute(f'SELECT count(*) FROM remote_jobs j JOIN campaigns c ON c.id=j.campaign WHERE c.owner=? AND {active}',(owner,)).fetchone()[0]
+        return provider_count < capacity and user_count < limit('SABLE_MAX_USER_JOBS',4,1000)
+
     def drive(self, campaign, job_id, owner, *, cancel=False):
         """Perform at most one remote request phase under a fenced local lease."""
         now = self.clock()
         with self.ledger.connect() as db:
             db.begin_write()
             row = self._read(db, campaign, job_id, owner)
+            cancel = cancel or row['requested_operation'] == 'cancel'
             was_cancelling = row['status'] == 'cancelling'
             if row['lease_until'] > now:
                 raise JobConflict('Job operation is already in progress')
@@ -217,6 +258,12 @@ class JobManager:
             if action is None or action['status'] != 'succeeded':
                 raise JobConflict('Enqueue action has not committed successfully')
             phase = 'cancel' if cancel else ('submit' if row['status'] == 'queued' else 'poll')
+            if phase == 'submit' and not self._submission_available(db, row, owner):
+                db.execute('UPDATE remote_jobs SET next_poll=?,error=? WHERE id=?', (now+10, 'waiting_for_capacity', job_id))
+                if row['error'] != 'waiting_for_capacity':
+                    self.ledger.event(db,campaign,row['action'],'job_deferred',{'job_id':job_id,'reason':'waiting_for_capacity'})
+                return self.public(row)
+            db.execute('UPDATE remote_jobs SET requested_operation=NULL WHERE id=?', (job_id,))
             # A missing/revoked credential must not turn an unsent job into an uncertain submission.
             context = self._context(campaign, row['action'], owner, spec, row['credential_ref'], pinned=True)
             token = uuid4().hex
@@ -300,20 +347,43 @@ class JobManager:
             self.ledger.event(db, campaign, row['action'], 'job_reconciled', {'job_id': job_id, 'remote_id': remote_id})
         return next(j for j in self.list(campaign, owner) if j['id'] == job_id)
 
-    def drive_due(self, limit=32):
+    def drive_due(self, limit=32, *, requested_only=False):
         """Advance due jobs without a browser or model request; one phase per job."""
         with self.ledger.connect() as db:
-            rows = db.execute('''SELECT j.id,j.campaign,c.owner FROM remote_jobs j
+            requested = "AND j.requested_operation IS NOT NULL" if requested_only else ''
+            rows = db.execute(f'''SELECT j.id,j.campaign,c.owner,
+                row_number() OVER (PARTITION BY c.owner ORDER BY j.next_poll,j.created) AS owner_rank
+                FROM remote_jobs j
                 JOIN campaigns c ON c.id=j.campaign
                 JOIN actions a ON a.campaign=j.campaign AND a.id=j.action
-                WHERE j.status IN ('queued','submitting','running','cancelling')
+                WHERE (j.status IN ('queued','submitting','running','cancelling') OR (j.status='timed_out' AND j.requested_operation IS NOT NULL)) {requested}
                 AND j.next_poll<=? AND j.lease_until<=? AND a.status='succeeded'
-                ORDER BY j.next_poll LIMIT ?''', (self.clock(),self.clock(),limit)).fetchall()
+                ORDER BY owner_rank,j.next_poll LIMIT ?''', (self.clock(),self.clock(),max(64,limit))).fetchall()
         outcomes = []
+        from .scheduling import limit as setting
         for row in rows:
-            try:
-                result = self.drive(row['campaign'],row['id'],row['owner'])
-                outcomes.append({'job_id':row['id'],'status':result['status']})
-            except JobConflict:
-                outcomes.append({'job_id':row['id'],'status':'configuration_or_concurrency_conflict'})
+            with self.slots.acquire('owner:'+str(row['owner']), setting('SABLE_MAX_USER_OPERATIONS',1)) as owner_slot:
+                if not owner_slot:
+                    continue
+                with self.slots.acquire('campaign:'+row['campaign']) as campaign_slot:
+                    if not campaign_slot:
+                        continue
+                    outcomes.append(self._drive_due_job(row))
+            if len(outcomes) >= limit:
+                break
         return outcomes
+
+    def _drive_due_job(self, row):
+        try:
+            result = self.drive(row['campaign'],row['id'],row['owner'])
+            status = result['status']
+        except JobConflict:
+            with self.ledger.connect() as db:
+                db.begin_write()
+                current = self._read(db,row['campaign'],row['id'],row['owner'])
+                if current['lease_until'] <= self.clock():
+                    db.execute('UPDATE remote_jobs SET next_poll=?,error=? WHERE id=?',
+                               (self.clock()+60,'configuration_or_access_unavailable',row['id']))
+                    self.ledger.event(db,row['campaign'],current['action'],'job_deferred',{'job_id':row['id'],'reason':'configuration_or_access_unavailable'})
+            status = 'configuration_or_concurrency_conflict'
+        return {'job_id':row['id'],'campaign':row['campaign'],'owner':str(row['owner']),'status':status}
