@@ -68,31 +68,49 @@ def resolve_library(results, action_id):
 def measurements(results, library_id, action_ids, targets):
     library = resolve_library(results, library_id)
     candidates = {c['id']: c['smiles'] for c in library['candidates']}
-    rows, versions = {}, set()
+    from .scoring import SCORES, prediction_observations
+    rows, provenance = {}, {}
     names = {t['name'] for t in targets}
+    units = {name: definition[1] for name, definition in DESCRIPTORS.items()}
+    units.update({name: definition['unit'] for name, definition in SCORES.items()})
+    if len(set(action_ids)) != len(action_ids):
+        raise ValueError('Duplicate measurement references')
     for action_id in action_ids:
-        batch = results.get(action_id)
-        if not batch or batch.get('library_action_id') != library_id:
-            raise ValueError('Measurements must reference the same recorded library')
-        for observation in batch['observations']:
-            candidate_id = observation.get('candidate_id')
-            if candidate_id not in candidates or observation['canonical_smiles'] != candidates[candidate_id]:
-                raise ValueError('Measurement identity mismatch')
-            if observation['method'] != 'RDKit' or observation['source'] != 'computed':
-                raise ValueError('Unsupported measurement method')
-            versions.add(observation['method_version'])
-            row = rows.setdefault(candidate_id, {'Molecule_ID': candidate_id})
-            for item in observation['values']:
-                prop, value = item['property'], item['value']
-                if prop not in names:
-                    continue
-                if item['unit'] != DESCRIPTORS[prop][1] or not math.isfinite(value):
-                    raise ValueError('Invalid measurement unit or value')
-                if prop in row and row[prop] != value:
-                    raise ValueError('Conflicting repeated measurements')
-                row[prop] = value
-    if len(versions) > 1:
-        raise ValueError('Cannot combine RDKit versions within an optimization campaign')
+        recorded = results.get(action_id)
+        if not recorded:
+            raise ValueError('Missing recorded measurements')
+        for batch in prediction_observations(recorded):
+            if batch.get('library_action_id') != library_id:
+                raise ValueError('Measurements must reference the same recorded library')
+            for observation in batch['observations']:
+                candidate_id = observation.get('candidate_id')
+                if candidate_id not in candidates or observation['canonical_smiles'] != canonical(candidates[candidate_id]):
+                    raise ValueError('Measurement identity mismatch')
+                row = rows.setdefault(candidate_id, {'Molecule_ID': candidate_id})
+                for item in observation['values']:
+                    prop, value = item['property'], item['value']
+                    if prop not in names:
+                        continue
+                    score = SCORES.get(prop)
+                    expected_method = score['method'] if score else 'RDKit'
+                    expected_source = 'predicted' if score else 'computed'
+                    scope = observation.get('protein_scope_id')
+                    if observation['method'] != expected_method or observation['source'] != expected_source:
+                        raise ValueError('Unsupported measurement method')
+                    if score and (not isinstance(scope, str) or not scope.startswith('boltz-target:')):
+                        raise ValueError('A protein target scope is required')
+                    if item['unit'] != units[prop] or isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                        raise ValueError('Invalid measurement unit or value')
+                    signature = (observation['method'], observation['method_version'], observation['source'], item['unit'], scope)
+                    if prop in provenance and provenance[prop] != signature:
+                        raise ValueError('Cannot combine versions, methods, units or protein targets within an optimization campaign')
+                    provenance[prop] = signature
+                    if prop in row and row[prop] != value:
+                        raise ValueError('Conflicting repeated measurements')
+                    row[prop] = value
+    scopes = {signature[-1] for name, signature in provenance.items() if name in SCORES}
+    if len(scopes) > 1:
+        raise ValueError('Cannot combine protein targets across objectives')
     complete = [r for r in rows.values() if names <= r.keys()]
     incomplete = [key for key, r in rows.items() if not names <= r.keys()]
     return library, complete, incomplete
@@ -104,8 +122,11 @@ def validate_targets(targets, strategy):
     if strategy == 'single' and len(targets) != 1:
         raise ValueError('Single-objective strategy requires one target')
     for target in targets:
-        if target['name'] not in DESCRIPTORS:
+        from .scoring import SCORES
+        if target['name'] not in DESCRIPTORS and target['name'] not in SCORES:
             raise ValueError('Unsupported objective')
+        if target['name'] in SCORES and target['mode'] != SCORES[target['name']]['mode']:
+            raise ValueError('Use the provider-defined optimization direction for predicted scores')
         bounds = target.get('bounds')
         if bounds is not None and (len(bounds) != 2 or bounds[0] >= bounds[1]):
             raise ValueError('Target bounds must increase')
