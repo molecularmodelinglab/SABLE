@@ -36,3 +36,14 @@ Jobs pin the selected credential ID and a key fingerprint when queued. Account
 selection changes apply to new jobs. Deleted, inactive, foreign-owned or replaced
 credentials block further provider requests; they never fall back to a deployment
 key. A queued job can still be cancelled locally without its credential.
+
+For Bayesian optimization, use `source_action_id` referencing a BayBE
+recommendation (or a whole candidate library). The screen evaluates only those
+selected candidates and retains the original library identity. Use its completed
+action ID in BayBE's cumulative `measurement_action_ids`. `library_action_id`
+remains accepted for whole-library screens; supply exactly one source reference.
+Use objective `boltz_optimization_score`, mode `MAX`. Do not reuse self-hosted
+affinity bounds or assume a 0–1 score range. Confidence is not the objective.
+Keep exact protein sequences and chain assignments fixed across rounds. Resolve
+UniProt targets through `uniprot` before asking for sequences. Model version is
+not reported by this adapter; disclose that limitation.

@@ -27,12 +27,9 @@ def _payload(inputs, molecules):
 
 
 def screen(inputs, context):
-    library = context.results.get(inputs['library_action_id'])
-    if not library or library.get('kind') != 'candidate_library':
-        raise ValueError('A successful candidate-library action is required')
-    molecules = [{'id': row['id'], 'smiles': row['smiles']} for row in library['candidates']]
+    from sable_runtime.scoring import selected_candidates, validate_scoring_scope
+    library_id, molecules = selected_candidates(inputs, context.results)
     payload = _payload(inputs, molecules)
-    payload['library_action_id'] = inputs['library_action_id']
+    validate_scoring_scope(context.results, library_id, payload['protein_scope_id'])
+    payload['library_action_id'] = library_id
     return context.submit_job('screen', payload)
-
-

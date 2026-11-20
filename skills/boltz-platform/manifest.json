@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "id": "boltz-platform",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Boltz Platform library screens with target-scoped confidence and optimization scores.",
   "operations": [
     {
       "id": "screen",
       "handler": "screen",
-      "description": "Queue a Platform library screen from an owned candidate library.",
+      "description": "Screen a recorded library or BayBE recommendation batch using the Platform optimization score.",
       "input_schema": {
         "type": "object",
         "additionalProperties": false,
@@ -40,11 +40,36 @@
             },
             "minItems": 1,
             "maxItems": 16
+          },
+          "source_action_id": {
+            "type": "string",
+            "minLength": 1
           }
         },
         "required": [
-          "library_action_id",
           "proteins"
+        ],
+        "oneOf": [
+          {
+            "required": [
+              "library_action_id"
+            ],
+            "not": {
+              "required": [
+                "source_action_id"
+              ]
+            }
+          },
+          {
+            "required": [
+              "source_action_id"
+            ],
+            "not": {
+              "required": [
+                "library_action_id"
+              ]
+            }
+          }
         ]
       },
       "output_schema": {
