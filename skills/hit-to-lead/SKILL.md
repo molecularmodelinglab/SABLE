@@ -40,3 +40,13 @@ missing context, credentials, unavailable capabilities, or consequential choices
 Do not replace binding objectives with QED/logP. Explicit OpenFE/free-energy
 requests require the appropriate OpenFE contract and inputs; do not substitute
 Boltz scores for binding free energies.
+
+Library breadth is separate from scoring budget. Preserve requested batch size
+and iterations for BayBE; do not use their product as the HEALER library cap.
+When enumeration size was not specified, omit the enumeration breadth parameters
+to use the deployment's HEALER defaults. A two-round, three-per-round campaign
+normally explores a broader library and scores at most six recommended analogues,
+plus a separately authorized or explained baseline. Pass library references to
+BayBE and recommendation references to scorers so large libraries do not exceed
+scorer batch limits. If too few eligible candidates remain, report the generated,
+excluded and retained counts and the resulting smaller evaluation budget.
