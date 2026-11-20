@@ -1,0 +1,15 @@
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const vm = require('node:vm')
+const ts = require('/workspace/ui/node_modules/typescript')
+const source = fs.readFileSync('/workspace/ui/src/components/campaign/presentation.ts','utf8')
+const exportsObject = {}
+vm.runInNewContext(ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText,{exports:exportsObject})
+const prediction = {kind:'boltz_prediction',provider:'self_hosted',protein_scope_id:'target',measurement:{id:'one',smiles:'CCO',metrics:{affinity:-2,binding_confidence:0.8}}}
+const view=exportsObject.present({kind:'remote_batch_result',results:[prediction],failures:[{job_id:'failed'}]})
+assert.equal(view.title,'Binding predictions')
+assert.equal(view.blocks[0].rows.length,2)
+assert.match(view.blocks[0].rows[0].metric,/log10/)
+assert.match(view.summary,/1 calculation/)
+assert.match(exportsObject.present({kind:'remote_batch',jobs:[{},{}]}).summary,/2 molecule jobs/)
+console.log('PASS: binding batch scores, metric labels, and partial failures.')

@@ -128,3 +128,11 @@ def test_upload_requires_a_pause_or_clarification(service):
         service.upload_artifact(state['id'],'alice','next.txt','CCN')
     service.execution(state['id'],'alice','paused')
     assert len(service.upload_artifact(state['id'],'alice','next.txt','CCN')['artifacts'])==2
+
+
+def test_account_provider_preference_reaches_model(service):
+    service.preferences = lambda owner: {'boltz_provider':'platform','boltz_skill_id':'boltz-platform'}
+    state = service.create('alice', 'Optimize binding')
+    model = ScriptedModel([decision('ask_user', question='Which target?')])
+    service.advance(state['id'], 'alice', model)
+    assert model.contexts[0]['preferences']['boltz_skill_id'] == 'boltz-platform'

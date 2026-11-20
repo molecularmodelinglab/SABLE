@@ -207,7 +207,7 @@ def test_missing_pinned_version_returns_a_conflict(service):
 def test_discovery_finish_requires_current_ranking(service):
     state = service.create('alice', 'Optimize analogues')
     service.registry.install(Path(__file__).resolve().parents[2] / 'skills/baybe')
-    state['skills'].append({'id': 'baybe', 'version': '1.1.0'})
+    state['skills'].append({'id': 'baybe', 'version': '1.2.0'})
     state['loaded']['baybe'] = {}
     state['results'] = {
         'recommendation': {'kind': 'recommendation', 'library_action_id': 'library'},

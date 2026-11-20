@@ -28,11 +28,11 @@ def setup(tmp_path):
     reg = registry()
     ledger = Ledger(tmp_path / 'science.sqlite')
     ledger.create_campaign('science', 'alice', Budget(max_actions=24, max_units=32))
-    grants = {(name, version, op.id) for name, version in [('healer','1.1.0'),('baybe','1.1.0'),('rdkit-descriptors','1.3.0')]
+    grants = {(name, version, op.id) for name, version in [('healer','1.1.0'),('baybe','1.2.0'),('rdkit-descriptors','1.3.0')]
               for op in reg.get(name, version).manifest.operations}
     executor = Executor(reg, ledger, grants={'alice': grants})
     def execute(skill, operation, action_id, inputs):
-        version = '1.3.0' if skill == 'rdkit-descriptors' else '1.1.0'
+        version = '1.3.0' if skill == 'rdkit-descriptors' else '1.2.0' if skill == 'baybe' else '1.1.0'
         return executor.execute(Action(campaign_id='science', action_id=action_id, skill_id=skill,
                                 skill_version=version, skill_digest=reg.get(skill, version).digest,
                                 operation_id=operation, inputs=inputs), owner='alice')
@@ -71,9 +71,9 @@ def test_hard_constraints_deduplication_and_seed_exclusion():
 
 def test_workflow_skill_is_instruction_only():
     reg = registry()
-    description = reg.describe('hit-to-lead','1.2.0',{('hit-to-lead','1.2.0')})
+    description = reg.describe('hit-to-lead','1.3.0',{('hit-to-lead','1.3.0')})
     assert not description['manifest']['operations']
-    assert reg.get('hit-to-lead', '1.2.0').code == b''
+    assert reg.get('hit-to-lead', '1.3.0').code == b''
 
 
 @pytest.mark.parametrize('strategy', ['single','pareto','desirability'])

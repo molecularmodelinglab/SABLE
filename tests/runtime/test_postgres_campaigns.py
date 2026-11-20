@@ -219,3 +219,24 @@ def test_disabled_account_is_not_scheduled(storage):
         db.execute('UPDATE public.users SET is_active=false WHERE id=?', (alice,))
     CampaignRunner(campaigns, lambda: pytest.fail('Disabled account must not incur model usage')).tick()
     assert campaigns.get(state['id'], alice)['turns'] == 0
+
+
+def test_independent_jobs_share_one_committed_action(storage, remote_fixture):
+    ledger, alice, _ = storage
+    fixture = remote_fixture
+    ledger.create_campaign('batch', alice, Budget(max_actions=3, max_units=3))
+    manager = JobManager(ledger, fixture.registry, services=fixture.services, clock=lambda:fixture.clock[0])
+    action = fixture.action.model_copy(update={'campaign_id':'batch'})
+    skill = fixture.registry.get('remote','1.0.0')
+    ledger.claim(action, alice, 'batch-fingerprint', 1, {})
+    receipt = manager.enqueue_many(action, skill, 'compute', [{'value':1}, {'value':2}, {'value':3}], alice)
+    assert len(receipt['jobs']) == 3
+    assert manager.enqueue_many(action, skill, 'compute', [{'value':1}, {'value':2}, {'value':3}], alice) == receipt
+    assert manager.drive_due() == []
+    ledger.finish(action, alice, 'succeeded', receipt)
+    assert len(manager.drive_due()) == 3
+    fixture.clock[0] += 2
+    assert len(manager.drive_due()) == 3
+    from sable_runtime.job_results import resolved_job_results
+    result = resolved_job_results(manager.list('batch', alice))[action.action_id]
+    assert sorted(item['value'] for item in result['results']) == [1,2,3]

@@ -313,3 +313,13 @@ def test_late_result_invalidates_a_report_that_cited_timeout(runtime):
     assert state['status']=='ready' and state['report'] is None
     assert state['results']['turn-2']=={'value':2}
     assert any(e['kind']=='report_invalidated' for e in r.ledger.events(state['id'],'alice'))
+
+
+def test_batch_enqueue_rolls_back_every_item_on_failure(runtime):
+    r=runtime
+    r.jobs.services['example']=ServiceBinding('https://example.invalid','test-key')
+    r.jobs.credentials=lambda *args:SecretStr('secret-value')
+    skill=r.registry.get('remote','1.0.0')
+    with pytest.raises(JobConflict,match='Credential'):
+        r.jobs.enqueue_many(r.action,skill,'compute',[{'value':1},{'value':'secret-value'}],'alice')
+    assert r.jobs.list('campaign','alice')==[]
