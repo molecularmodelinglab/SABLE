@@ -105,7 +105,7 @@ export function present(result: Result): Presentation {
   if (result.kind === 'remote_job') { title = 'Calculation submitted'; summary = 'Waiting for the remote service. Results will appear here when available.' }
   if (!blocks.length) {
     const scalar = Object.entries(result).filter(([, value]) => value === null || typeof value === 'string' || typeof value === 'boolean' || finite(value))
-    if (scalar.length) blocks.push({ type: 'table', title: 'Summary', columns: [{ key: 'property', label: 'Property' }, { key: 'value', label: 'Value' }], rows: scalar.filter(([key]) => key !== 'figure_png_base64').map(([key, value]) => ({ property: readable(key), value: value as DataRow[string] })) })
+    if (scalar.length) blocks.push({ type: 'table', title: 'Summary', columns: [{ key: 'property', label: 'Property' }, { key: 'value', label: 'Value' }], rows: scalar.filter(([key]) => !['figure_png_base64', 'figure_svg', 'figure_html'].includes(key)).map(([key, value]) => ({ property: readable(key), value: value as DataRow[string] })) })
   }
   return { version: 1, title, summary, blocks }
 }

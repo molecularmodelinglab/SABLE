@@ -2752,3 +2752,10 @@ button.secondary:hover:not(:disabled) {
 .campaign-delete-confirm { background: #b42318; border-color: #b42318; color: #fff; }
 .campaign-delete-confirm:hover:not(:disabled) { background: #912018; border-color: #912018; }
 .campaign-delete-error { color: #b42318; }
+
+.campaign-export-figure { display: block; width: 100%; max-height: 560px; object-fit: contain; }
+.campaign-interactive-figure { width: 100%; height: 640px; border: 0; background: white; }
+.campaign-structure-result { display: grid; grid-template-columns: minmax(0, 2fr) minmax(180px, 1fr); gap: 1rem; margin-top: 1rem; }
+.campaign-structure-result aside { overflow-wrap: anywhere; }
+.campaign-structure-result dd { margin: 0 0 0.75rem; font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) { .campaign-structure-result { grid-template-columns: minmax(0, 1fr); } }

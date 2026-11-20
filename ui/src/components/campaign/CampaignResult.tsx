@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts'
+import { PredictionStructures } from './PredictionStructures'
 import { MoleculeViewer } from '../MoleculeViewer'
 import { ResultsTable } from '../ResultsTable'
 import { DistributionChart } from '../DistributionChart'
@@ -41,7 +42,7 @@ function Chart({ block }: { block: Extract<Block, { type: 'chart' }> }) {
   return <figure className="campaign-chart"><figcaption>{block.title} · {block.x_label} / {block.y_label}</figcaption><ResponsiveContainer width="100%" height={280}>{block.style === 'line' ? <LineChart data={block.points}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="x" name={block.x_label} type="number" domain={['dataMin', 'dataMax']} /><YAxis name={block.y_label} domain={['auto', 'auto']} /><Tooltip /><Line dataKey="y" name={block.y_label} type="linear" stroke="#13294b" dot /></LineChart> : <ScatterChart><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="x" name={block.x_label} type="number" /><YAxis dataKey="y" name={block.y_label} type="number" /><Tooltip cursor={{ strokeDasharray: '3 3' }} /><Scatter data={block.points} fill="#4b9cd3" /></ScatterChart>}</ResponsiveContainer></figure>
 }
 
-export function CampaignResult({ id, result, skill, operation }: { id: string; result: Result; skill?: string; operation?: string }) {
+export function CampaignResult({ id, result, skill, operation, campaignId }: { campaignId?: string; id: string; result: Result; skill?: string; operation?: string }) {
   const view = present(result)
   const [expanded, setExpanded] = useState(false)
   const dialog = useRef<HTMLDialogElement | null>(null)
@@ -49,21 +50,27 @@ export function CampaignResult({ id, result, skill, operation }: { id: string; r
     if (expanded) dialog.current?.showModal()
     else if (dialog.current?.open) { dialog.current.close(); document.getElementById(`result-${id}`)?.querySelector('button')?.focus() }
   }, [expanded, id])
+  const [interactive, setInteractive] = useState(false)
   const [chart, setChart] = useState(0)
   const [molecules, setMolecules] = useState(false)
   const charts = view.blocks.filter((block): block is Extract<Block, { type: 'chart' }> => block.type === 'chart')
   const png = typeof result.figure_png_base64 === 'string' && result.figure_png_base64.length < 2_000_000 && /^[A-Za-z0-9+/=]+$/.test(result.figure_png_base64) ? result.figure_png_base64 : null
+  const svg = typeof result.figure_svg === 'string' && result.figure_svg.length <= 3_000_000 ? result.figure_svg : null
+  const html = typeof result.figure_html === 'string' && result.figure_html.length <= 3_000_000 ? result.figure_html : null
   const moleculeBlocks = view.blocks.filter((block): block is Extract<Block, { type: 'molecules' }> => block.type === 'molecules')
   const card = <article id={`result-${id}`} className={`campaign-result-card${expanded ? ' campaign-result-card--expanded' : ''}`} aria-label={view.title}>
     <header><div><p className="workspace-muted">{skill ? readable(skill) : 'Scientific result'}</p><h3>{view.title}</h3></div><button aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? 'Close expanded view' : 'Expand result'}</button></header>
     <p>{view.summary}</p>
-    {charts.length > 0 && <section>{charts.length > 1 && <label>Chart <select value={chart} onChange={e => setChart(Number(e.target.value))}>{charts.map((block, index) => <option key={index} value={index}>{block.title}</option>)}</select></label>}<Chart block={charts[Math.min(chart, charts.length - 1)]} /></section>}
+    {html && <section><button aria-expanded={interactive} onClick={() => setInteractive(value => !value)}>{interactive ? 'Hide interactive figure' : 'Explore interactive figure'}</button>{interactive && <><p className="workspace-muted">Zoom, inspect molecules, and use the camera icon to export the current view as SVG. Requires access to the Plotly CDN.</p><iframe title={view.title + ' interactive figure'} className="campaign-interactive-figure" sandbox="allow-scripts allow-downloads" referrerPolicy="no-referrer" srcDoc={html} /></>}</section>}
+    {svg && !interactive && <img className="campaign-export-figure" alt={view.title} src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`} />}
+    {campaignId && <PredictionStructures result={result} campaignId={campaignId} />}
+    {!svg && charts.length > 0 && <section>{charts.length > 1 && <label>Chart <select value={chart} onChange={e => setChart(Number(e.target.value))}>{charts.map((block, index) => <option key={index} value={index}>{block.title}</option>)}</select></label>}<Chart block={charts[Math.min(chart, charts.length - 1)]} /></section>}
     {view.blocks.filter((block): block is Extract<Block, { type: 'table' }> => block.type === 'table').map((block, index) => <section key={index}><h4>{block.title}</h4><DataTable block={block} /></section>)}
     {moleculeBlocks.length > 0 && <section><button aria-expanded={molecules} onClick={() => setMolecules(value => !value)}>{molecules ? 'Hide molecules' : `View molecules (${moleculeBlocks.reduce((n, b) => n + b.items.length, 0)})`}</button>{(molecules || moleculeBlocks.reduce((n, b) => n + b.items.length, 0) <= 3) && moleculeBlocks.map((block, index) => <Molecules key={index} block={block} />)}</section>}
     {Array.isArray(result.matches) && result.matches.filter(object).map(match => typeof match.cid === 'number' && Number.isInteger(match.cid) && match.cid > 0 ? <a key={match.cid} href={`https://pubchem.ncbi.nlm.nih.gov/compound/${match.cid}`} target="_blank" rel="noreferrer">PubChem CID {match.cid}</a> : null)}
     {result.source === 'CAS Common Chemistry' && typeof result.cas_rn === 'string' && /^[1-9][0-9]{1,6}-[0-9]{2}-[0-9]$/.test(result.cas_rn) && <a href={`https://commonchemistry.cas.org/detail?cas_rn=${result.cas_rn}`} target="_blank" rel="noreferrer">CAS Common Chemistry record</a>}
-    <footer className="campaign-result-toolbar"><button onClick={() => saveFile('scientific-result.json', JSON.stringify(result, null, 2))}>Download result</button>{png && <a download="campaign-figure.png" href={`data:image/png;base64,${png}`}>Download figure (PNG)</a>}</footer>
-    <details><summary>Source and technical details</summary><p>Recorded action: {id}{operation ? ` · ${operation}` : ''}</p><pre>{JSON.stringify(result, (key, value) => key === 'figure_png_base64' ? '[downloadable PNG figure]' : value, 2)}</pre></details>
+    <footer className="campaign-result-toolbar"><button onClick={() => saveFile('scientific-result.json', JSON.stringify(result, null, 2))}>Download result</button>{svg && <button onClick={() => saveFile('campaign-figure.svg', svg, 'image/svg+xml')}>Download figure (SVG)</button>}{html && <button onClick={() => saveFile('campaign-figure.html', html, 'text/html')}>Download interactive figure</button>}{png && <a download="campaign-figure.png" href={`data:image/png;base64,${png}`}>Download figure (PNG)</a>}</footer>
+    <details><summary>Source and technical details</summary><p>Recorded action: {id}{operation ? ` · ${operation}` : ''}</p><pre>{JSON.stringify(result, (key, value) => ['figure_png_base64', 'figure_svg', 'figure_html'].includes(key) ? '[downloadable figure]' : value, 2)}</pre></details>
   </article>
   return <>{!expanded && card}<dialog ref={dialog} className="campaign-result-dialog" onCancel={() => setExpanded(false)} onClose={() => setExpanded(false)} aria-label={view.title}>{expanded && card}</dialog></>
 }
