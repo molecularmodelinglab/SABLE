@@ -105,7 +105,8 @@ export function NewRunPage() {
   useEffect(() => {
     if (!campaign) return
     const id = campaign.id
-    let active = true, fetching = false, cursor = 0
+    let active = true, fetching = false
+    let cursor = 0
     setEvents([]); setFullEvent(null); setTraceFilter('all'); setTraceSearch('')
     const refresh = async () => {
       if (fetching) return
@@ -132,11 +133,15 @@ export function NewRunPage() {
     if (!campaign) return
     const id = campaign.id
     let active = true, fetching = false
+    let revision: number | undefined
     const refresh = async () => {
       if (fetching || requestBusy.current) return
       fetching = true
       try {
+        const status = await request<{ revision: number }>(`/${encodeURIComponent(id)}/status`)
+        if (status.revision !== undefined && status.revision === revision) return
         const next = await request<Campaign>(`/${encodeURIComponent(id)}`)
+        revision = status.revision
         if (active && !requestBusy.current) { setCampaign(previous => previous?.id === id ? next : previous); setJobError('') }
       } catch (error) { if (active) setJobError(error instanceof Error ? error.message : 'Campaign refresh failed') }
       finally { fetching = false }
