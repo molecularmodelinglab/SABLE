@@ -32,7 +32,7 @@ class BoltzAccessService:
 
         provider = settings.get("provider")
         if provider not in {"self_hosted", "platform"}:
-            provider = "self_hosted" if is_admin else None
+            provider = None
 
         return BoltzSettingsResponse(
             access_status=access_status,
