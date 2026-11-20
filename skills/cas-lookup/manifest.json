@@ -1,0 +1,279 @@
+{
+  "schema_version": 1,
+  "id": "cas-lookup",
+  "version": "1.0.0",
+  "description": "Search CAS Common Chemistry, resolve CAS Registry Numbers to sourced chemical structures and reported properties, and export molfiles to campaign artifacts.",
+  "operations": [
+    {
+      "id": "search",
+      "handler": "search",
+      "description": "Search CAS RN, name, SMILES, InChI or InChIKey; one explicit page, no automatic identity selection.",
+      "service": "cas-common-chemistry",
+      "credential": "cas-common-chemistry",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "const": "CAS Common Chemistry"
+          },
+          "retrieved_at": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "resolved",
+              "not_found",
+              "authentication_required",
+              "rate_limited",
+              "unavailable",
+              "invalid_response"
+            ]
+          },
+          "kind": {
+            "const": "cas_search"
+          },
+          "query": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "count": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "matches": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "cas_rn": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cas_rn",
+                "name"
+              ]
+            }
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "presentation": {
+            "type": "object",
+            "description": "Shared result-presentation contract, validated by the runtime."
+          }
+        },
+        "required": [
+          "source",
+          "retrieved_at",
+          "status",
+          "kind",
+          "query",
+          "offset",
+          "size",
+          "count",
+          "matches",
+          "has_more"
+        ]
+      }
+    },
+    {
+      "id": "detail",
+      "handler": "detail",
+      "description": "Retrieve one CAS record with reported structures, experimental properties, conditions and citations.",
+      "service": "cas-common-chemistry",
+      "credential": "cas-common-chemistry",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cas_rn": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{1,6}-[0-9]{2}-[0-9]$"
+          }
+        },
+        "required": [
+          "cas_rn"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "const": "CAS Common Chemistry"
+          },
+          "retrieved_at": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "resolved",
+              "not_found",
+              "authentication_required",
+              "rate_limited",
+              "unavailable",
+              "invalid_response"
+            ]
+          },
+          "kind": {
+            "const": "cas_record"
+          },
+          "cas_rn": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "record": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "smiles": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "presentation": {
+            "type": "object",
+            "description": "Shared result-presentation contract, validated by the runtime."
+          }
+        },
+        "required": [
+          "source",
+          "retrieved_at",
+          "status",
+          "kind",
+          "cas_rn",
+          "source_url",
+          "record",
+          "smiles"
+        ]
+      }
+    },
+    {
+      "id": "export_molfile",
+      "handler": "export_molfile",
+      "description": "Save a validated molfile from a resolved CAS detail action as an owned campaign artifact.",
+      "service": "cas-common-chemistry",
+      "credential": "cas-common-chemistry",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "detail_action_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "detail_action_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "const": "CAS Common Chemistry"
+          },
+          "retrieved_at": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "resolved",
+              "not_found",
+              "authentication_required",
+              "rate_limited",
+              "unavailable",
+              "invalid_response"
+            ]
+          },
+          "kind": {
+            "const": "cas_structure"
+          },
+          "cas_rn": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "detail_action_id": {
+            "type": "string"
+          },
+          "artifact": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "presentation": {
+            "type": "object",
+            "description": "Shared result-presentation contract, validated by the runtime."
+          }
+        },
+        "required": [
+          "source",
+          "retrieved_at",
+          "status",
+          "kind",
+          "cas_rn",
+          "source_url",
+          "detail_action_id",
+          "artifact"
+        ]
+      }
+    }
+  ],
+  "requirements": {
+    "modules": [
+      "requests",
+      "rdkit"
+    ],
+    "services": [
+      "cas-common-chemistry"
+    ]
+  }
+}
