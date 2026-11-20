@@ -76,7 +76,7 @@ def test_manifest_library_contract_and_dependencies():
 def test_package_installs_remote_adapter_snapshot():
     registry = SkillRegistry()
     registry.install(PACKAGE)
-    installed = registry.get('healer-api', '1.0.0')
+    installed = registry.get('healer-api', '1.1.0')
     assert installed.files['remote.py'] == (PACKAGE / 'remote.py').read_bytes()
     assert callable(registry.handler(installed, installed.manifest.operations[0]))
 
@@ -85,19 +85,19 @@ def test_durable_enqueue_then_drive_uses_service_credential(api, tmp_path):
     _, _, http, _ = api
     registry = SkillRegistry()
     registry.install(PACKAGE)
-    skill = registry.get('healer-api', '1.0.0')
+    skill = registry.get('healer-api', '1.1.0')
     assert registry.available() == set()
-    assert registry.available(services=['healer-api']) == {('healer-api', '1.0.0')}
+    assert registry.available(services=['healer-api']) == {('healer-api', '1.1.0')}
     ledger = Ledger(tmp_path / 'ledger.sqlite')
     ledger.create_campaign('campaign', 'alice', Budget(max_actions=2, max_units=4))
     now = [100.0]
     services = {'healer-api': ServiceBinding('https://healer.example', credential='healer-token')}
     credentials = Mock(spec=lambda owner, reference: None, return_value=SecretStr('test-service-secret'))
     jobs = JobManager(ledger, registry, services=services, credentials=credentials, clock=lambda: now[0])
-    executor = Executor(registry, ledger, grants={'alice': {('healer-api', '1.0.0', 'enumerate')}},
+    executor = Executor(registry, ledger, grants={'alice': {('healer-api', '1.1.0', 'enumerate')}},
                         services=services, jobs=jobs)
     action = Action(campaign_id='campaign', action_id='library', skill_id='healer-api',
-                    skill_version='1.0.0', skill_digest=skill.digest, operation_id='enumerate',
+                    skill_version='1.1.0', skill_digest=skill.digest, operation_id='enumerate',
                     inputs={'starting_smiles': 'CCO', 'max_candidates': 4})
     receipt = executor.execute(action, owner='alice')
     assert receipt['status'] == 'queued'
@@ -129,8 +129,8 @@ def test_submit_contract_and_seed_not_sent(api):
     http.assert_called_once_with('POST', 'https://healer.example/api/enumerate/molecule',
                                  headers={}, timeout=(5, 30), allow_redirects=False, stream=True,
                                  json={'molecule': 'OCC', 'bb_source': 'test-stock',
-                                       'reaction_tags': ['amide'], 'max_bbs_per_frag': 5,
-                                       'n_compositions': 4, 'max_total_products': 16})
+                                       'reaction_tags': ['amide'], 'max_bbs_per_frag': 10,
+                                       'n_compositions': 100, 'max_total_products': 16})
 
 
 def test_site_atom_order_and_optional_auth(api):
@@ -335,3 +335,17 @@ def test_stream_failure_closes_response_without_retry(api):
         remote.poll('job', {}, context)
     assert http.call_count == 1
     reply.close.assert_called_once()
+
+
+def test_api_submits_independent_deployment_defaults(api):
+    operations, remote, http, context = api
+    operations.enumerate({'starting_smiles':'CCO'},context)
+    inputs=context.submit_job.call_args.args[1]
+    http.side_effect=None
+    http.return_value=response({'job_id':'broad-library','status':'submitted'})
+    remote.submit(inputs,context)
+    body=http.call_args.kwargs['json']
+    assert body['max_total_products']==8000
+    assert body['n_compositions']==100
+    assert body['max_bbs_per_frag']==10
+    assert 'batch_size' not in body and 'max_iterations' not in body

@@ -1,0 +1,21 @@
+// Verify scientific result labels and count accounting without a live provider.
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const vm = require('node:vm')
+const ts = require('/workspace/ui/node_modules/typescript')
+const source = fs.readFileSync('/workspace/ui/src/components/campaign/presentation.ts', 'utf8')
+const exportsObject = {}
+vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, { exports: exportsObject })
+const prediction = { kind: 'boltz_prediction', provider: 'self_hosted', protein_scope_id: 'target', measurement: { id: 'one', smiles: 'CCO', metrics: { affinity: -2, binding_confidence: 0.8 } } }
+const view = exportsObject.present({ kind: 'remote_batch_result', results: [prediction], failures: [{ job_id: 'failed' }] })
+assert.equal(view.title, 'Binding predictions')
+assert.equal(view.blocks[0].rows.length, 2)
+assert.match(view.blocks[0].rows[0].metric, /log10/)
+assert.match(view.summary, /1 calculation/)
+assert.match(exportsObject.present({ kind: 'remote_batch', jobs: [{}, {}] }).summary, /2 molecule jobs/)
+const library = exportsObject.present({ kind: 'candidate_library', candidates: [{ id: 'a', smiles: 'CCO' }], enumeration: { source_count: 4, requested_product_cap: 8000, backend_filtered_count: 0, truncated_count: 0, exclusion_counts: { seed_or_duplicate: 3 } } })
+assert.match(library.summary, /1 usable analogues from 4 returned products/)
+assert.match(library.summary, /separate from the number scored/)
+assert.equal(library.blocks[0].title, 'Library generation')
+assert.equal(library.blocks[0].rows.find(row => row.stage === 'Seed or duplicate').count, 3)
+console.log('PASS: binding metrics, partial failures, enumeration counts, and separate evaluation budgets.')
