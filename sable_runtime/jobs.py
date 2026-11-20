@@ -28,7 +28,8 @@ def trace_inputs(value):
 
 
 class JobManager:
-    def __init__(self, ledger, registry, *, services=None, credentials=None, allowed=None, clock=time.time):
+    def __init__(self, ledger, registry, *, services=None, credentials=None, allowed=None, clock=time.time, authorize=None):
+        self.authorize = authorize
         self.ledger, self.registry = ledger, registry
         self.services, self.credentials = dict(services or {}), credentials
         self.allowed, self.clock = allowed, clock
@@ -56,6 +57,7 @@ class JobManager:
         return sha256((service.endpoint or 'sdk-managed').encode()).hexdigest()
 
     def enqueue(self, action, skill, name, payload, owner, *, batch_index=0, connection=None):
+        self._authorize(owner, skill.manifest.id)
         spec = skill.manifest.remote_jobs.get(name)
         if spec is None:
             raise JobConflict('Remote job is not declared')
@@ -103,6 +105,13 @@ class JobManager:
                                      batch_index=index, connection=db)
                         for index, payload in enumerate(payloads)]
         return {'kind': 'remote_batch', 'jobs': receipts}
+
+    def _authorize(self, owner, skill_id):
+        if self.authorize:
+            try:
+                self.authorize(owner, skill_id)
+            except PermissionError as exc:
+                raise JobConflict(str(exc)) from None
 
     def _context(self, campaign, action, owner, spec, reference=None, *, pinned=False):
         from .executor import ExecutionContext
@@ -184,6 +193,7 @@ class JobManager:
             if row['status'] in {'succeeded', 'partial', 'failed', 'cancelled'}:
                 return self.public(row)
             skill, spec = self._configuration(row)
+            self._authorize(owner, row['skill_id'])
             if row['status'] == 'unknown':
                 raise JobConflict('Submission requires explicit reconciliation; it will not be retried')
             if cancel and not spec.cancel:
@@ -266,6 +276,7 @@ class JobManager:
             db.begin_write()
             row = self._read(db, campaign, job_id, owner)
             _, spec = self._configuration(row)
+            self._authorize(owner, row['skill_id'])
             if not spec.reconcilable:
                 raise JobConflict('This service has no safe lookup for an uncertain submission; operator review is required')
             context = self._context(campaign, row['action'], owner, spec, row['credential_ref'], pinned=True)

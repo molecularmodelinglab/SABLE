@@ -8,7 +8,7 @@ from threading import Event
 from .jobs import JobManager
 from .ledger import Ledger
 from .registry import SkillRegistry
-from server.services.campaign_credentials import load_campaign_services as load_services
+from server.services.campaign_credentials import load_campaign_services as load_services, authorize_campaign_skill
 from .skill_store import load_deployment_skills, deployment_revision
 
 
@@ -19,7 +19,7 @@ def main():
     services, credentials = load_services(os.getenv('SABLE_SERVICE_BINDINGS_PATH'))
     revision = deployment_revision()
     registry, allowed, _ = load_deployment_skills(Path(__file__).resolve().parents[1] / 'skills', services)
-    jobs = JobManager(Ledger.configured(), registry, services=services, credentials=credentials, allowed=allowed)
+    jobs = JobManager(Ledger.configured(), registry, services=services, credentials=credentials, allowed=allowed, authorize=authorize_campaign_skill)
     stopped = Event()
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, lambda *_: stopped.set())

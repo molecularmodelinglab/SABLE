@@ -18,13 +18,14 @@ class CampaignConflict(RuntimeError):
 
 
 class CampaignService:
-    def __init__(self, ledger, registry, allowed, *, services=None, credentials=None, discovery_allowed=None, preferences=None):
+    def __init__(self, ledger, registry, allowed, *, services=None, credentials=None, discovery_allowed=None, preferences=None, authorize=None):
         self.preferences = preferences
+        self.authorize = authorize
         self.ledger, self.registry = ledger, registry
         self.allowed = frozenset(allowed)  # Host-configured skill/version pairs.
         self.discovery_allowed = frozenset(allowed if discovery_allowed is None else discovery_allowed)
         self.services, self.credentials = dict(services or {}), credentials
-        self.jobs = JobManager(ledger, registry, services=self.services, credentials=credentials, allowed=self.allowed)
+        self.jobs = JobManager(ledger, registry, services=self.services, credentials=credentials, allowed=self.allowed, authorize=authorize)
         self.artifacts = ArtifactStore(ledger)
         if ledger.postgres:
             return
@@ -43,10 +44,11 @@ class CampaignService:
 
     def create(self, owner, prompt):
         campaign_id = 'campaign-' + uuid4().hex
-        pins = self.registry.discover(self.discovery_allowed)
+        preferences = self.preferences(owner) if self.preferences else {}
+        pins = self.registry.discover(self._visible_skills(owner))
         state = dict(id=campaign_id, status='ready', history=[{'role': 'user', 'content': prompt}],
                      skills=pins, loaded={}, results={}, report=None, question=None,
-                     turns=0, max_turns=100, model=None, pending=None, error=None, agent_spec=AGENT_SPEC, preferences=self.preferences(owner) if self.preferences else {})
+                     turns=0, max_turns=100, model=None, pending=None, error=None, agent_spec=AGENT_SPEC, preferences=preferences)
         with self.ledger.connect() as db:
             db.begin_write()
             db.execute('INSERT INTO campaigns(id,owner,max_actions,max_units) VALUES(?,?,?,?)',
@@ -103,13 +105,31 @@ class CampaignService:
             execution = db.execute('SELECT execution_mode,execution_error FROM agent_campaigns WHERE id=?', (campaign_id,)).fetchone()
             return {**state, 'execution_mode': execution['execution_mode'], 'execution_error': execution['execution_error'], 'busy': busy, 'jobs': jobs, 'artifacts': self.artifacts.list(campaign_id, owner), 'metrics':metrics}
 
-    def catalog(self):
+    def _can_access(self, owner, skill_id):
+        if self.authorize is None:
+            return True
+        if owner is None:
+            return False
+        try:
+            self.authorize(owner, skill_id)
+        except PermissionError:
+            return False
+        return True
+
+    def _visible_skills(self, owner):
+        if self.authorize is None:
+            return self.discovery_allowed
+        selected = {key for key in self.discovery_allowed if self._can_access(owner, key[0])}
+        return self.registry.available(self.services, candidates=selected)
+
+    def catalog(self, owner=None):
+        selected = self._visible_skills(owner)
         return [dict(id=skill.manifest.id, version=skill.manifest.version,
                      description=skill.manifest.description, digest=skill.digest,
-                     available=key in self.discovery_allowed, resumable=key in self.allowed,
+                     available=key in selected, resumable=key in self.allowed,
                      requirements=skill.manifest.requirements.model_dump(),
                      operations=[{'id':op.id,'description':op.description} for op in skill.manifest.operations])
-                for key, skill in sorted(self.registry._skills.items())]
+                for key, skill in sorted(self.registry._skills.items()) if self._can_access(owner, key[0])]
 
     def export(self, campaign_id, owner):
         state = self.get(campaign_id, owner)
@@ -246,7 +266,15 @@ class CampaignService:
                         return feedback
             state.update(status='completed', report=args)
             return args
-        pin = next(p for p in state['skills'] if p['id'] == args['skill_id'])
+        if self.authorize:
+            try:
+                self.authorize(owner, args['skill_id'], state.get('preferences', {}))
+            except PermissionError as exc:
+                state.update(status='awaiting_user', question=str(exc))
+                return {'error': 'skill_access_denied', 'question': str(exc)}
+        pin = next((p for p in state['skills'] if p['id'] == args['skill_id']), None)
+        if pin is None:
+            raise ValueError('Skill is not available in this campaign')
         if decision.name == 'load_skill':
             description = self.registry.describe(pin['id'], pin['version'], self.allowed)
             state['loaded'][pin['id']] = description
