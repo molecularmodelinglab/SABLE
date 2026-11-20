@@ -114,3 +114,74 @@ def test_registry_dispatch_and_durable_replay(monkeypatch, tmp_path):
     assert result['status'] == 'resolved'
     assert executor.execute(action, owner='owner') == result
     assert len(calls) == 1
+
+
+def test_cas_search_details_export_and_secret_isolation(monkeypatch, tmp_path):
+    from pydantic import SecretStr
+    from rdkit import Chem
+    from sable_runtime.artifacts import ArtifactStore
+    from sable_runtime.executor import ExecutionError
+    from sable_runtime.skill_validation import validate_package
+    root = ROOT.parent / 'cas-lookup'
+    validate_package(root)
+    registry = SkillRegistry(); registry.install(root)
+    skill = registry.get('cas-lookup', '1.0.0')
+    ledger = Ledger(tmp_path / 'cas.sqlite')
+    ledger.create_campaign('campaign', 'alice', Budget(max_actions=8, max_units=8))
+    artifacts = ArtifactStore(ledger)
+    executor = Executor(registry, ledger, grants={'alice': {('cas-lookup','1.0.0',op.id) for op in skill.manifest.operations}},
+        services={'cas-common-chemistry': ServiceBinding('https://commonchemistry.cas.org/direct-api','cas-common-chemistry')},
+        credentials=lambda owner, reference: SecretStr('test-secret-cas-key'), artifacts=artifacts)
+    detail = {'rn':'50-00-0','name':'Formaldehyde','uri':'substance/pt/50000','canonicalSmile':'C=O',
+        'image':'<svg>untrusted markup</svg>',
+        'experimentalProperties':[{'name':'Boiling Point','property':'-19.5 °C at 760 mmHg','sourceNumber':1},
+                                  {'name':'Melting Point','property':'-92 to -90 °C','sourceNumber':1},
+                                  {'name':'Density','property':'0.8 g/cm3','sourceNumber':1}],
+        'propertyCitations':[{'sourceNumber':1,'source':'Reference source'}]}
+    calls=[]
+    def get(url, **kwargs):
+        calls.append((url,kwargs))
+        if url.endswith('/search'):return Response(raw=json.dumps({'count':'2','results':[{'rn':'50-00-0','name':'Formaldehyde'}]}).encode())
+        if url.endswith('/export'):return Response(raw=Chem.MolToMolBlock(Chem.MolFromSmiles('C=O')).encode())
+        return Response(raw=json.dumps(detail).encode())
+    monkeypatch.setattr(requests,'get',get)
+    def run(operation, action_id, inputs):
+        return executor.execute(Action(campaign_id='campaign',action_id=action_id,skill_id='cas-lookup',skill_version='1.0.0',
+            skill_digest=skill.digest,operation_id=operation,inputs=inputs),owner='alice')
+    page=run('search','search',{'query':'form*','size':1})
+    assert page['count']==2 and page['has_more'] and len(calls)==1
+    record=run('detail','detail',{'cas_rn':'50-00-0'})
+    assert record['record']['experimentalProperties']==detail['experimentalProperties']
+    assert record['record']['propertyCitations']==detail['propertyCitations']
+    assert 'image' not in record['record'] and record['smiles']=='C=O'
+    assert run('detail','detail',{'cas_rn':'50-00-0'})==record and len(calls)==2
+    exported=run('export_molfile','export',{'detail_action_id':'detail'})
+    assert exported['status']=='resolved'
+    assert 'M  END' in artifacts.read('campaign','alice',exported['artifact']['id'])
+    with pytest.raises(PermissionError):artifacts.read('campaign','bob',exported['artifact']['id'])
+    with pytest.raises(ExecutionError):run('export_molfile','foreign',{'detail_action_id':'not-owned'})
+    assert len(calls)==3
+    for _,kwargs in calls:
+        assert kwargs['headers']['X-API-KEY']=='test-secret-cas-key'
+        assert kwargs['headers']['x-origin']=='https://commonchemistry.cas.org/api-overview'
+        assert kwargs['allow_redirects'] is False and kwargs['timeout']==(5,20)
+    assert calls[-1][1]['params']['uri']=='substance/pt/50000'
+    assert 'test-secret-cas-key' not in json.dumps(ledger.events('campaign','alice'))
+
+
+def test_cas_failures_do_not_establish_identity(monkeypatch):
+    from pydantic import SecretStr
+    spec=importlib.util.spec_from_file_location('cas_lookup',ROOT.parent/'cas-lookup/operations.py')
+    cas=importlib.util.module_from_spec(spec);spec.loader.exec_module(cas)
+    context=SimpleNamespace(service=ServiceBinding('https://commonchemistry.cas.org/direct-api'),secret=SecretStr('test-key'))
+    calls=[]
+    for status,expected in [(401,'authentication_required'),(403,'authentication_required'),(404,'not_found'),(429,'rate_limited'),(503,'unavailable')]:
+        def get(*args,**kwargs):calls.append(args);return Response(status=status)
+        monkeypatch.setattr(requests,'get',get)
+        result=cas.detail({'cas_rn':'50-00-0'},context)
+        assert result['status']==expected and result['record'] is None
+    assert len(calls)==5
+    with pytest.raises(ValueError):cas.detail({'cas_rn':'50-00-1'},context)
+    assert len(calls)==5
+    monkeypatch.setattr(requests,'get',lambda *a,**kw:Response(raw=b'{"rn":"64-17-5","name":"wrong identity"}'))
+    assert cas.detail({'cas_rn':'50-00-0'},context)['status']=='invalid_response'

@@ -33,6 +33,7 @@ class ExecutionContext:
     submit_job: Callable | None = field(default=None, repr=False)
     read_artifact: Callable | None = field(default=None, repr=False)
     submit_jobs: Callable | None = field(default=None, repr=False)
+    write_artifact: Callable | None = field(default=None, repr=False)
 
 
 def contains_secret(value, secret):
@@ -113,7 +114,8 @@ class Executor:
                                        lambda name, payload: run_worker(skill, name, payload),
                                        (lambda name, payload: self.jobs.enqueue(action, skill, name, payload, owner)) if self.jobs else None,
                                        (lambda artifact_id: self.artifacts.read(action.campaign_id, owner, artifact_id)) if self.artifacts else None,
-                                       submit_jobs=(lambda name, payloads: self.jobs.enqueue_many(action, skill, name, payloads, owner)) if self.jobs else None)
+                                       submit_jobs=(lambda name, payloads: self.jobs.enqueue_many(action, skill, name, payloads, owner)) if self.jobs else None,
+                                       write_artifact=(lambda name, content: self.artifacts.put(action.campaign_id, owner, name, content)) if self.artifacts else None)
             result = self.registry.handler(skill, operation)(action.inputs, context)
             # Convert to JSON values before validation, storage and caller exposure.
             result = json.loads(json.dumps(result, allow_nan=False))
