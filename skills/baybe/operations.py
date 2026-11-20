@@ -17,6 +17,8 @@ def recommend(inputs, context):
     previous = [r for r in context.results.values() if r.get('kind') == 'recommendation' and r.get('library_action_id') == library_id]
     if any(r['specification'] != specification for r in previous):
         raise ValueError('Objectives and round budget cannot change within a library optimization')
+    if any(not set(r['measurement_action_ids']) <= set(inputs['measurement_action_ids']) for r in previous):
+        raise ValueError('Keep cumulative measurement references across rounds')
     completed_rounds = len([r for r in previous if r['candidates']])
     measured = {r['Molecule_ID'] for r in rows}
     previously_selected = {c['id'] for r in previous for c in r['candidates']}
@@ -41,6 +43,10 @@ def recommend(inputs, context):
 
 
 def rank(inputs, context):
+    for result in context.results.values():
+        if result.get('kind') == 'recommendation' and result.get('library_action_id') == inputs['library_action_id']:
+            if result['specification']['targets'] != inputs['targets'] or result['specification']['strategy'] != inputs['strategy']:
+                raise ValueError('Ranking must preserve the optimization objectives and strategy')
     library, rows, incomplete = prepare(inputs, context)
     targets = [SimpleNamespace(name=t['name'], mode=t['mode'], weight=t.get('weight', 1), bounds=t.get('bounds')) for t in inputs['targets']]
     by_id = {c['id']: c['smiles'] for c in library['candidates']}
