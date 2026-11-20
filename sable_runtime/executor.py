@@ -32,6 +32,7 @@ class ExecutionContext:
     run_worker: Callable | None = field(default=None, repr=False)
     submit_job: Callable | None = field(default=None, repr=False)
     read_artifact: Callable | None = field(default=None, repr=False)
+    submit_jobs: Callable | None = field(default=None, repr=False)
 
 
 def contains_secret(value, secret):
@@ -105,14 +106,14 @@ class Executor:
                                   (action.campaign_id, 'succeeded')).fetchall()
                 results = {row['id']: json.loads(row['result']) for row in rows}
                 if self.jobs:
-                    for job in self.jobs.list(action.campaign_id, owner):
-                        if job['status'] in {'succeeded', 'partial'}:
-                            results[job['action']] = job['result']
+                    from .job_results import resolved_job_results
+                    results.update(resolved_job_results(self.jobs.list(action.campaign_id, owner)))
             context = ExecutionContext(action.campaign_id, action.action_id, service, secret,
                                        MappingProxyType(results),
                                        lambda name, payload: run_worker(skill, name, payload),
                                        (lambda name, payload: self.jobs.enqueue(action, skill, name, payload, owner)) if self.jobs else None,
-                                       (lambda artifact_id: self.artifacts.read(action.campaign_id, owner, artifact_id)) if self.artifacts else None)
+                                       (lambda artifact_id: self.artifacts.read(action.campaign_id, owner, artifact_id)) if self.artifacts else None,
+                                       submit_jobs=(lambda name, payloads: self.jobs.enqueue_many(action, skill, name, payloads, owner)) if self.jobs else None)
             result = self.registry.handler(skill, operation)(action.inputs, context)
             # Convert to JSON values before validation, storage and caller exposure.
             result = json.loads(json.dumps(result, allow_nan=False))

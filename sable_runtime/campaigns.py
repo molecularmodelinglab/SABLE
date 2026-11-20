@@ -18,7 +18,8 @@ class CampaignConflict(RuntimeError):
 
 
 class CampaignService:
-    def __init__(self, ledger, registry, allowed, *, services=None, credentials=None, discovery_allowed=None):
+    def __init__(self, ledger, registry, allowed, *, services=None, credentials=None, discovery_allowed=None, preferences=None):
+        self.preferences = preferences
         self.ledger, self.registry = ledger, registry
         self.allowed = frozenset(allowed)  # Host-configured skill/version pairs.
         self.discovery_allowed = frozenset(allowed if discovery_allowed is None else discovery_allowed)
@@ -45,7 +46,7 @@ class CampaignService:
         pins = self.registry.discover(self.discovery_allowed)
         state = dict(id=campaign_id, status='ready', history=[{'role': 'user', 'content': prompt}],
                      skills=pins, loaded={}, results={}, report=None, question=None,
-                     turns=0, max_turns=100, model=None, pending=None, error=None, agent_spec=AGENT_SPEC)
+                     turns=0, max_turns=100, model=None, pending=None, error=None, agent_spec=AGENT_SPEC, preferences=self.preferences(owner) if self.preferences else {})
         with self.ledger.connect() as db:
             db.begin_write()
             db.execute('INSERT INTO campaigns(id,owner,max_actions,max_units) VALUES(?,?,?,?)',
@@ -84,12 +85,8 @@ class CampaignService:
             jobs = [self.jobs.public(r) for r in db.execute('SELECT * FROM remote_jobs WHERE campaign=? ORDER BY created', (campaign_id,))]
             cited = set((state.get('report') or {}).get('evidence', []))
             before = {key: state['results'].get(key) for key in cited}
-            for job in jobs:
-                if job['status'] in {'succeeded', 'partial'}:
-                    state['results'][job['action']] = job['result']
-                elif job['status'] in {'failed', 'cancelled', 'timed_out'}:
-                    state['results'][job['action']] = {'kind': 'job_outcome', 'job_id': job['id'],
-                                                       'status': job['status'], 'error': job['error']}
+            from .job_results import resolved_job_results
+            state['results'].update(resolved_job_results(jobs))
             if state['status'] == 'completed' and any(before[key] != state['results'].get(key) for key in cited):
                 self.ledger.event(db, campaign_id, 'campaign', 'report_invalidated', {'previous_report': state['report']})
                 state.update(status='ready', report=None)
@@ -209,6 +206,7 @@ class CampaignService:
         try:
             # Deliberately omit internal lock/pending fields from model context.
             context = {key: compact(state[key]) for key in ('history', 'skills', 'loaded', 'results', 'turns', 'max_turns')}
+            context['preferences'] = state.get('preferences', {})
             context['budget'] = self.get(campaign_id, owner)['metrics']
             context['jobs'] = compact(self.jobs.list(campaign_id, owner))
             context['artifacts'] = self.artifacts.list(campaign_id, owner)
@@ -238,7 +236,7 @@ class CampaignService:
         if decision.name == 'finish':
             if not args['evidence'] or not set(args['evidence']) <= state['results'].keys():
                 raise ValueError('Report references unknown evidence')
-            if any(state['results'][key].get('kind') == 'remote_job' for key in args['evidence']):
+            if any(state['results'][key].get('kind') in {'remote_job', 'remote_batch'} for key in args['evidence']):
                 return {'error': 'remote_job_pending', 'instruction': 'Wait for a recorded job outcome before reporting.'}
             for pin in state['skills']:
                 if pin['id'] in state['loaded']:
@@ -275,7 +273,7 @@ class CampaignService:
         # An all-invalid structure batch is retained as tool output, not scientific evidence.
         if 'observations' not in result or result['observations']:
             state['results'][action.action_id] = result
-        if result.get('kind') == 'remote_job':
+        if result.get('kind') in {'remote_job', 'remote_batch'}:
             state['status'] = 'waiting_jobs'
         return {'action_id': action.action_id, 'output': result}
 

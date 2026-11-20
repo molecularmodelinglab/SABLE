@@ -11,7 +11,7 @@ from sable_runtime.agent_model import create_agent_model
 from sable_runtime.ledger import Ledger
 from sable_runtime.registry import SkillRegistry
 from sable_runtime.jobs import JobConflict
-from server.services.campaign_credentials import load_campaign_services as load_services
+from server.services.campaign_credentials import load_campaign_services as load_services, campaign_preferences
 from sable_runtime.skill_store import load_deployment_skills, deployment_revision
 
 
@@ -41,7 +41,7 @@ def _configured_service(revision=None):
     services, credentials = load_services(os.getenv('SABLE_SERVICE_BINDINGS_PATH'))
     registry, allowed, selected = load_deployment_skills(root, services)
     return CampaignService(Ledger.configured(), registry, allowed, services=services, credentials=credentials,
-                           discovery_allowed=selected)
+                           discovery_allowed=selected, preferences=campaign_preferences)
 
 
 def configured_service():
