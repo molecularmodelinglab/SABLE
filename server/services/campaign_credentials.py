@@ -42,15 +42,50 @@ def load_campaign_services(path):
     return load_services(path, credential_store=SavedCredentials())
 
 
+def _boltz_selection(db, user):
+    """Return the explicitly selected, currently usable Boltz capability."""
+    from server.services.boltz_access_service import boltz_access_service
+    from server.services.credential_service import credential_service
+    metadata = user.extra_metadata if isinstance(user.extra_metadata, dict) else {}
+    settings = metadata.get('boltz_settings', {})
+    provider = settings.get('provider') if isinstance(settings, dict) else None
+    skill = {'self_hosted': 'boltz', 'platform': 'boltz-platform'}.get(provider)
+    reason = None
+    if not user.is_active:
+        skill, reason = None, 'This account is inactive'
+    elif provider == 'self_hosted' and not boltz_access_service.get_settings(user).can_use_self_hosted:
+        skill, reason = None, 'Self-hosted Boltz access has not been approved'
+    elif provider == 'platform':
+        try:
+            credential_id = UUID(str(settings.get('credential_id')))
+        except (ValueError, TypeError):
+            credential_id = None
+        credential = credential_service.get_owned(db, credential_id, user.id) if credential_id else None
+        if credential is None or credential.provider != 'boltz_platform' or credential.status != 'active':
+            skill, reason = None, 'Select an active owned Boltz Platform credential in Account'
+    elif skill is None:
+        reason = 'Select a Boltz provider in Account'
+    return {'boltz_provider': provider if provider in {'self_hosted', 'platform'} else None,
+            'boltz_skill_id': skill, 'boltz_unavailable_reason': reason}
+
+
 def campaign_preferences(owner):
-    """Expose scientific provider selection without account credentials."""
+    """Expose account selection and availability without account credentials."""
     from server.database import SessionLocal
     from server.models.user import User
-    from server.services.boltz_access_service import boltz_access_service
     with SessionLocal() as db:
         user = db.query(User).filter(User.id == UUID(str(owner))).first()
         if user is None:
             raise PermissionError('Campaign owner is not available')
-        settings = boltz_access_service.get_settings(user)
-        return {'boltz_provider': settings.provider,
-                'boltz_skill_id': {'self_hosted':'boltz', 'platform':'boltz-platform'}.get(settings.provider)}
+        return _boltz_selection(db, user)
+
+
+def authorize_campaign_skill(owner, skill_id, preferences=None):
+    """Enforce account selection and access for each Boltz operation."""
+    if skill_id not in {'boltz', 'boltz-platform'}:
+        return
+    current = campaign_preferences(owner)
+    if current['boltz_skill_id'] != skill_id:
+        raise PermissionError(current['boltz_unavailable_reason'] or 'The Boltz provider selection has changed; use a new campaign or restore its original Account setting')
+    if preferences is not None and preferences.get('boltz_skill_id') != skill_id:
+        raise PermissionError('This campaign has a different pinned Boltz selection; start a new campaign to use the current Account setting')
