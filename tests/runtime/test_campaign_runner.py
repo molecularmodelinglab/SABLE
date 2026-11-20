@@ -136,3 +136,36 @@ def test_account_provider_preference_reaches_model(service):
     model = ScriptedModel([decision('ask_user', question='Which target?')])
     service.advance(state['id'], 'alice', model)
     assert model.contexts[0]['preferences']['boltz_skill_id'] == 'boltz-platform'
+
+
+def test_slow_user_does_not_take_other_users_slots_or_block_controls(service):
+    first = service.create('alice', 'slow')
+    service.execution(first['id'], 'alice', 'running')
+    entered, release = Event(), Event()
+    class Model:
+        identity = 'test:fairness'
+        def decide(self, context):
+            if context['history'][0]['content'] == 'slow':
+                entered.set()
+                assert release.wait(10)
+            return decision('ask_user', question='Which structure?')
+    runner = CampaignRunner(service, Model)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        work = pool.submit(runner.tick)
+        try:
+            assert entered.wait(5)
+            second = service.create('alice', 'queued')
+            other = service.create('bob', 'quick')
+            service.execution(second['id'], 'alice', 'running')
+            service.execution(other['id'], 'bob', 'running')
+            assert pool.submit(CampaignRunner(service,Model).tick).result(timeout=3)
+            assert service.snapshot(other['id'], 'bob')['status'] == 'awaiting_user'
+            assert service.snapshot(second['id'], 'alice')['turns'] == 0
+            before = service.revision(first['id'], 'alice')
+            assert service.snapshot(first['id'], 'alice')['busy']
+            assert service.revision(first['id'], 'alice') == before
+            service.execution(first['id'], 'alice', 'paused')
+        finally:
+            release.set()
+        work.result(timeout=5)
+    assert service.snapshot(first['id'], 'alice')['execution_mode'] == 'paused'

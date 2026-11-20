@@ -240,3 +240,44 @@ def test_independent_jobs_share_one_committed_action(storage, remote_fixture):
     from sable_runtime.job_results import resolved_job_results
     result = resolved_job_results(manager.list('batch', alice))[action.action_id]
     assert sorted(item['value'] for item in result['results']) == [1,2,3]
+
+
+def test_status_reads_do_not_wait_for_campaign_write_lock(storage):
+    ledger, alice, _ = storage
+    campaigns = service(ledger)
+    state = campaigns.create(alice, 'Read status')
+    revision = campaigns.revision(state['id'],alice)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with ledger.connect() as db:
+            db.begin_write()
+            ledger.owned(db,state['id'],alice)
+            assert pool.submit(campaigns.snapshot,state['id'],alice).result(timeout=3)['id'] == state['id']
+            assert pool.submit(campaigns.revision,state['id'],alice).result(timeout=3) == revision
+
+
+def test_shared_slots_expire_and_provider_capacity_is_atomic(storage, remote_fixture, monkeypatch):
+    from sable_runtime.scheduling import ExecutionSlots
+    ledger, alice, bob = storage
+    first, second = ExecutionSlots(ledger), ExecutionSlots(Ledger(ledger.path))
+    with first.acquire('owner:'+alice) as acquired:
+        assert acquired
+        with second.acquire('owner:'+alice) as duplicate:
+            assert not duplicate
+        with second.acquire('owner:'+bob) as independent:
+            assert independent
+    with ledger.connect() as db:
+        db.execute('INSERT INTO execution_slots(resource,slot,token,expires) VALUES(?,?,?,?)',('expired',0,'old',0))
+    with second.acquire('expired') as recovered:
+        assert recovered
+    fixture = remote_fixture
+    monkeypatch.setenv('SABLE_PROVIDER_JOB_LIMITS','{"remote":1}')
+    manager = JobManager(ledger,fixture.registry,services=fixture.services,clock=lambda:fixture.clock[0])
+    ids = []
+    for name, owner in [('first',alice),('second',bob)]:
+        ledger.create_campaign(name,owner,Budget(max_actions=3,max_units=3))
+        action = fixture.action.model_copy(update={'campaign_id':name})
+        executor = Executor(fixture.registry,ledger,grants={owner:{('remote','1.0.0','run')}},jobs=manager)
+        ids.append((name,executor.execute(action,owner=owner)['job_id'],owner))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        statuses = list(pool.map(lambda args: manager.drive(*args)['status'],ids))
+    assert sorted(statuses) == ['queued','running']

@@ -151,9 +151,9 @@ def test_credential_outputs_never_persist(runtime, monkeypatch):
 
 def test_background_progress_and_pin_changes(runtime):
     r=runtime;job=enqueue(r)
-    assert r.jobs.drive_due()==[{'job_id':job,'status':'running'}]
+    assert r.jobs.drive_due()==[{'job_id':job,'campaign':'campaign','owner':'alice','status':'running'}]
     r.clock[0]+=2
-    assert r.jobs.drive_due()==[{'job_id':job,'status':'succeeded'}]
+    assert r.jobs.drive_due()==[{'job_id':job,'campaign':'campaign','owner':'alice','status':'succeeded'}]
     assert r.jobs.drive_due()==[]
     second=r.action.model_copy(update={'action_id':'two'})
     job2=r.executor.execute(second,owner='alice')['job_id']
@@ -335,3 +335,36 @@ def test_remote_structure_artifacts_are_owned_and_retry_reuses_file(runtime):
     assert len(r.jobs.artifacts.list('campaign', 'alice')) == 1
     with pytest.raises(PermissionError):
         r.jobs.artifacts.read('campaign', 'bob', first['id'])
+
+
+def test_provider_admission_and_queued_cancel(runtime, monkeypatch):
+    r = runtime
+    monkeypatch.setenv('SABLE_PROVIDER_JOB_LIMITS', '{"remote":1}')
+    first = enqueue(r)
+    second_action = r.action.model_copy(update={'action_id':'two'})
+    second = r.executor.execute(second_action, owner='alice')['job_id']
+    assert r.jobs.drive('campaign',first,'alice')['status'] == 'running'
+    assert r.jobs.drive('campaign',second,'alice')['status'] == 'queued'
+    calls = []
+    original = r.registry.remote_handler
+    monkeypatch.setattr(r.registry,'remote_handler',lambda *args:(calls.append(args) or original(*args)))
+    r.jobs.request('campaign',first,'alice','cancel')
+    assert calls == []
+    assert r.jobs.drive_due(limit=1,requested_only=True)[0]['status'] == 'cancelled'
+    r.clock[0] += 11
+    assert r.jobs.drive('campaign',second,'alice')['status'] == 'running'
+
+
+def test_blocked_job_backs_off_and_another_user_progresses(runtime):
+    r = runtime
+    first = enqueue(r)
+    r.ledger.create_campaign('other','bob',Budget(max_actions=3,max_units=3))
+    action = r.action.model_copy(update={'campaign_id':'other'})
+    other_executor = Executor(r.registry,r.ledger,grants={'bob':{('remote','1.0.0','run')}},jobs=r.jobs)
+    second = other_executor.execute(action,owner='bob')['job_id']
+    def authorize(owner, skill):
+        if owner == 'alice': raise PermissionError('Access revoked')
+    r.jobs.authorize = authorize
+    assert r.jobs.drive_due(limit=1)[0]['status'] == 'configuration_or_concurrency_conflict'
+    assert r.jobs.drive_due(limit=1)[0]['job_id'] == second
+    assert r.jobs.list('campaign','alice')[0]['next_poll'] > r.clock[0]

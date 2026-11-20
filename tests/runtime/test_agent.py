@@ -150,10 +150,15 @@ def test_api_auth_isolation_and_full_campaign(service):
         assert client.get(path, headers=bob).status_code == 404
         assert client.post(path + '/advance', headers=bob).status_code == 404
         assert client.get(path + '/events', headers=bob).status_code == 404
+        from sable_runtime.runner import CampaignRunner
+        runner = CampaignRunner(service, lambda: model)
         for _ in range(3):
+            previous = len(model.contexts)
             response = client.post(path + '/advance', headers=alice)
-            assert response.status_code == 200
-        assert response.json()['status'] == 'completed'
+            assert response.status_code == 202
+            assert len(model.contexts) == previous
+            runner.tick()
+        assert client.get(path, headers=alice).json()['status'] == 'completed'
         assert client.post(path + '/advance', headers=alice).status_code == 409
         events = client.get(path + '/events', headers=alice).json()
         assert client.get(path + '/events', headers=alice, params={'after': events[-1]['sequence']}).json() == []

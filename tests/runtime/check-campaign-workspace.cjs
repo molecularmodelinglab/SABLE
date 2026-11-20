@@ -8,7 +8,7 @@ const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKi
 
 async function view(scenario) {
   const state = [], effects = [], refs = []; if (scenario.campaign) state[1] = scenario.campaign
-  let index = 0, pending = [], dirty = false, tree; const posts = [], deletes = [], timers = []
+  let index = 0, pending = [], dirty = false, tree; const posts = [], deletes = [], timers = [], reads = []
   const react = {
     useState(value) { const i = index++; if (!(i in state)) state[i] = value; return [state[i], value => { state[i] = typeof value === 'function' ? value(state[i]) : value; dirty = true }] },
     useRef(value) { return refs[index++] ||= { current: value } },
@@ -25,6 +25,8 @@ async function view(scenario) {
     if (name === '../api') return { API_BASE: '', getAccessToken: () => 'test-token' }
     throw Error(name)
   }, fetch: async (url, options) => {
+    if (!options.method || options.method === 'GET') reads.push(url)
+    if (url.endsWith('/status')) return { ok: true, json: async () => ({ revision: scenario.revision ?? 1 }) }
     if (options.method === 'DELETE') { deletes.push(url); return { ok: !scenario.deleteError, status: scenario.deleteError ? 409 : 200, json: async () => scenario.deleteError ? { detail: scenario.deleteError } : { deleted: true } } }
     if (options.method === 'POST') { posts.push({ url, body: JSON.parse(options.body) }); return { ok: true, json: async () => scenario.nextCampaign || scenario.campaign } }
     if (url.endsWith('/capabilities')) {
@@ -39,7 +41,7 @@ async function view(scenario) {
   function nodes(node) { if (arguments.length === 0) node = tree; if (!node || typeof node !== 'object') return []; if (Array.isArray(node)) return node.flatMap(n => nodes(n)); return [node, ...nodes(node.props?.children || [])] }
   function text(node) { if (arguments.length === 0) node = tree; if (node == null || typeof node === 'boolean') return ''; if (typeof node !== 'object') return String(node); if (Array.isArray(node)) return node.map(n => text(n)).join(' '); return text(node.props?.children || '') }
   render(); await settle()
-  return { nodes, text, posts, deletes, async remove() { nodes().find(node => node.props?.title === 'Delete campaign').props.onClick(); await settle() }, async tick() { for (const fn of timers) await fn(); await settle() }, async click(label) { const button = nodes().find(node => node.type === 'button' && text(node).replace(/\s+/g, ' ').trim() === label.replace(/\s+/g, ' ').trim()); assert.ok(button, label); button.props.onClick(); await settle() } }
+  return { nodes, text, posts, deletes, reads, async remove() { nodes().find(node => node.props?.title === 'Delete campaign').props.onClick(); await settle() }, async tick() { for (const fn of timers) await fn(); await settle() }, async click(label) { const button = nodes().find(node => node.type === 'button' && text(node).replace(/\s+/g, ' ').trim() === label.replace(/\s+/g, ' ').trim()); assert.ok(button, label); button.props.onClick(); await settle() } }
 
 }
 
@@ -79,6 +81,9 @@ async function view(scenario) {
   assert.equal(started.posts.length, 1); assert.match(started.posts[0].url, /\/start$/)
   await started.tick(); assert.equal(started.posts.length, 1)
   assert.doesNotMatch(started.text(), /Continue campaign/)
+  const snapshots = started.reads.filter(url => url === '/v2/campaigns/test-campaign').length
+  await started.tick()
+  assert.equal(started.reads.filter(url => url === '/v2/campaigns/test-campaign').length, snapshots, 'Unchanged status must not download the full campaign again')
   const pausing = await view({ catalog, campaign: { ...drafted, execution_mode: 'running' }, nextCampaign: { ...drafted, execution_mode: 'paused' } })
   await pausing.click('Pause campaign')
   assert.match(pausing.posts[0].url, /\/pause$/); assert.match(pausing.text(), /Resume campaign/)
