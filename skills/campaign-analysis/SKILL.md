@@ -11,4 +11,8 @@ Progress requires observations with candidate/library identity that match record
 
 Chemical space uses deterministic PCA of the shared Morgan fingerprints (radius 2, 2048 bits), with at least three molecules. It is a two-dimensional projection, not evidence of activity or a guarantee that neighbors are equivalent. State the projection and its limits.
 
-The result includes summary statistics, source action IDs, a portable presentation of charts/tables, and a downloadable PNG. Cite the source observations and analysis action in the report. This operation produces figures; it does not start new experiments or alter objectives.
+The result includes summary statistics, source action IDs, a portable presentation of charts/tables, and downloadable SVG/PNG figures plus interactive HTML. Cite the source observations and analysis action in the report. This operation produces figures; it does not start new experiments or alter objectives.
+
+For richer figures, `box` and `violin` show distributions by recorded optimization round and `minmax` shows observed ranges. These require the same unambiguous round linkage as `progress`. Shared plotting utilities provide interactive inspection and SVG export from the camera control. The result also includes standalone SVG and PNG downloads. Interactive HTML loads Plotly from its CDN; static downloads work offline.
+
+Collected Boltz predictions and batch-result action IDs can be analyzed directly: use `binding_affinity` (self-hosted, log10 micromolar, MIN) or `boltz_optimization_score` (Platform provider score, MAX). Keep protein targets separate. Confidence metrics are not affinity measurements. Cite failed/excluded candidates separately rather than treating absent scores as zero.

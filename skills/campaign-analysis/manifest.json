@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "id": "campaign-analysis",
-  "version": "1.0.0",
-  "description": "Analyze recorded molecular observations: property distributions, progress by scientific round, or chemical-space PCA; produce sourced summaries, interactive chart data, and downloadable PNG figures.",
+  "version": "1.1.0",
+  "description": "Analyze recorded molecular observations: property distributions, progress by scientific round, or chemical-space PCA; produce sourced summaries, interactive chart data, and downloadable PNG/SVG figures and interactive Plotly views with SVG export.",
   "operations": [
     {
       "id": "analyze",
@@ -37,7 +37,10 @@
             "enum": [
               "distribution",
               "progress",
-              "chemical_space"
+              "chemical_space",
+              "box",
+              "violin",
+              "minmax"
             ]
           },
           "direction": {
@@ -277,6 +280,14 @@
             "items": {
               "type": "string"
             }
+          },
+          "figure_svg": {
+            "type": "string",
+            "maxLength": 3000000
+          },
+          "figure_html": {
+            "type": "string",
+            "maxLength": 3000000
           }
         }
       }
