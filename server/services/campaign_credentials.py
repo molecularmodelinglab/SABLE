@@ -40,3 +40,17 @@ class SavedCredentials:
 def load_campaign_services(path):
     from sable_runtime.service_config import load_services
     return load_services(path, credential_store=SavedCredentials())
+
+
+def campaign_preferences(owner):
+    """Expose scientific provider selection without account credentials."""
+    from server.database import SessionLocal
+    from server.models.user import User
+    from server.services.boltz_access_service import boltz_access_service
+    with SessionLocal() as db:
+        user = db.query(User).filter(User.id == UUID(str(owner))).first()
+        if user is None:
+            raise PermissionError('Campaign owner is not available')
+        settings = boltz_access_service.get_settings(user)
+        return {'boltz_provider': settings.provider,
+                'boltz_skill_id': {'self_hosted':'boltz', 'platform':'boltz-platform'}.get(settings.provider)}
