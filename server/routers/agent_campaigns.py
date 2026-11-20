@@ -85,7 +85,11 @@ def make_router(user_dependency, service_dependency=configured_service, model_fa
 
     @router.get('/{campaign_id}')
     def get(campaign_id: str, user=Depends(user_dependency), service=Depends(service_dependency)):
-        return invoke(service.get, campaign_id, str(user.id))
+        return invoke(service.snapshot, campaign_id, str(user.id))
+
+    @router.get('/{campaign_id}/status')
+    def status(campaign_id: str, user=Depends(user_dependency), service=Depends(service_dependency)):
+        return invoke(service.revision, campaign_id, str(user.id))
 
     @router.delete('/{campaign_id}')
     def delete(campaign_id: str, user=Depends(user_dependency), service=Depends(service_dependency)):
@@ -136,16 +140,9 @@ def make_router(user_dependency, service_dependency=configured_service, model_fa
     def budget(campaign_id: str, payload: BudgetInput, user=Depends(user_dependency), service=Depends(service_dependency)):
         return invoke(service.extend_budget, campaign_id, str(user.id), payload.max_turns, payload.max_actions, payload.max_units)
 
-    @router.post('/{campaign_id}/advance')
+    @router.post('/{campaign_id}/advance', status_code=202)
     def advance(campaign_id: str, user=Depends(user_dependency), service=Depends(service_dependency)):
-        # Resolve ownership before constructing any provider client.
-        invoke(service.get, campaign_id, str(user.id))
-        model = model_factory()
-        try:
-            return invoke(service.advance, campaign_id, str(user.id), model)
-        finally:
-            if hasattr(model, 'close'):
-                model.close()
+        return invoke(service.execution, campaign_id, str(user.id), 'step')
 
     @router.post('/{campaign_id}/messages')
     def message(campaign_id: str, payload: CampaignInput, user=Depends(user_dependency), service=Depends(service_dependency)):
@@ -160,13 +157,15 @@ def make_router(user_dependency, service_dependency=configured_service, model_fa
                         user=Depends(user_dependency), service=Depends(service_dependency)):
         return invoke(service.upload_artifact, campaign_id, str(user.id), payload.name, payload.content)
 
-    @router.post('/{campaign_id}/jobs/{job_id}/poll')
+    @router.post('/{campaign_id}/jobs/{job_id}/poll', status_code=202)
     def poll(campaign_id: str, job_id: str, user=Depends(user_dependency), service=Depends(service_dependency)):
-        return invoke(service.job_operation, campaign_id, job_id, str(user.id), 'poll')
+        invoke(service.jobs.request, campaign_id, job_id, str(user.id), 'poll')
+        return invoke(service.snapshot, campaign_id, str(user.id))
 
-    @router.post('/{campaign_id}/jobs/{job_id}/cancel')
+    @router.post('/{campaign_id}/jobs/{job_id}/cancel', status_code=202)
     def cancel(campaign_id: str, job_id: str, user=Depends(user_dependency), service=Depends(service_dependency)):
-        return invoke(service.job_operation, campaign_id, job_id, str(user.id), 'cancel')
+        invoke(service.jobs.request, campaign_id, job_id, str(user.id), 'cancel')
+        return invoke(service.snapshot, campaign_id, str(user.id))
 
     @router.post('/{campaign_id}/jobs/{job_id}/reconcile')
     def reconcile(campaign_id: str, job_id: str, payload: ReconcileInput,
