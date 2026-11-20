@@ -6,6 +6,7 @@ import time
 
 import httpx
 from boltz_api import Boltz
+from sable_runtime.structures import retain_structure
 
 
 METRICS = ('binding_confidence', 'optimization_score', 'structure_confidence',
@@ -108,6 +109,7 @@ def poll(remote_id, payload, context):
     else:
         raise ValueError('Boltz result pagination exceeded bounds')
     measurements, seen = [], set()
+    structure_deadline = time.monotonic() + 60
     for row in rows:
         molecule_id = row.get('external_id')
         if not molecule_id:
@@ -127,8 +129,13 @@ def poll(remote_id, payload, context):
         warnings = [warning['message'] for warning in (row.get('warnings') or [])]
         if any(not isinstance(w, str) for w in warnings):
             raise ValueError('Invalid Boltz warnings')
+        artifacts = row.get('artifacts')
+        structure = artifacts.get('structure') if isinstance(artifacts, dict) else None
+        structure_url = structure.get('url') if isinstance(structure, dict) else None
         measurements.append({**by_id[molecule_id], 'metrics': metrics, 'warnings': warnings,
-                             'provider_result_id': _id(row.get('id'))})
+                             'provider_result_id': _id(row.get('id')),
+                             **retain_structure(structure_url,
+                                 context, provider='platform', name='boltz-' + _id(row.get('id')), deadline=structure_deadline)})
     accepted = {row['id'] for row in measurements}
     exclusions = [{'id': row['id'], 'reason': 'No usable Platform result'}
                   for row in payload['molecules'] if row['id'] not in accepted]

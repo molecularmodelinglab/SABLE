@@ -47,3 +47,5 @@ affinity bounds or assume a 0–1 score range. Confidence is not the objective.
 Keep exact protein sequences and chain assignments fixed across rounds. Resolve
 UniProt targets through `uniprot` before asking for sequences. Model version is
 not reported by this adapter; disclose that limitation.
+
+Completed screens retain returned structure files as owned campaign artifacts when available. Each measurement includes a `structure` reference or `structure_status`. The conversation can show the corresponding molecule, 3D structure and metrics together. Missing structures do not invalidate scores and are not a reason to repeat a paid screen. Structure collection is bounded; signed download URLs are not included in results.

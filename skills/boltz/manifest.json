@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "boltz",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Self-hosted Boltz single-molecule or batch affinity predictions from recorded libraries and BayBE recommendations.",
   "operations": [
     {
@@ -219,11 +219,58 @@
                     "type": "number",
                     "minimum": 0,
                     "maximum": 1
+                  },
+                  "ptm": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "iptm": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "complex_plddt": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "complex_iplddt": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
                   }
                 },
                 "required": [
                   "affinity"
                 ]
+              },
+              "structure": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "name",
+                  "size_bytes",
+                  "sha256"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "size_bytes": {
+                    "type": "integer"
+                  },
+                  "sha256": {
+                    "type": "string"
+                  }
+                }
+              },
+              "structure_status": {
+                "type": "string"
               }
             },
             "required": [

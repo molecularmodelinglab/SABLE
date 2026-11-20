@@ -5,6 +5,7 @@ import re
 import time
 
 import httpx
+from sable_runtime.structures import retain_structure
 
 
 
@@ -76,6 +77,10 @@ def poll_prediction(remote_id, payload, context):
     metrics = {'affinity': _number(affinity)}
     confidence = response.get('confidence')
     if isinstance(confidence, dict):
+        for key in ('ptm', 'iptm', 'complex_plddt', 'complex_iplddt'):
+            if confidence.get(key) is not None:
+                metrics[key] = _number(confidence[key], confidence=True)
+    if isinstance(confidence, dict):
         confidence = confidence.get('confidence_score')
     if confidence is not None:
         metrics['binding_confidence'] = _number(confidence, confidence=True)
@@ -83,4 +88,5 @@ def poll_prediction(remote_id, payload, context):
         'kind': 'boltz_prediction', 'provider': 'self_hosted',
         'protein_scope_id': payload['protein_scope_id'],
         **({'library_action_id': payload['library_action_id']} if 'library_action_id' in payload else {}),
-        'measurement': {**payload['molecules'][0], 'metrics': metrics}}}
+        'measurement': {**payload['molecules'][0], 'metrics': metrics,
+            **retain_structure(response.get('cif_url'), context, provider='self_hosted', name='boltz-' + remote_id)}}}

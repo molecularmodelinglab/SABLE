@@ -39,3 +39,5 @@ same exact protein sequences and chain assignments for every round and baseline.
 The server does not report its model version; disclose that limitation and keep
 the deployment/model configuration fixed during a campaign. Resolve a UniProt
 accession using `uniprot` first; no receptor coordinate file is needed.
+
+Completed predictions retain returned coordinate files as owned campaign artifacts when available. Each measurement includes a `structure` artifact reference or `structure_status` explaining unavailability. The conversation renders structures alongside their metrics; no additional prediction is needed to view them. A missing structure does not invalidate a successful score and should not trigger resubmission. Additional returned pTM, ipTM and complex confidence metrics remain distinct from affinity.
