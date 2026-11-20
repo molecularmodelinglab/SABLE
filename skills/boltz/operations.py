@@ -29,3 +29,12 @@ def _payload(inputs, molecules):
 
 def predict(inputs, context):
     return context.submit_job('prediction', _payload(inputs, [inputs['molecule']]))
+
+
+def screen(inputs, context):
+    """Queue an independently tracked prediction for every selected molecule."""
+    from sable_runtime.scoring import selected_candidates, validate_scoring_scope
+    library_id, molecules = selected_candidates(inputs, context.results)
+    payloads = [{**_payload(inputs, [molecule]), 'library_action_id': library_id} for molecule in molecules]
+    validate_scoring_scope(context.results, library_id, payloads[0]['protein_scope_id'])
+    return context.submit_jobs('prediction', payloads)

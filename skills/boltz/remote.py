@@ -82,4 +82,5 @@ def poll_prediction(remote_id, payload, context):
     return {'status': 'succeeded', 'result': {
         'kind': 'boltz_prediction', 'provider': 'self_hosted',
         'protein_scope_id': payload['protein_scope_id'],
+        **({'library_action_id': payload['library_action_id']} if 'library_action_id' in payload else {}),
         'measurement': {**payload['molecules'][0], 'metrics': metrics}}}

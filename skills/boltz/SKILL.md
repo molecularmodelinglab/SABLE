@@ -22,3 +22,20 @@ cyclic proteins, MSA settings, constraints and templates are unsupported here.
 
 HTTP uses no retries or redirects, a 20-second I/O timeout, a 30-second elapsed
 response check and a 4 MB decoded-response limit. Local timeout is not cancellation.
+
+For a library or BayBE batch use `screen` with `source_action_id` pointing to the
+recorded library or recommendation and explicit `proteins`. It queues one to 100
+independent jobs atomically; the runtime submits and polls them without further
+model decisions. Do not ask the user to choose candidate-by-candidate execution.
+Every molecule has its own submission lease, remote ID and outcome. An uncertain
+submission is never automatically retried. Completed siblings remain recorded.
+Use the screen action ID as a BayBE measurement reference after all jobs finish.
+Missing or failed scores do not become fabricated observations; incomplete batches
+must be reported and resolved before another recommendation.
+
+Use BayBE objective `binding_affinity`, mode `MIN`, for the native
+`affinity_pred_value` (log10 micromolar). Confidence is not affinity. Keep the
+same exact protein sequences and chain assignments for every round and baseline.
+The server does not report its model version; disclose that limitation and keep
+the deployment/model configuration fixed during a campaign. Resolve a UniProt
+accession using `uniprot` first; no receptor coordinate file is needed.

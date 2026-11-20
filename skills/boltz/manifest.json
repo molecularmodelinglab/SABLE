@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "id": "boltz",
-  "version": "1.0.0",
-  "description": "Self-hosted Boltz single-ligand affinity prediction.",
+  "version": "1.1.0",
+  "description": "Self-hosted Boltz single-molecule or batch affinity predictions from recorded libraries and BayBE recommendations.",
   "operations": [
     {
       "id": "predict",
@@ -85,6 +85,91 @@
           "status"
         ]
       }
+    },
+    {
+      "id": "screen",
+      "handler": "screen",
+      "description": "Score one recorded library or BayBE recommendation as a batch of independently tracked self-hosted predictions.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source_action_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "proteins": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "sequence": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 10000
+                },
+                "chain_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+                }
+              },
+              "required": [
+                "sequence",
+                "chain_id"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 16
+          }
+        },
+        "required": [
+          "source_action_id",
+          "proteins"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "remote_batch"
+          },
+          "jobs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "remote_job"
+                },
+                "job_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "status": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "kind",
+                "job_id",
+                "status"
+              ]
+            }
+          }
+        },
+        "required": [
+          "kind",
+          "jobs"
+        ]
+      }
     }
   ],
   "remote_jobs": {
@@ -146,6 +231,9 @@
               "smiles",
               "metrics"
             ]
+          },
+          "library_action_id": {
+            "type": "string"
           }
         },
         "required": [
