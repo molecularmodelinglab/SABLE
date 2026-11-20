@@ -1,5 +1,6 @@
 """Durable remote job submission, observation, and explicit reconciliation."""
 import json
+from contextlib import nullcontext
 import time
 from uuid import uuid4
 from hashlib import sha256
@@ -42,7 +43,7 @@ class JobManager:
                 status TEXT NOT NULL, remote_id TEXT, result TEXT, error TEXT,
                 created REAL NOT NULL, updated REAL NOT NULL, deadline REAL NOT NULL,
                 next_poll REAL NOT NULL, lease_until REAL NOT NULL DEFAULT 0,
-                token TEXT, UNIQUE(campaign,action))''')
+                token TEXT, batch_index INTEGER NOT NULL DEFAULT 0, UNIQUE(campaign,action,batch_index))''')
             if 'diagnostics' not in {r['name'] for r in db.execute('PRAGMA table_info(remote_jobs)')}:
                 db.execute('ALTER TABLE remote_jobs ADD COLUMN diagnostics TEXT')
             if 'credential_ref' not in {r['name'] for r in db.execute('PRAGMA table_info(remote_jobs)')}:
@@ -54,7 +55,7 @@ class JobManager:
             raise JobConflict('Remote service is unavailable')
         return sha256((service.endpoint or 'sdk-managed').encode()).hexdigest()
 
-    def enqueue(self, action, skill, name, payload, owner):
+    def enqueue(self, action, skill, name, payload, owner, *, batch_index=0, connection=None):
         spec = skill.manifest.remote_jobs.get(name)
         if spec is None:
             raise JobConflict('Remote job is not declared')
@@ -69,26 +70,39 @@ class JobManager:
             raise JobConflict('Credential material is not a valid job input')
         serialized = json.dumps(payload, sort_keys=True, allow_nan=False)
         now = self.clock()
-        with self.ledger.connect() as db:
-            db.begin_write()
+        with (nullcontext(connection) if connection is not None else self.ledger.connect()) as db:
+            if connection is None:
+                db.begin_write()
             self.ledger.owned(db, action.campaign_id, owner)
-            existing = db.execute('SELECT * FROM remote_jobs WHERE campaign=? AND action=?',
-                                  (action.campaign_id, action.action_id)).fetchone()
+            existing = db.execute('SELECT * FROM remote_jobs WHERE campaign=? AND action=? AND batch_index=?',
+                                  (action.campaign_id, action.action_id, batch_index)).fetchone()
             if existing:
                 if existing['name'] != name or existing['payload'] != serialized:
-                    raise JobConflict('One remote job is permitted per action')
+                    raise JobConflict('A batch position cannot change its recorded job payload')
                 return {'kind': 'remote_job', 'job_id': existing['id'], 'status': existing['status']}
             job_id = 'job-' + uuid4().hex
             db.execute('''INSERT INTO remote_jobs
-                (id,campaign,action,skill_id,version,digest,name,payload,binding,status,created,updated,deadline,next_poll,credential_ref)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (id,campaign,action,skill_id,version,digest,name,payload,binding,status,created,updated,deadline,next_poll,credential_ref,batch_index)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                 (job_id, action.campaign_id, action.action_id, skill.manifest.id, skill.manifest.version,
-                 skill.digest, name, serialized, binding, 'queued', now, now, now + spec.timeout_seconds, now, reference))
+                 skill.digest, name, serialized, binding, 'queued', now, now, now + spec.timeout_seconds, now, reference, batch_index))
             self.ledger.event(db, action.campaign_id, action.action_id, 'job_queued',
                               {'job_id': job_id, 'name': name, 'inputs': trace_inputs(payload), 'service': spec.service,
                                'skill_id': skill.manifest.id, 'skill_version': skill.manifest.version,
                                'skill_digest': skill.digest, 'binding_digest': binding})
         return {'kind': 'remote_job', 'job_id': job_id, 'status': 'queued'}
+
+    def enqueue_many(self, action, skill, name, payloads, owner):
+        """Atomically queue a bounded batch; each submission has its own lease."""
+        if not isinstance(payloads, list) or not 1 <= len(payloads) <= 100:
+            raise JobConflict('A remote batch requires one to 100 items')
+        with self.ledger.connect() as db:
+            db.begin_write()
+            self.ledger.owned(db, action.campaign_id, owner)
+            receipts = [self.enqueue(action, skill, name, payload, owner,
+                                     batch_index=index, connection=db)
+                        for index, payload in enumerate(payloads)]
+        return {'kind': 'remote_batch', 'jobs': receipts}
 
     def _context(self, campaign, action, owner, spec, reference=None, *, pinned=False):
         from .executor import ExecutionContext
