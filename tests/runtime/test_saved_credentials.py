@@ -196,3 +196,80 @@ def test_sdk_does_not_read_error_bodies(monkeypatch):
     monkeypatch.setattr(httpx.HTTPTransport,'handle_request',respond)
     with pytest.raises(RuntimeError):remote._call(context(),'retrieve','job-a')
     assert len(calls)==1 and reads == []
+
+
+def test_boltz_requires_explicit_selection_and_current_access(monkeypatch):
+    from server.services.campaign_credentials import _boltz_selection
+    from server.services.credential_service import credential_service
+    owner, key = uuid4(), uuid4()
+    user = SimpleNamespace(id=owner, is_active=True, extra_metadata={}, has_role=lambda role:True)
+    db = Mock()
+    # Administrators still need an explicit selection.
+    assert _boltz_selection(db,user)['boltz_skill_id'] is None
+    user.extra_metadata={'boltz_settings':{'provider':'self_hosted'}}
+    assert _boltz_selection(db,user)['boltz_skill_id']=='boltz'
+    user.has_role=lambda role:False
+    assert _boltz_selection(db,user)['boltz_skill_id'] is None
+    user.extra_metadata['boltz_self_hosted_access']={'status':'approved'}
+    assert _boltz_selection(db,user)['boltz_skill_id']=='boltz'
+    user.extra_metadata['boltz_settings']={'provider':'platform','credential_id':str(key)}
+    credential=SimpleNamespace(provider='boltz_platform',status='active')
+    get_owned=Mock(return_value=credential)
+    monkeypatch.setattr(credential_service,'get_owned',get_owned)
+    assert _boltz_selection(db,user)['boltz_skill_id']=='boltz-platform'
+    get_owned.assert_called_with(db,key,owner)
+    for invalid in (None,SimpleNamespace(provider='other',status='active'),SimpleNamespace(provider='boltz_platform',status='revoked')):
+        get_owned.return_value=invalid
+        assert _boltz_selection(db,user)['boltz_skill_id'] is None
+
+
+def test_per_user_boltz_discovery_and_execution_guards(tmp_path, monkeypatch):
+    from pathlib import Path
+    from server.services import campaign_credentials as access
+    from sable_runtime.campaigns import CampaignService
+    from sable_runtime.ledger import Ledger
+    from sable_runtime.registry import SkillRegistry
+    from test_agent import decision
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from server.routers.agent_campaigns import make_router
+    selected={'alice':'boltz-platform','bob':'boltz'}
+    def preferences(owner):
+        return {'boltz_skill_id':selected[owner], 'boltz_unavailable_reason':None}
+    monkeypatch.setattr(access,'campaign_preferences',preferences)
+    registry=SkillRegistry()
+    for name in ('boltz','boltz-platform'):
+        registry.install(Path(__file__).resolve().parents[2]/'skills'/name)
+    services={name:SimpleNamespace(endpoint='https://test.invalid',credential=None) for name in ('boltz','boltz-platform')}
+    service=CampaignService(Ledger(tmp_path/'policy.sqlite'),registry,set(registry._skills),services=services,
+        preferences=preferences,authorize=access.authorize_campaign_skill)
+    assert service.jobs.authorize is access.authorize_campaign_skill
+    first=service.create('alice','Use my provider')
+    assert [pin['id'] for pin in first['skills']]==['boltz-platform']
+    assert [pin['id'] for pin in service.create('bob','Use my provider')['skills']]==['boltz']
+    app=FastAPI();app.include_router(make_router(lambda:SimpleNamespace(id='alice'),lambda:service))
+    assert [row['id'] for row in TestClient(app).get('/v2/campaigns/capabilities').json()]==['boltz-platform']
+    denied=service._act(first,'alice',decision('load_skill',skill_id='boltz'))
+    assert denied['error']=='skill_access_denied'
+    # Changing selection does not rewrite an existing campaign's scoring method.
+    selected['alice']='boltz'
+    assert service._act(first,'alice',decision('load_skill',skill_id='boltz'))['error']=='skill_access_denied'
+    assert [pin['id'] for pin in service.create('alice','New campaign')['skills']]==['boltz']
+
+
+def test_job_access_is_rechecked_before_network_requests(runtime, monkeypatch):
+    r=runtime; allowed=[True]; calls=[]
+    def authorize(owner, skill_id):
+        if not allowed[0]: raise PermissionError('Provider access revoked')
+    r.jobs.authorize=authorize
+    job=enqueue(r)
+    original=r.registry.remote_handler
+    monkeypatch.setattr(r.registry,'remote_handler',lambda *args:(calls.append(args) or original(*args)))
+    allowed[0]=False
+    with pytest.raises(JobConflict,match='revoked'):r.jobs.drive('campaign',job,'alice')
+    assert calls==[] and r.jobs.list('campaign','alice')[0]['status']=='queued'
+    allowed[0]=True
+    r.jobs.drive('campaign',job,'alice')
+    allowed[0]=False;r.clock[0]+=2
+    with pytest.raises(JobConflict,match='revoked'):r.jobs.drive('campaign',job,'alice')
+    assert len(calls)==1
