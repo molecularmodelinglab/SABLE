@@ -22,5 +22,9 @@
   },
   "uniprot": {
     "endpoint": "https://rest.uniprot.org"
+  },
+  "cas-common-chemistry": {
+    "endpoint": "https://commonchemistry.cas.org/direct-api",
+    "credential_env": "CAS_API_KEY"
   }
 }
