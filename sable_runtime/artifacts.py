@@ -1,5 +1,6 @@
 """Owned text artifacts for scientific inputs that should not enter model context."""
 import json
+import os
 from hashlib import sha256
 from uuid import uuid4
 
@@ -28,7 +29,7 @@ class ArtifactStore:
                 if state is None or state['busy'] or (state['execution_mode'] == 'running' and json.loads(state['state'])['status'] != 'awaiting_user'):
                     raise ValueError('Pause the campaign before adding files, or wait for a request for information')
             count,size=db.execute('SELECT count(*),coalesce(sum(size_bytes),0) FROM campaign_artifacts WHERE campaign=?',(campaign,)).fetchone()
-            if count>=16 or size+len(encoded)>32_000_000:
+            if count >= int(os.getenv('SABLE_CAMPAIGN_MAX_ARTIFACTS', '512')) or size+len(encoded) > int(os.getenv('SABLE_CAMPAIGN_ARTIFACT_BYTES', '128000000')):
                 raise ValueError('Campaign artifact allowance exceeded')
             record={'id':'artifact-'+uuid4().hex,'name':name,'size_bytes':len(encoded),'sha256':sha256(encoded).hexdigest()}
             db.execute('INSERT INTO campaign_artifacts(id,campaign,name,content,size_bytes,sha256) VALUES(?,?,?,?,?,?)',

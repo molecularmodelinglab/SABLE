@@ -29,6 +29,8 @@ def trace_inputs(value):
 
 class JobManager:
     def __init__(self, ledger, registry, *, services=None, credentials=None, allowed=None, clock=time.time, authorize=None):
+        from .artifacts import ArtifactStore
+        self.artifacts = ArtifactStore(ledger)
         self.authorize = authorize
         self.ledger, self.registry = ledger, registry
         self.services, self.credentials = dict(services or {}), credentials
@@ -129,7 +131,15 @@ class JobManager:
             raise JobConflict('Remote credential is unavailable; check the saved account credential') from None
         if reference and (not isinstance(secret, SecretStr) or not secret.get_secret_value()):
             raise JobConflict('Remote credential is unavailable')
-        return ExecutionContext(campaign, action, service, secret)
+        artifacts = self.artifacts
+        def write_artifact(name, content):
+            from hashlib import sha256
+            digest = sha256(content.encode()).hexdigest()
+            for existing in artifacts.list(campaign, owner):
+                if existing['name'] == name and existing['sha256'] == digest:
+                    return existing
+            return artifacts.put(campaign, owner, name, content)
+        return ExecutionContext(campaign, action, service, secret, write_artifact=write_artifact)
 
     def _read(self, db, campaign, job_id, owner):
         self.ledger.owned(db, campaign, owner)

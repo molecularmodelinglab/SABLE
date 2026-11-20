@@ -367,7 +367,7 @@ class CampaignService:
 def compact(value):
     """Keep recorded results intact while bounding bulk data in model context."""
     if isinstance(value, dict):
-        return {key: ({'format': 'png', 'available': True} if key == 'figure_png_base64' else {'retained_row_count': len(item)} if key == 'reaction_rows' and isinstance(item, list)
+        return {key: ({'format': 'png', 'available': True} if key == 'figure_png_base64' else {'format': key.removeprefix('figure_'), 'available': True} if key in {'figure_svg', 'figure_html'} else {'retained_row_count': len(item)} if key == 'reaction_rows' and isinstance(item, list)
                       else compact(item)) for key, item in value.items()}
     if isinstance(value, list):
         if len(value) > 16:
