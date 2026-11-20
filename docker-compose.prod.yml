@@ -38,6 +38,11 @@ x-backend-environment: &backend-environment
   CAS_API_KEY: ${CAS_API_KEY:-}
   STOPLIGHT_URL: ${STOPLIGHT_URL:-}
   SABLE_SKILL_STORE_PATH: ${SABLE_SKILL_STORE_PATH:-}
+  SABLE_MODEL_WORKERS: ${SABLE_MODEL_WORKERS:-2}
+  SABLE_JOB_WORKERS: ${SABLE_JOB_WORKERS:-2}
+  SABLE_MAX_USER_OPERATIONS: ${SABLE_MAX_USER_OPERATIONS:-1}
+  SABLE_MAX_USER_JOBS: ${SABLE_MAX_USER_JOBS:-4}
+  SABLE_PROVIDER_JOB_LIMITS: '${SABLE_PROVIDER_JOB_LIMITS:-}'
   SABLE_AGENT_ENABLED: ${SABLE_AGENT_ENABLED:-0}
   SABLE_MAX_CAMPAIGN_DECISIONS: ${SABLE_MAX_CAMPAIGN_DECISIONS:-1000}
   SABLE_MAX_CAMPAIGN_ACTIONS: ${SABLE_MAX_CAMPAIGN_ACTIONS:-200}
@@ -175,6 +180,27 @@ services:
       start_period: 30s
     networks:
       - sable-network
+    restart: unless-stopped
+
+  campaign_worker:
+    <<: *backend-image
+    entrypoint: ["micromamba", "run", "-n", "sable"]
+    command: ["python", "-m", "server.services.campaign_runner"]
+    environment: *backend-environment
+    volumes:
+      - artifacts_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+      volume_init:
+        condition: service_completed_successfully
+    networks:
+      - sable-network
+    cpus: ${SABLE_WORKER_CPUS:-2.0}
+    mem_limit: ${SABLE_WORKER_MEMORY:-4g}
+    stop_grace_period: 180s
     restart: unless-stopped
 
   celery_worker:

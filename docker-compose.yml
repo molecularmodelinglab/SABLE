@@ -65,7 +65,7 @@ services:
     command: ["micromamba run -n sable uvicorn server.app:app --host 0.0.0.0 --port 8000"]
     ports:
       - "8000:8000"
-    environment:
+    environment: &campaign-environment
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql://sable_user:${POSTGRES_PASSWORD:-sable_password}@postgres:5432/sable
       - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
@@ -89,6 +89,11 @@ services:
       - BOLTZ_BASE_URL=${BOLTZ_BASE_URL:-}
       - BOLTZ_API_TOKEN=${BOLTZ_API_TOKEN:-}
       - SABLE_SKILL_STORE_PATH=${SABLE_SKILL_STORE_PATH:-}
+      - SABLE_MODEL_WORKERS=${SABLE_MODEL_WORKERS:-2}
+      - SABLE_JOB_WORKERS=${SABLE_JOB_WORKERS:-2}
+      - SABLE_MAX_USER_OPERATIONS=${SABLE_MAX_USER_OPERATIONS:-1}
+      - SABLE_MAX_USER_JOBS=${SABLE_MAX_USER_JOBS:-4}
+      - 'SABLE_PROVIDER_JOB_LIMITS=${SABLE_PROVIDER_JOB_LIMITS:-}'
       - SABLE_AGENT_ENABLED=${SABLE_AGENT_ENABLED:-0}
       - SABLE_MAX_CAMPAIGN_DECISIONS=${SABLE_MAX_CAMPAIGN_DECISIONS:-1000}
       - SABLE_MAX_CAMPAIGN_ACTIONS=${SABLE_MAX_CAMPAIGN_ACTIONS:-200}
@@ -128,6 +133,28 @@ services:
         condition: service_completed_successfully
     networks:
       - sable-network
+    restart: unless-stopped
+
+  campaign_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: ["dev", "prod"]
+    entrypoint: ["micromamba", "run", "-n", "sable"]
+    command: ["python", "-m", "server.services.campaign_runner"]
+    environment: *campaign-environment
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+    networks:
+      - sable-network
+    cpus: ${SABLE_WORKER_CPUS:-2.0}
+    mem_limit: ${SABLE_WORKER_MEMORY:-4g}
+    stop_grace_period: 180s
     restart: unless-stopped
 
   # Celery Worker
