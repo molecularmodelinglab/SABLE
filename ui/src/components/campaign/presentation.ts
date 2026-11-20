@@ -70,6 +70,25 @@ export function present(result: Result): Presentation {
     blocks.push({ type: 'table', title: 'Ranked candidates', columns: [{ key: 'molecule', label: 'Candidate' }, { key: 'rank', label: 'Rank' }, { key: 'pareto_front', label: 'Pareto front' }, { key: 'smiles', label: 'SMILES' }, ...[...names].map(name => ({ key: `objective:${name}`, label: readable(name) }))], rows })
     blocks.push({ type: 'molecules', title: 'Ranked molecules', items: rows.filter(row => row.smiles).map(row => ({ id: String(row.molecule), smiles: String(row.smiles), label: `${row.rank === null ? 'Unranked' : `Rank ${row.rank}`} · ${row.molecule}` })) })
   }
+  if (['boltz_prediction', 'boltz_screen', 'remote_batch_result'].includes(String(result.kind))) {
+    const outputs = result.kind === 'remote_batch_result' ? records(result.results) : [result]
+    const rows: DataRow[] = []
+    for (const output of outputs) {
+      const measurements = output.kind === 'boltz_prediction' && object(output.measurement) ? [output.measurement] : records(output.measurements)
+      for (const measurement of measurements) {
+        if (!object(measurement.metrics)) continue
+        for (const [metric, value] of Object.entries(measurement.metrics)) if (finite(value)) rows.push({
+          molecule: String(measurement.id), smiles: String(measurement.smiles), provider: String(output.provider),
+          target: String(output.protein_scope_id), metric: metric === 'affinity' ? 'Predicted affinity (log10 µM; lower is better)' : metric === 'optimization_score' ? 'Platform optimization score (higher is better)' : readable(metric), value,
+        })
+      }
+    }
+    const failures = records(result.failures).length + outputs.reduce((count, output) => count + records(output.exclusions).length, 0)
+    title = 'Binding predictions'
+    summary = `Computational predictions, not measured affinity. Confidence and provider ranking scores are distinct metrics.${failures ? ` ${failures} calculation(s) failed or were excluded; inspect Calculations for details.` : ''}`
+    blocks.push({ type: 'table', title: 'Prediction metrics', columns: ['molecule', 'smiles', 'provider', 'target', 'metric', 'value'].map(key => ({ key, label: readable(key) })), rows })
+  }
+  if (result.kind === 'remote_batch') { title = 'Batch calculations submitted'; summary = `${records(result.jobs).length} molecule jobs queued. Results appear when the batch finishes; individual progress is available in Calculations.` }
   if (result.kind === 'job_outcome') { title = 'Remote calculation outcome'; summary = `Job ${readable(String(result.status)).toLowerCase()}. Review job details before using this as evidence.` }
   if (result.kind === 'remote_job') { title = 'Calculation submitted'; summary = 'Waiting for the remote service. Results will appear here when available.' }
   if (!blocks.length) {
