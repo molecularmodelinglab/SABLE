@@ -12,3 +12,22 @@ MoleculeHEALER is the default. SiteHEALER requires explicit zero-based RDKit ato
 The deployment supplies the `healer-api` service endpoint and optional bearer credential. Stock comes from deployment configuration (`HEALER_STOCK`, default `US_stock`). This package needs RDKit and requests, but no local HEALER installation or building-block data. The API contract and status translation are implemented in `remote.py`; the manifest declares the durable job and schemas.
 
 Retained reaction rows, API statistics, and actual remote job identity provide computational provenance, not evidence of experimental synthesis, commercial availability, or biological activity.
+
+Keep library generation separate from downstream evaluation batch size and rounds.
+Use `max_total_products` for the raw product cap; `max_candidates` is a compatibility
+alias. Do not supply both. A user asking for two rounds of three predictions has
+not requested a six-molecule library. Unless the user specifies enumeration
+breadth, omit `max_total_products`, `n_compositions` and `max_bbs_per_frag`: the
+host normally supplies 8000 raw products, 100 compositions and 10 building blocks
+per fragment. The deployment may override these defaults and its product ceiling.
+Compositions describe search breadth, not molecule count. The API receives these
+settings directly as `max_total_products`, `n_compositions`, `max_bbs_per_frag`.
+
+Generate the library once and let BayBE select evaluation batches by action
+reference. Score the recommendation, not the entire library. Report the returned
+`enumeration` counts: source rows, retained rows, exclusions by reason, any
+truncation, and eligible analogues. A raw cap is not a guaranteed usable yield;
+never remove user constraints to inflate it. The API's complete result response
+is bounded to 32 MB; oversize responses fail explicitly rather than producing a
+silently partial library. Provider-side exclusions not present in `complete`
+cannot be inferred; provider statistics remain available in provenance.

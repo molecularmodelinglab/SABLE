@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "healer-api",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Enumerate reaction-based analogues through the HEALER API with durable jobs and explicit chemical constraints.",
   "operations": [
     {
@@ -21,7 +21,8 @@
           "max_candidates": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 128
+            "maximum": 100000,
+            "description": "Compatibility alias for the raw product cap, not a guaranteed number of usable candidates. Prefer max_total_products."
           },
           "mode": {
             "enum": [
@@ -33,7 +34,8 @@
           "n_compositions": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 8
+            "maximum": 1000,
+            "description": "Compositions explored, not molecule count or evaluation batch size. Omit for HEALER_N_COMPOSITIONS (normally 100)."
           },
           "seed": {
             "type": "integer",
@@ -96,12 +98,29 @@
             "minItems": 1,
             "maxItems": 16,
             "uniqueItems": true
+          },
+          "max_total_products": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000,
+            "description": "Raw enumeration product cap, independent of BayBE evaluation batch size. Omit to use HEALER_MAX_TOTAL_PRODUCTS (normally 8000); deployment ceiling applies."
+          },
+          "max_bbs_per_frag": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Building blocks per fragment. Omit for HEALER_MAX_BBS_PER_FRAG (normally 10)."
           }
         },
         "required": [
-          "starting_smiles",
-          "max_candidates"
-        ]
+          "starting_smiles"
+        ],
+        "not": {
+          "required": [
+            "max_candidates",
+            "max_total_products"
+          ]
+        }
       },
       "output_schema": {
         "type": "object",
@@ -161,7 +180,7 @@
                 "smiles"
               ]
             },
-            "maxItems": 128
+            "maxItems": 100000
           },
           "constraints": {
             "type": "object",
@@ -232,6 +251,61 @@
           },
           "provenance": {
             "type": "object"
+          },
+          "enumeration": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "requested_product_cap": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "source_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "considered_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "eligible_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "excluded_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "backend_filtered_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "truncated_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "capacity_reached": {
+                "type": "boolean"
+              },
+              "exclusion_counts": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "required": [
+              "requested_product_cap",
+              "source_count",
+              "considered_count",
+              "eligible_count",
+              "excluded_count",
+              "backend_filtered_count",
+              "truncated_count",
+              "capacity_reached",
+              "exclusion_counts"
+            ]
           }
         },
         "required": [

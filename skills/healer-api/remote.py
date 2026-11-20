@@ -6,10 +6,11 @@ from urllib.parse import quote
 import requests
 from rdkit import rdBase
 from sable_runtime.science import canonical, filter_library
+from sable_runtime.enumeration import yield_summary
 
 
-MAX_RESPONSE_BYTES = 4_000_000
-READ_DEADLINE_SECONDS = 30
+MAX_RESPONSE_BYTES = 32_000_000
+READ_DEADLINE_SECONDS = 100
 
 
 def _request(method, path, context, **kwargs):
@@ -56,9 +57,9 @@ def submit(payload, context):
     if mode not in {'MoleculeHEALER', 'SiteHEALER'}:
         raise ValueError('Unsupported HEALER API mode')
     body = {'molecule': payload['starting_smiles'], 'bb_source': payload['stock'],
-            'reaction_tags': payload['reaction_tags'], 'max_bbs_per_frag': 5,
+            'reaction_tags': payload['reaction_tags'], 'max_bbs_per_frag': payload['max_bbs_per_frag'],
             'n_compositions': payload['n_compositions'],
-            'max_total_products': payload['max_candidates']}
+            'max_total_products': payload['max_total_products']}
     if mode == 'SiteHEALER':
         body['reactive_sites'] = payload['reactive_sites']
     route = '/enumerate/site' if mode == 'SiteHEALER' else '/enumerate/molecule'
@@ -78,19 +79,22 @@ def _library(response, remote_id, payload, context):
         raise ValueError('HEALER API success response is missing result.complete')
     if any(not isinstance(row, dict) or 'Product' not in row for row in rows):
         raise ValueError('HEALER API result.complete is missing Product')
-    retained = rows[:payload['max_candidates']]
+    retained = rows[:payload['max_total_products']]
     products = [row['Product'] if isinstance(row['Product'], str) else '' for row in retained]
     starting = canonical(payload['starting_smiles'])
     constraints = payload['constraints']
     candidates, exclusions = filter_library(products, starting, constraints)
     return {'kind': 'candidate_library', 'starting_smiles': starting, 'candidates': candidates,
             'constraints': constraints, 'exclusions': exclusions,
+            'enumeration': yield_summary(payload['max_total_products'], len(rows), len(retained), candidates, exclusions),
             'provenance': {'tool': 'HEALER', 'execution_mode': 'api',
                            'rdkit_version': rdBase.rdkitVersion,
                            'stock': payload['stock'], 'mode': payload['mode'],
                            'requested_seed': payload.get('seed'), 'seed_applied': False,
                            'n_compositions': payload['n_compositions'],
-                           'max_candidates': payload['max_candidates'],
+                           'max_candidates': payload['max_total_products'],
+                           'max_total_products': payload['max_total_products'],
+                           'max_bbs_per_frag': payload['max_bbs_per_frag'],
                            'reaction_tags': payload['reaction_tags'],
                            'source_count': len(rows), 'retained_source_count': len(retained),
                            'reaction_rows': retained, 'stats': result.get('stats', {}),

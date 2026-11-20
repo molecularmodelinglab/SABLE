@@ -2,9 +2,11 @@ import os
 
 from rdkit import Chem
 from sable_runtime.science import canonical, filter_library
+from sable_runtime.enumeration import enumeration_settings
 
 
 def enumerate(inputs, context):
+    settings = enumeration_settings(inputs)
     starting = canonical(inputs['starting_smiles'])
     constraints = {'scaffold_smarts': inputs.get('scaffold_smarts'),
                    'property_filters': inputs.get('property_filters', [])}
@@ -25,5 +27,5 @@ def enumerate(inputs, context):
     payload = {**inputs, 'mode': mode, 'constraints': constraints,
                'stock': os.getenv('HEALER_STOCK', 'US_stock'),
                'reaction_tags': inputs.get('reaction_tags', ['all']),
-               'n_compositions': inputs.get('n_compositions', 4)}
+               **settings, 'max_candidates': settings['max_total_products']}
     return context.submit_job('enumeration', payload)
