@@ -2759,3 +2759,13 @@ button.secondary:hover:not(:disabled) {
 .campaign-structure-result aside { overflow-wrap: anywhere; }
 .campaign-structure-result dd { margin: 0 0 0.75rem; font-variant-numeric: tabular-nums; }
 @media (max-width: 760px) { .campaign-structure-result { grid-template-columns: minmax(0, 1fr); } }
+
+.campaign-data-table--properties .results-table table { table-layout: fixed; }
+.campaign-data-table--properties .results-table th:first-child,
+.campaign-data-table--properties .results-table td:first-child {
+  width: clamp(8rem, 25%, 14rem);
+  overflow-wrap: normal;
+  word-break: normal;
+  vertical-align: top;
+}
+.campaign-data-table--properties .results-table td:nth-child(2) { overflow-wrap: anywhere; }

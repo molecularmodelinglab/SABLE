@@ -13,6 +13,7 @@ export function saveFile(name: string, content: string, type = 'application/json
 }
 
 function DataTable({ block }: { block: Extract<Block, { type: 'table' }> }) {
+  const propertyTable = block.columns.length === 2 && block.columns[0].key === 'property' && block.columns[1].key === 'value'
   const [page, setPage] = useState(0)
   const [sort, setSort] = useState({ key: '', descending: false })
   const rows = [...block.rows].sort((a, b) => {
@@ -24,7 +25,7 @@ function DataTable({ block }: { block: Extract<Block, { type: 'table' }> }) {
     return sort.descending ? -diff : diff
   })
   const current = Math.min(page, Math.max(0, Math.ceil(rows.length / 20) - 1))
-  return <section className="campaign-data-table"><div className="campaign-result-toolbar"><label>Sort by <select value={sort.key} onChange={e => { setSort({ ...sort, key: e.target.value }); setPage(0) }}><option value="">Recorded order</option>{block.columns.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}</select></label><button disabled={!sort.key} onClick={() => setSort({ ...sort, descending: !sort.descending })}>{sort.descending ? 'Descending' : 'Ascending'}</button><button onClick={() => saveFile('observations.csv', csv(block), 'text/csv;charset=utf-8')}>Download CSV</button></div>
+  return <section className={`campaign-data-table${propertyTable ? ' campaign-data-table--properties' : ''}`}><div className="campaign-result-toolbar"><label>Sort by <select value={sort.key} onChange={e => { setSort({ ...sort, key: e.target.value }); setPage(0) }}><option value="">Recorded order</option>{block.columns.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}</select></label><button disabled={!sort.key} onClick={() => setSort({ ...sort, descending: !sort.descending })}>{sort.descending ? 'Descending' : 'Ascending'}</button><button onClick={() => saveFile('observations.csv', csv(block), 'text/csv;charset=utf-8')}>Download CSV</button></div>
     <ResultsTable rows={rows.slice(current * 20, current * 20 + 20)} columns={block.columns.map(column => ({ ...column, render: (row: Record<string, unknown>) => { const value = row[column.key]; return value == null ? '—' : typeof value === 'number' ? Number.isInteger(value) ? String(value) : value.toPrecision(6) : String(value) } }))} />
     {rows.length > 20 && <div className="campaign-pagination"><button disabled={!current} onClick={() => setPage(current - 1)}>Previous rows</button><span>{current * 20 + 1}–{Math.min(rows.length, current * 20 + 20)} of {rows.length}</span><button disabled={(current + 1) * 20 >= rows.length} onClick={() => setPage(current + 1)}>Next rows</button></div>}
   </section>
