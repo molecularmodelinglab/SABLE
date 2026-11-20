@@ -12,7 +12,7 @@ from sable_runtime.campaigns import compact
 def skill():
     registry = SkillRegistry()
     registry.install(Path(__file__).resolve().parents[2] / 'skills/campaign-analysis')
-    package = registry.get('campaign-analysis', '1.0.0')
+    package = registry.get('campaign-analysis', '1.1.0')
     return registry, package
 
 
@@ -25,9 +25,14 @@ def test_real_figures_and_reference_resolution():
     results = {'measure':{'library_action_id':'library','observations':[observation('CCO',20,'a'),observation('CCN',25,'b'),observation('CCC',0,'c')]},
                'batch':{'kind':'recommendation','library_action_id':'library','round':2,'candidates':[{'id':name} for name in ('a','b','c')]}}
     context = SimpleNamespace(results=results,run_worker=lambda name,payload:run_worker(package,name,payload))
-    for kind in ('distribution','progress','chemical_space'):
+    for kind in ('distribution','progress','chemical_space','box','violin','minmax'):
         result=registry.handler(package,package.manifest.operations[0])({'measurement_action_ids':['measure'],'property':'tpsa','chart':kind,'direction':'MIN'},context)
         validate_presentation(result['presentation'])
+        from jsonschema import Draft202012Validator
+        Draft202012Validator(package.manifest.operations[0].output_schema).validate(result)
+        assert '<svg' in result['figure_svg']
+        assert 'Plotly.newPlot' in result['figure_html'] and '"format": "svg"' in result['figure_html']
+        assert compact(result)['figure_html'] == {'format': 'html', 'available': True}
         assert base64.b64decode(result['figure_png_base64']).startswith(b'\x89PNG\r\n')
         assert result['source_action_ids']==['measure'] and result['summary']['count']==3
         assert compact(result)['figure_png_base64']=={'format':'png','available':True}
@@ -56,3 +61,18 @@ def test_portable_schema_matches_published_contract():
     from sable_runtime.presentation import PRESENTATION_SCHEMA
     path=Path(__file__).resolve().parents[2]/'schemas/result-presentation.schema.json'
     assert json.loads(path.read_text())==PRESENTATION_SCHEMA
+
+
+def test_boltz_analysis_retains_native_units_and_rejects_target_mixing():
+    registry, package = skill()
+    operation = registry.handler(package, package.manifest.operations[0])
+    def prediction(candidate, target):
+        return {'kind':'boltz_prediction','provider':'self_hosted','protein_scope_id':target,'library_action_id':'library',
+                'measurement':{'id':candidate,'smiles':'CCO','metrics':{'affinity':-2}}}
+    context = SimpleNamespace(results={'scores':{'kind':'remote_batch_result','results':[prediction('a','target')]}}, run_worker=lambda name,payload:payload)
+    args = {'measurement_action_ids':['scores'],'property':'binding_affinity','chart':'distribution','direction':'MIN'}
+    result = operation(args,context)
+    assert result['unit'] == 'log10(uM)' and result['rows'][0]['value'] == -2
+    context.results['scores']['results'].append(prediction('b','other-target'))
+    with pytest.raises(ValueError, match='target'):
+        operation(args,context)

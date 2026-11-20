@@ -420,3 +420,36 @@ def test_real_runtime_queues_then_drives_stoplight_once(tmp_path, monkeypatch):
     jobs.drive('owned', receipt['job_id'], 'alice')
     executor.execute(action, owner='alice')
     assert len(requests) == 1
+
+
+@pytest.mark.parametrize('provider', ['self_hosted', 'platform'])
+def test_boltz_structure_retention_and_download_boundaries(provider, monkeypatch):
+    from sable_runtime.structures import retain_structure
+    stored, requests = [], []
+    def write(name, content):
+        stored.append((name, content))
+        return {'id': 'artifact-test', 'name': name, 'size_bytes': len(content), 'sha256': 'a'*64}
+    def respond(transport, request):
+        requests.append(request)
+        return httpx.Response(200, text='data_model\n_atom_site.id\n1\n')
+    monkeypatch.setattr(httpx.HTTPTransport, 'handle_request', respond)
+    ctx = context(write_artifact=write)
+    url = '/files/model.cif' if provider == 'self_hosted' else 'https://api.boltz.bio/model.cif?signature=private'
+    remote = module('boltz' if provider == 'self_hosted' else 'boltz-platform')
+    if provider == 'self_hosted':
+        monkeypatch.setattr(remote, '_request', lambda *a, **k: {'status':'completed', 'affinity':-2, 'cif_url':url})
+        output = validate('boltz','prediction',remote.poll_prediction('job-a',screen_payload(),ctx))
+        measurement = output['result']['measurement']
+    else:
+        monkeypatch.setattr(remote, '_call', Mock(side_effect=[{'status':'succeeded'}, {'data':[screen_row(artifacts={'structure':{'url':url}})],'has_more':False}]))
+        output = validate('boltz-platform','screen',remote.poll('job-a',screen_payload(),ctx))
+        measurement = output['result']['measurements'][0]
+    assert measurement['structure']['id'] == 'artifact-test' and stored[0][0].endswith('.cif')
+    assert bool(requests[0].headers.get('Authorization')) == (provider == 'self_hosted')
+    assert 'signature' not in json.dumps(output)
+    for bad in ['https://evil.invalid/model.cif', 'https://127.0.0.1/model.cif']:
+        assert 'structure_status' in retain_structure(bad,ctx,provider=provider,name='bad')
+    assert len(requests) == 1
+    monkeypatch.setattr(httpx.HTTPTransport, 'handle_request', lambda *a: httpx.Response(302,headers={'location':'https://evil.invalid'}))
+    assert 'structure_status' in retain_structure(url,ctx,provider=provider,name='redirect')
+    assert len(stored) == 1

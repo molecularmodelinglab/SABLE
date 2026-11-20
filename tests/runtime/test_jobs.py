@@ -323,3 +323,15 @@ def test_batch_enqueue_rolls_back_every_item_on_failure(runtime):
     with pytest.raises(JobConflict,match='Credential'):
         r.jobs.enqueue_many(r.action,skill,'compute',[{'value':1},{'value':'secret-value'}],'alice')
     assert r.jobs.list('campaign','alice')==[]
+
+
+def test_remote_structure_artifacts_are_owned_and_retry_reuses_file(runtime):
+    r = runtime
+    job = enqueue(r)
+    skill = r.registry.get('remote', '1.0.0')
+    context = r.jobs._context('campaign', 'one', 'alice', skill.manifest.remote_jobs['compute'])
+    first = context.write_artifact('job-model.cif', 'data_model\n_atom_site.id\n1')
+    assert context.write_artifact(first['name'], 'data_model\n_atom_site.id\n1') == first
+    assert len(r.jobs.artifacts.list('campaign', 'alice')) == 1
+    with pytest.raises(PermissionError):
+        r.jobs.artifacts.read('campaign', 'bob', first['id'])
