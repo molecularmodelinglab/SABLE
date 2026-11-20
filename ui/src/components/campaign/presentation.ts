@@ -28,6 +28,18 @@ export function present(result: Result): Presentation {
   if (Array.isArray(result.candidates)) {
     title = result.kind === 'recommendation' ? `Optimization round ${result.round} · recommended candidates` : 'Generated analogues'
     summary = `${candidates.length} candidates${Array.isArray(result.exclusions) ? ` · ${result.exclusions.length} excluded` : ''}.${result.stop_reason ? ` ${readable(String(result.stop_reason))}.` : ''}`
+    if (result.kind === 'candidate_library' && object(result.enumeration)) {
+      const counts = result.enumeration
+      summary = `${candidates.length} usable analogues from ${counts.source_count} returned products. Enumeration cap: ${counts.requested_product_cap}; this is separate from the number scored per optimization round.`
+      const rows: DataRow[] = [
+        { stage: 'Products returned', count: Number(counts.source_count) },
+        { stage: 'Removed by the enumeration backend', count: Number(counts.backend_filtered_count) },
+        { stage: 'Beyond the requested product cap', count: Number(counts.truncated_count) },
+        ...Object.entries(object(counts.exclusion_counts) ? counts.exclusion_counts : {}).filter(([, count]) => finite(count)).map(([reason, count]) => ({ stage: readable(reason), count: count as number })),
+        { stage: 'Usable analogues', count: candidates.length },
+      ]
+      blocks.push({ type: 'table', title: 'Library generation', columns: [{ key: 'stage', label: 'Stage' }, { key: 'count', label: 'Molecules' }], rows })
+    }
     const items = candidates.filter(c => typeof c.id === 'string' && typeof c.smiles === 'string').map(c => ({ id: String(c.id), smiles: String(c.smiles) }))
     blocks.push({ type: 'molecules', title: 'Molecule library', items }, { type: 'table', title: 'Candidates', columns: [{ key: 'id', label: 'Candidate' }, { key: 'smiles', label: 'SMILES' }], rows: items })
   }
