@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sable-campaign-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sable-campaign-worker
+  template:
+    metadata:
+      labels:
+        app: sable-campaign-worker
+    spec:
+      terminationGracePeriodSeconds: 180
+      containers:
+        - name: campaign-worker
+          image: image-registry.openshift-image-registry.svc:5000/dept-sable-prod/sable-api:latest
+          command: ["micromamba", "run", "-n", "sable"]
+          args: ["python", "-m", "server.services.campaign_runner"]
+          envFrom:
+            - configMapRef:
+                name: sable-config
+            - secretRef:
+                name: sable-secrets
+          volumeMounts:
+            - name: artifacts
+              mountPath: /app/data
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: sable-artifacts

@@ -26,7 +26,7 @@ class ArtifactStore:
             self.ledger.owned(db,campaign,owner)
             if require_idle:
                 state = db.execute('SELECT state,busy,execution_mode FROM agent_campaigns WHERE id=?', (campaign,)).fetchone()
-                if state is None or state['busy'] or (state['execution_mode'] == 'running' and json.loads(state['state'])['status'] != 'awaiting_user'):
+                if state is None or state['busy'] or (state['execution_mode'] in {'running', 'step'} and json.loads(state['state'])['status'] != 'awaiting_user'):
                     raise ValueError('Pause the campaign before adding files, or wait for a request for information')
             count,size=db.execute('SELECT count(*),coalesce(sum(size_bytes),0) FROM campaign_artifacts WHERE campaign=?',(campaign,)).fetchone()
             if count >= int(os.getenv('SABLE_CAMPAIGN_MAX_ARTIFACTS', '512')) or size+len(encoded) > int(os.getenv('SABLE_CAMPAIGN_ARTIFACT_BYTES', '128000000')):
