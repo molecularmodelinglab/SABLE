@@ -15,7 +15,7 @@ export function AdminGuard({ children }: AdminGuardProps) {
 
   useEffect(() => {
     if (!isLoading && !isAdmin) {
-      navigate('/dashboard', { replace: true })
+      navigate('/campaigns', { replace: true })
     }
   }, [isLoading, isAdmin, navigate])
 

@@ -45,7 +45,7 @@ async function request<T>(path = '', body?: unknown, method?: 'DELETE'): Promise
   return response.json()
 }
 
-export function NewRunPage() {
+export function CampaignsPage() {
   const { data: profile } = useAuthProfile()
   const isAdmin = Boolean(profile?.user.roles?.includes('admin'))
   const [campaigns, setCampaigns] = useState<CampaignSummary[]>([])

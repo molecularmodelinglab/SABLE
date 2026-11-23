@@ -3,8 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { AppShell } from './components/AppShell'
 import { AuthGuard } from './components/AuthGuard'
 import { AdminGuard } from './components/AdminGuard'
-import { DashboardPage } from './pages/DashboardPage'
-import { NewRunPage } from './pages/NewRunPage'
+import { CampaignsPage } from './pages/CampaignsPage'
 import { RunDetailPage } from './pages/RunDetailPage'
 import { LoginPage } from './pages/LoginPage'
 import { RegisterPage } from './pages/RegisterPage'
@@ -28,9 +27,8 @@ export function App() {
           <AuthGuard>
             <AppShell header={<Header title={headerContent.title} description={headerContent.description} pathname={location.pathname} />}>
               <Routes>
-                <Route path="/dashboard" element={<DashboardPage />} />
-                <Route path="/agent" element={<Navigate to="/runs/new" replace />} />
-                <Route path="/runs/new" element={<NewRunPage />} />
+                <Route path="/campaigns" element={<CampaignsPage />} />
+                {['/dashboard', '/agent', '/runs/new'].map(path => <Route key={path} path={path} element={<Navigate to={`/campaigns${location.search}${location.hash}`} replace />} />)}
                 <Route path="/runs/:id" element={<RunDetailPage />} />
                 <Route path="/account" element={<AccountPage />} />
                 <Route
@@ -41,7 +39,7 @@ export function App() {
                     </AdminGuard>
                   }
                 />
-                <Route path="*" element={<Navigate to="/dashboard" replace />} />
+                <Route path="*" element={<Navigate to="/campaigns" replace />} />
               </Routes>
             </AppShell>
           </AuthGuard>
@@ -73,18 +71,18 @@ function Header({ title, description, pathname }: { title: string; description: 
       <div className="app-header__status">
         <span>{timestamp}</span>
         {isAdmin && (
-          <div className="view-toggle" role="group" aria-label="Select dashboard view">
+          <div className="view-toggle" role="group" aria-label="Select workspace">
             <button
               type="button"
               className={!onAdminView ? 'active' : ''}
               aria-pressed={!onAdminView}
               onClick={() => {
                 if (onAdminView) {
-                  navigate('/dashboard')
+                  navigate('/campaigns')
                 }
               }}
             >
-              Workflows
+              Campaigns
             </button>
             <button
               type="button"
@@ -106,7 +104,7 @@ function Header({ title, description, pathname }: { title: string; description: 
 }
 
 function buildHeader(pathname: string) {
-  if (pathname.startsWith('/runs/new')) {
+  if (pathname.startsWith('/campaigns')) {
     return {
       title: 'Campaigns',
       description: 'Describe a task and follow its progress',
@@ -131,7 +129,7 @@ function buildHeader(pathname: string) {
     }
   }
   return {
-    title: 'Campaign Dashboard',
-    description: 'Overview of optimization runs, status, and historical metrics.',
+    title: 'Campaigns',
+    description: 'Describe a task and follow its progress',
   }
 }

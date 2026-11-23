@@ -3,7 +3,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { logout } from '../api'
 import { useAuthProfile } from '../hooks/useAuthProfile'
-import { BarChart3, ChevronDown, ChevronUp, LogOut, Settings, ShieldCheck, Target } from 'lucide-react'
+import { ChevronDown, ChevronUp, LogOut, Settings, ShieldCheck, Target } from 'lucide-react'
 
 export function AppShell({ header, children }: { header: ReactNode; children: ReactNode }) {
   const location = useLocation()
@@ -15,8 +15,7 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
 
   const navLinks = useMemo(() => {
     const baseLinks = [
-      { to: '/dashboard', label: 'Dashboard', icon: BarChart3, end: true },
-      { to: '/runs/new', label: 'New Run', icon: Target, end: false },
+      { to: '/campaigns', label: 'Campaigns', icon: Target, end: false },
       { to: '/account', label: 'Settings & API', icon: Settings, end: false },
     ]
 
@@ -60,7 +59,7 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
                 [
                   'app-shell__nav-link',
                   isActive ? 'app-shell__nav-link--active' : '',
-                  link.to !== '/dashboard' && location.pathname.startsWith(link.to) && !isActive ? 'app-shell__nav-link--pending' : '',
+                  location.pathname.startsWith(link.to) && !isActive ? 'app-shell__nav-link--pending' : '',
                 ]
                   .filter(Boolean)
                   .join(' ')
@@ -124,7 +123,7 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
       </aside>
       <div className="app-shell__main">
         <header className="app-shell__header">{header}</header>
-        <main className={`app-shell__content${location.pathname.replace(/\/$/, '') === '/runs/new' ? ' app-shell__content--workspace' : ''}`}>{children}</main>
+        <main className={`app-shell__content${location.pathname.replace(/\/$/, '') === '/campaigns' ? ' app-shell__content--workspace' : ''}`}>{children}</main>
       </div>
     </div>
   )
