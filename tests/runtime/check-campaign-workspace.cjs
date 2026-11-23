@@ -34,7 +34,8 @@ async function view(scenario) {
       return { ok: !scenario.status, status: scenario.status || 200, json: async () => scenario.status ? { detail: scenario.detail || 'Not Found' } : scenario.catalog }
     }
     if (url.includes('/events')) return { ok: true, json: async () => [] }
-    return { ok: true, json: async () => url === '/v2/campaigns' ? (scenario.campaigns || []) : scenario.nextCampaign || scenario.campaign }
+    if (url.startsWith('/v2/campaigns?')) return { ok: true, json: async () => url.includes('before=') ? { items: scenario.olderCampaigns || [], next_cursor: null } : { items: scenario.campaigns || [], next_cursor: scenario.nextCursor || null } }
+    return { ok: true, json: async () => scenario.nextCampaign || scenario.campaign }
   } })
   function render() { index = 0; dirty = false; tree = exports.NewRunPage(); const tasks = pending; pending = []; tasks.forEach(fn => fn()) }
   async function settle() { for (let n = 0; n < 20; n++) { await Promise.resolve(); if (dirty) render() } }
@@ -95,6 +96,13 @@ async function view(scenario) {
   assert.deepEqual(deleting.deletes, ['/v2/campaigns/test-campaign'])
   assert.match(deleting.text(), /What would you like to investigate/)
   assert.equal(deleting.nodes().filter(node => node.props?.title === 'Delete campaign').length, 0)
+  const paged = await view({ catalog, campaigns: [{ id: 'new', title: 'Newest campaign', status: 'completed' }], nextCursor: '42', olderCampaigns: [{ id: 'old', title: 'Older campaign', status: 'completed' }] })
+  assert.match(paged.text(), /Newest campaign/)
+  await paged.click('Load older campaigns')
+  assert.match(paged.text(), /Older campaign/)
+  assert.match(paged.text(), /Newest campaign/)
+  assert.doesNotMatch(paged.text(), /Load older campaigns/)
+  assert.ok(paged.reads.some(url => url.endsWith('before=42')))
   const cancelled = await view({ catalog, campaign: drafted, campaigns: [drafted] })
   await cancelled.remove(); await cancelled.click('Cancel'); assert.equal(cancelled.deletes.length, 0)
   assert.doesNotMatch(cancelled.text(), /This cannot be undone/)

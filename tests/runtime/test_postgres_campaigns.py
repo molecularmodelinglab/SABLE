@@ -48,8 +48,8 @@ def test_campaign_roundtrip_and_owner_isolation(storage):
     campaigns = service(ledger)
     first = campaigns.create(alice, 'Summarize these observations')
     second = campaigns.create(alice, 'A second campaign')
-    assert [row['id'] for row in campaigns.list(alice)] == [second['id'], first['id']]
-    assert campaigns.list(bob) == []
+    assert [row['id'] for row in campaigns.list(alice)['items']] == [second['id'], first['id']]
+    assert campaigns.list(bob)['items'] == []
     artifact = campaigns.artifacts.put(first['id'], alice, 'data.txt', '1,2,3')
     with pytest.raises(PermissionError):
         campaigns.get(first['id'], bob)
@@ -94,7 +94,7 @@ def test_permanent_campaign_deletion(storage):
     with pytest.raises(PermissionError):
         campaigns.delete(campaign, bob)
     campaigns.delete(campaign, alice)
-    assert campaigns.list(alice) == []
+    assert campaigns.list(alice)['items'] == []
     assert campaigns.get(other, bob)['id'] == other
     with ledger.connect() as db:
         for table in ('actions', 'events', 'remote_jobs', 'campaign_artifacts'):

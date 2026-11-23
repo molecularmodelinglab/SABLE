@@ -30,7 +30,7 @@ async function view(scenario) {
       if (scenario.loading) return new Promise(() => {})
       return { ok: !scenario.status, status: scenario.status || 200, json: async () => scenario.status ? { detail: scenario.detail || 'Not Found' } : scenario.catalog }
     }
-    return { ok: true, json: async () => [] }
+    return { ok: true, json: async () => ({ items: [], next_cursor: null }) }
   } })
   function render() { index = 0; dirty = false; tree = exports.NewRunPage(); const tasks = pending; pending = []; tasks.forEach(fn => fn()) }
   async function settle() { for (let n = 0; n < 20; n++) { await Promise.resolve(); if (dirty) render() } }

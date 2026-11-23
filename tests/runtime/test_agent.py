@@ -81,7 +81,7 @@ def test_clarification_resume_and_ownership(service):
     state = service.message(state['id'], 'alice', 'CCO')
     assert state['status'] == 'ready'
     assert state['history'][-1]['content'] == 'CCO'
-    assert service.list('bob') == []
+    assert service.list('bob')['items'] == []
 
 
 @pytest.mark.parametrize('choice', [decision('finish', summary='Invented result', evidence=['unknown']),
@@ -247,3 +247,27 @@ def test_recovery_preserves_empty_observation_exclusion(service):
     recovered = service.get(state['id'], 'alice')
     assert recovered['results'] == {}
     assert recovered['history'][-1]['result']['output']['failures']
+
+
+def test_campaign_pages_are_owned_stable_and_only_contain_summaries(service):
+    ids = [service.create('alice', f'Campaign {index}')['id'] for index in range(105)]
+    service.create('bob', 'Private campaign')
+    page = service.list('alice', limit=25)
+    assert [row['id'] for row in page['items']] == list(reversed(ids[-25:]))
+    assert set(page['items'][0]) == {'id','title','status','busy','execution_mode'}
+    assert page['items'][0]['title'] == 'Campaign 104'
+    # A concurrent insertion and deletion do not shift the remaining pages.
+    service.create('alice', 'Newer campaign')
+    service.delete(ids[-1], 'alice')
+    collected = [row['id'] for row in page['items']]
+    while page['next_cursor']:
+        page = service.list('alice', before=int(page['next_cursor']), limit=25)
+        collected.extend(row['id'] for row in page['items'])
+    assert collected == list(reversed(ids))
+    assert service.list('bob')['items'][0]['title'] == 'Private campaign'
+    app = FastAPI()
+    app.include_router(make_router(lambda:SimpleNamespace(id='alice'), lambda:service))
+    with TestClient(app) as client:
+        assert client.get('/v2/campaigns?limit=0').status_code == 422
+        assert client.get('/v2/campaigns?before=-1').status_code == 422
+        assert len(client.get('/v2/campaigns?limit=2').json()['items']) == 2

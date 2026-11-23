@@ -15,7 +15,7 @@ def test_delete_removes_records_and_preserves_other_campaigns(service):
     with pytest.raises(PermissionError):
         service.delete(campaign, 'bob')
     assert service.delete(campaign, 'alice')['deleted'] is True
-    assert [item['id'] for item in service.list('alice')] == [other]
+    assert [item['id'] for item in service.list('alice')['items']] == [other]
     with pytest.raises(PermissionError):
         service.get(campaign, 'alice')
     with service.ledger.connect() as db:
