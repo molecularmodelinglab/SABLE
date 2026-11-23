@@ -10,6 +10,8 @@ type JobStatus = 'queued' | 'submitting' | 'unknown' | 'running' | 'succeeded' |
 type Job = { id: string; campaign: string; action: string; skill_id: string; remote_id: string | null; status: JobStatus; can_cancel: boolean; can_reconcile: boolean; created: string | number; updated: string | number; next_poll: string | number | null; deadline: string | number | null; result?: unknown; error?: unknown; diagnostics?: Record<string, unknown> }
 type Artifact = { id: string; name: string; size_bytes: number; sha256: string }
 type Campaign = { history?: { role: string; content?: string; decision?: { name: string; arguments: { question?: string; skill_id?: string; operation_id?: string } }; result?: { action_id?: string } }[]; execution_mode?: string; execution_error?: string | null; budget_reason?: string | null; id: string; status: string; busy: boolean; question: string | null; error: string | null; turns: number; max_turns: number; report: { summary: string; evidence: string[] } | null; results: Record<string, ScientificResult>; jobs?: Job[]; artifacts?: Artifact[]; skills?: { id: string; version: string; digest: string }[]; model?: string; metrics?: { tool_actions: number; max_tool_actions: number; operation_units: number; max_operation_units: number; input_tokens: number; output_tokens: number } }
+type CampaignSummary = { id: string; title: string; status: string; busy: boolean; execution_mode?: string }
+type CampaignPage = { items: CampaignSummary[]; next_cursor: string | null }
 type Capability = { id: string; version: string; description: string; digest: string; available: boolean; resumable: boolean; requirements: unknown; operations: { id: string; description: string }[] }
 type Event = { event_id: string; action: string; sequence: number; timestamp: string; kind: string; payload: unknown; preview?: boolean }
 
@@ -46,7 +48,7 @@ async function request<T>(path = '', body?: unknown, method?: 'DELETE'): Promise
 export function NewRunPage() {
   const { data: profile } = useAuthProfile()
   const isAdmin = Boolean(profile?.user.roles?.includes('admin'))
-  const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [campaigns, setCampaigns] = useState<CampaignSummary[]>([])
   const [campaign, setCampaign] = useState<Campaign | null>(null)
   const [events, setEvents] = useState<Event[]>([])
   const [capabilities, setCapabilities] = useState<Capability[] | null>(null)
@@ -64,7 +66,7 @@ export function NewRunPage() {
   const [structurePreview, setStructurePreview] = useState<{ name: string; content: string } | null>(null)
   const [budgetOpen, setBudgetOpen] = useState(false)
   const [budgetLimits, setBudgetLimits] = useState({ max_turns: 0, max_actions: 0, max_units: 0 })
-  const [deleteTarget, setDeleteTarget] = useState<Campaign | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<CampaignSummary | null>(null)
   const [deleteError, setDeleteError] = useState('')
   const deleteDialog = useRef<HTMLDialogElement | null>(null)
   useEffect(() => {
@@ -80,7 +82,41 @@ export function NewRunPage() {
   const conversationEnd = useRef<HTMLDivElement | null>(null)
   useEffect(() => { if (followConversation.current) conversationEnd.current?.scrollIntoView({ block: 'nearest' }) }, [campaign?.history?.length, campaign?.question, campaign?.report, structurePreview?.name])
   const mounted = useRef(true)
-  useEffect(() => { mounted.current = true; request<Campaign[]>().then(setCampaigns).catch(e => setError(e.message)); return () => { mounted.current = false } }, [])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState('')
+  const historyRequest = useRef(false)
+  const deletedCampaigns = useRef(new Set<string>())
+  async function loadCampaigns(cursor: string | null = null) {
+    if (historyRequest.current) return
+    historyRequest.current = true
+    setHistoryLoading(true); setHistoryError('')
+    try {
+      const page = await request<CampaignPage>(`?limit=25${cursor ? `&before=${encodeURIComponent(cursor)}` : ''}`)
+      if (!mounted.current) return
+      setCampaigns(previous => {
+        const seen = new Set<string>()
+        return [...previous, ...page.items].filter(item => {
+          if (seen.has(item.id) || deletedCampaigns.current.has(item.id)) return false
+          seen.add(item.id); return true
+        })
+      })
+      setNextCursor(page.next_cursor)
+    } catch (e) {
+      if (mounted.current) setHistoryError(e instanceof Error ? e.message : 'Unable to load campaigns')
+    } finally {
+      historyRequest.current = false
+      if (mounted.current) setHistoryLoading(false)
+    }
+  }
+  function rememberCampaign(value: Campaign) {
+    const summary = { id: value.id, title: title(value).slice(0, 160), status: value.status, busy: value.busy, execution_mode: value.execution_mode }
+    setCampaigns(previous => previous.some(item => item.id === value.id) ? previous.map(item => item.id === value.id ? summary : item) : [summary, ...previous])
+  }
+  useEffect(() => { mounted.current = true; void loadCampaigns(); return () => { mounted.current = false } }, [])
+  useEffect(() => {
+    if (campaign) setCampaigns(previous => previous.map(item => item.id === campaign.id ? { ...item, status: campaign.status, busy: campaign.busy, execution_mode: campaign.execution_mode } : item))
+  }, [campaign?.id, campaign?.status, campaign?.busy, campaign?.execution_mode])
   useEffect(() => {
     if (!window.location) return
     const id = new URLSearchParams(window.location.search).get('campaign')
@@ -171,7 +207,7 @@ export function NewRunPage() {
   async function run(current: Campaign) {
     setCampaign(current)
     const next = await request<Campaign>(`/${current.id}/start`, {})
-    if (mounted.current) { setCampaign(next); setCampaigns(await request<Campaign[]>()) }
+    if (mounted.current) { setCampaign(next); rememberCampaign(next) }
   }
   async function perform(action: () => Promise<void>) {
     if (requestBusy.current) return
@@ -195,13 +231,14 @@ export function NewRunPage() {
     })
   }
 
-  const title = (item: Campaign) => item.history?.find(message => message.role === 'user')?.content || `Campaign ${item.id.slice(-8)}`
-  async function deleteCampaign(item: Campaign) {
+  const title = (item: Campaign | CampaignSummary) => 'title' in item ? item.title : item.history?.find(message => message.role === 'user')?.content || `Campaign ${item.id.slice(-8)}`
+  async function deleteCampaign(item: CampaignSummary) {
     if (controlsBusy || requestBusy.current) return
     requestBusy.current = true
     setWorking(true); setDeleteError('')
     try {
       await request(`/${encodeURIComponent(item.id)}`, undefined, 'DELETE')
+      deletedCampaigns.current.add(item.id)
       setCampaigns(previous => previous.filter(value => value.id !== item.id))
       if (campaign?.id === item.id) {
         setCampaign(null); setEvents([]); setFullEvent(null); setPrompt(''); setReply('')
@@ -245,11 +282,14 @@ export function NewRunPage() {
     <div className={`workspace-layout${showDetails ? ' workspace-layout--details' : ''}`}>
       <aside className="workspace-history" aria-label="Campaign history">
         <button className="workspace-new" disabled={controlsBusy} onClick={() => { if (window.location && window.history) { const url = new URL(window.location.href); url.searchParams.delete('campaign'); window.history.replaceState(null, '', url) }; setCampaign(null); setEvents([]); setPrompt(''); setReply(''); setError(''); }}>+ New campaign</button>
-        <details open><summary>Recent campaigns <span>{campaigns.length}</span></summary>
-          {campaigns.length === 0 && <p className="workspace-muted">Your campaigns will appear here.</p>}
-          <nav aria-label="Previous campaigns">{campaigns.map(item => <div key={item.id} className="workspace-history-row"><button className="workspace-history-item" aria-current={campaign?.id === item.id ? 'page' : undefined} disabled={controlsBusy} onClick={() => perform(async () => { setReply(''); setEvents([]); setCampaign(await request<Campaign>(`/${item.id}`)) })}>
+        <details open><summary>Recent campaigns <span title={nextCursor ? `${campaigns.length} loaded; more available` : `${campaigns.length} campaigns`}>{campaigns.length}{nextCursor ? "+" : ""}</span></summary>
+          {campaigns.length === 0 && !historyLoading && !historyError && <p className="workspace-muted">Your campaigns will appear here.</p>}
+          <nav aria-label="Previous campaigns" tabIndex={0} aria-busy={historyLoading}>{campaigns.map(item => <div key={item.id} className="workspace-history-row"><button className="workspace-history-item" aria-current={campaign?.id === item.id ? 'page' : undefined} disabled={controlsBusy} onClick={() => perform(async () => { setReply(''); setEvents([]); setCampaign(await request<Campaign>(`/${item.id}`)) })}>
             <span>{title(item)}</span><small>{item.execution_mode === 'running' && ['ready', 'waiting_jobs'].includes(item.status) ? 'In progress' : readable(item.status)}</small>
-          </button><button className="workspace-delete" aria-label={`Delete campaign: ${title(item)}`} title="Delete campaign" disabled={controlsBusy} onClick={() => { setDeleteError(''); setDeleteTarget(item) }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" /></svg></button></div>)}</nav>
+          </button><button className="workspace-delete" aria-label={`Delete campaign: ${title(item)}`} title="Delete campaign" disabled={controlsBusy} onClick={() => { setDeleteError(''); setDeleteTarget(item) }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" /></svg></button></div>)}
+            {historyError && <p role="alert">{historyError}</p>}
+            {(nextCursor || historyError || historyLoading) && <button disabled={historyLoading || controlsBusy} onClick={() => void loadCampaigns(nextCursor)}>{historyLoading ? 'Loading campaigns…' : historyError ? 'Retry loading campaigns' : 'Load older campaigns'}</button>}
+          </nav>
         </details>
       </aside>
       <section className="workspace-conversation" aria-label="Campaign conversation">
@@ -327,7 +367,7 @@ export function NewRunPage() {
             <label htmlFor="agent-prompt">Your research goal</label>
             <textarea id="agent-prompt" value={prompt} onChange={e => setPrompt(e.target.value)} required maxLength={10000} rows={3} placeholder="What do you want to discover? Include structures, data, or constraints if you have them." disabled={controlsBusy} />
             <div className="workspace-composer-actions"><button disabled={!canStartCampaign || !prompt.trim()} type="button" onClick={() => perform(async () => {
-              const next = await request<Campaign>('', { message: prompt.trim() }); setCampaign(next); setShowDetails(true); setCampaigns(await request<Campaign[]>())
+              const next = await request<Campaign>('', { message: prompt.trim() }); setCampaign(next); setShowDetails(true); rememberCampaign(next)
             })}>Add files first</button><button className="primary" disabled={!canStartCampaign || !prompt.trim()} type="submit">Start campaign</button></div>
           </form> : campaign.question ? <form onSubmit={e => { e.preventDefault(); if (!reply.trim() || controlsBusy) return; perform(async () => { const next = await request<Campaign>(`/${campaign.id}/messages`, { message: reply.trim() }); setReply(''); setCampaign(next); if (next.execution_mode !== 'paused') await run(next) }) }}>
             <label htmlFor="agent-reply">Your reply</label><textarea id="agent-reply" required rows={3} maxLength={10000} value={reply} onChange={e => setReply(e.target.value)} disabled={controlsBusy} placeholder="Add the information SABLE needs…" />

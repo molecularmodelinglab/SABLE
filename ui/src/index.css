@@ -2649,10 +2649,10 @@ button.secondary:hover:not(:disabled) {
 .workspace-eyebrow { margin: 0 0 6px; color: var(--old-well-basin); font-size: .75rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .workspace-layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 20px; align-items: start; }
 .workspace-layout--details { grid-template-columns: 170px minmax(300px, 1fr) minmax(270px, 330px); }
-.workspace-history { min-width: 0; padding-top: 8px; }
+.workspace-history { min-width: 0; padding-top: 8px; position: sticky; top: 20px; }
 .workspace-new { width: 100%; text-align: left; margin-bottom: 20px; background: var(--white); }
 .workspace-history summary { display: flex; justify-content: space-between; font-size: .85rem; }
-.workspace-history nav { display: grid; gap: 6px; margin-top: 10px; }
+.workspace-history nav { display: grid; gap: 6px; margin-top: 10px; max-height: max(10rem, calc(100dvh - 250px)); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .workspace-history-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .workspace-history-row .workspace-history-item { flex: 1; min-width: 0; }
 .workspace-delete { flex: 0 0 32px; min-height: 36px; padding: 6px; display: grid; place-items: center; background: transparent; border-color: transparent; color: var(--old-well-basin); }
@@ -2700,7 +2700,7 @@ button.secondary:hover:not(:disabled) {
 .science-workspace button:focus-visible, .science-workspace summary:focus-visible, .science-workspace a:focus-visible { outline: 2px solid var(--carolina-blue); outline-offset: 3px; }
 @media (max-width: 1200px) {
   .workspace-layout--details { grid-template-columns: minmax(0, 1fr) 300px; }
-  .workspace-layout--details .workspace-history { grid-column: 1 / -1; }
+  .workspace-layout--details .workspace-history { grid-column: 1 / -1; position: static; }
   .workspace-layout--details .workspace-history nav { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); max-height: 160px; overflow: auto; }
   .workspace-layout--details .workspace-new { width: auto; margin-bottom: 8px; }
 }
@@ -2708,6 +2708,7 @@ button.secondary:hover:not(:disabled) {
   .workspace-layout, .workspace-layout--details { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .workspace-header h1 { font-size: 1.3rem; }
   .workspace-header button { font-size: .8rem; }
+  .workspace-history { position: static; }
   .workspace-history nav { max-height: 150px; overflow: auto; }
   .workspace-new { width: auto; margin-bottom: 8px; }
   .workspace-conversation { min-height: 65vh; }
