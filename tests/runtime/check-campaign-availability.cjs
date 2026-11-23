@@ -3,7 +3,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const vm = require('node:vm')
 const ts = require('/workspace/ui/node_modules/typescript')
-const source = fs.readFileSync('/workspace/ui/src/pages/NewRunPage.tsx', 'utf8')
+const source = fs.readFileSync('/workspace/ui/src/pages/CampaignsPage.tsx', 'utf8')
 const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020 } }).outputText
 
 async function view(scenario) {
@@ -32,7 +32,7 @@ async function view(scenario) {
     }
     return { ok: true, json: async () => ({ items: [], next_cursor: null }) }
   } })
-  function render() { index = 0; dirty = false; tree = exports.NewRunPage(); const tasks = pending; pending = []; tasks.forEach(fn => fn()) }
+  function render() { index = 0; dirty = false; tree = exports.CampaignsPage(); const tasks = pending; pending = []; tasks.forEach(fn => fn()) }
   async function settle() { for (let n = 0; n < 20; n++) { await Promise.resolve(); if (dirty) render() } }
   function nodes(node) { if (arguments.length === 0) node = tree; if (!node || typeof node !== 'object') return []; if (Array.isArray(node)) return node.flatMap(n => nodes(n)); return [node, ...nodes(node.props?.children || [])] }
   function text(node) { if (arguments.length === 0) node = tree; if (node == null || typeof node === 'boolean') return ''; if (typeof node !== 'object') return String(node); if (Array.isArray(node)) return node.map(n => text(n)).join(' '); return text(node.props?.children || '') }

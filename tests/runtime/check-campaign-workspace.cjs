@@ -3,7 +3,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const vm = require('node:vm')
 const ts = require('/workspace/ui/node_modules/typescript')
-const source = fs.readFileSync('/workspace/ui/src/pages/NewRunPage.tsx', 'utf8')
+const source = fs.readFileSync('/workspace/ui/src/pages/CampaignsPage.tsx', 'utf8')
 const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020 } }).outputText
 
 async function view(scenario) {
@@ -37,7 +37,7 @@ async function view(scenario) {
     if (url.startsWith('/v2/campaigns?')) return { ok: true, json: async () => url.includes('before=') ? { items: scenario.olderCampaigns || [], next_cursor: null } : { items: scenario.campaigns || [], next_cursor: scenario.nextCursor || null } }
     return { ok: true, json: async () => scenario.nextCampaign || scenario.campaign }
   } })
-  function render() { index = 0; dirty = false; tree = exports.NewRunPage(); const tasks = pending; pending = []; tasks.forEach(fn => fn()) }
+  function render() { index = 0; dirty = false; tree = exports.CampaignsPage(); const tasks = pending; pending = []; tasks.forEach(fn => fn()) }
   async function settle() { for (let n = 0; n < 20; n++) { await Promise.resolve(); if (dirty) render() } }
   function nodes(node) { if (arguments.length === 0) node = tree; if (!node || typeof node !== 'object') return []; if (Array.isArray(node)) return node.flatMap(n => nodes(n)); return [node, ...nodes(node.props?.children || [])] }
   function text(node) { if (arguments.length === 0) node = tree; if (node == null || typeof node === 'boolean') return ''; if (typeof node !== 'object') return String(node); if (Array.isArray(node)) return node.map(n => text(n)).join(' '); return text(node.props?.children || '') }
@@ -113,3 +113,29 @@ async function view(scenario) {
   assert.equal(rejected.nodes().filter(node => node.props?.title === 'Delete campaign').length, 1)
   console.log('PASS: collapsed details, example prompts, single conversation composer, durable question history, and report access.')
 })().catch(error => { console.error(error); process.exitCode = 1 })
+
+// Exercise route compatibility, including bookmarks to an existing campaign.
+{
+  const appExports = {}
+  const appCode = ts.transpileModule(fs.readFileSync('/workspace/ui/src/App.tsx', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020 } }).outputText
+  vm.runInNewContext(appCode, { exports: appExports, require(name) {
+    if (name === 'react') return { useMemo: fn => fn() }
+    if (name === 'react/jsx-runtime') return { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) }
+    if (name === 'react-router-dom') return { useLocation: () => ({ pathname: '/runs/new', search: '?campaign=campaign-abc', hash: '#results' }), Routes: 'Routes', Route: 'Route', Navigate: 'Navigate' }
+    return new Proxy({}, { get: (_, key) => String(key) })
+  } })
+  function collect(node) {
+    if (!node || typeof node !== 'object') return []
+    if (Array.isArray(node)) return node.flatMap(collect)
+    return [node, ...collect(node.props?.children), ...collect(node.props?.element)]
+  }
+  const routes = collect(appExports.App()).filter(node => node.type === 'Route')
+  assert.equal(routes.find(node => node.props.path === '/campaigns').props.element.type, 'CampaignsPage')
+  for (const path of ['/dashboard', '/runs/new', '/agent']) {
+    const redirect = routes.find(node => node.props.path === path).props.element
+    assert.equal(redirect.props.to, '/campaigns?campaign=campaign-abc#results')
+    assert.equal(redirect.props.replace, true)
+  }
+  assert.ok(routes.some(node => node.props.path === '*' && node.props.element.props.to === '/campaigns'))
+  console.log('PASS: Campaigns route and preserved bookmarks from retired workspace URLs.')
+}
