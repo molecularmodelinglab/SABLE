@@ -76,8 +76,9 @@ def make_router(user_dependency, service_dependency=configured_service, model_fa
         return invoke(service.create, str(user.id), payload.message)
 
     @router.get('')
-    def list_campaigns(user=Depends(user_dependency), service=Depends(service_dependency)):
-        return invoke(service.list, str(user.id))
+    def list_campaigns(before: int | None = Query(default=None, ge=1, le=9223372036854775807), limit: int = Query(default=6, ge=1, le=100),
+                       user=Depends(user_dependency), service=Depends(service_dependency)):
+        return invoke(service.list, str(user.id), before, limit)
 
     @router.get('/capabilities')
     def capabilities(user=Depends(user_dependency), service=Depends(service_dependency)):

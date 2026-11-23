@@ -160,10 +160,21 @@ class CampaignService:
                            'events':self.ledger.events(campaign_id, owner),
                            'notice':'Operational record, not a curated training example. Exact uploaded-file values are replaced by artifact references; review user and tool text before sharing.'})
 
-    def list(self, owner):
+    def list(self, owner, before=None, limit=6):
+        """Page owned campaign summaries without transferring scientific results."""
+        if not 1 <= limit <= 100 or (before is not None and before < 1):
+            raise ValueError('Invalid campaign page')
+        order = f'a.{self.ledger.order_column}'
+        title = "left(a.state::jsonb #>> '{history,0,content}',160)" if self.ledger.postgres else "substr(json_extract(a.state,'$.history[0].content'),1,160)"
+        status = "a.state::jsonb->>'status'" if self.ledger.postgres else "json_extract(a.state,'$.status')"
+        cursor = f' AND {order} < ?' if before is not None else ''
+        parameters = [owner] + ([before] if before is not None else []) + [limit+1]
         with self.ledger.connect() as db:
-            rows = db.execute(f'SELECT a.state,a.busy,a.execution_mode FROM agent_campaigns a JOIN campaigns c ON a.id=c.id WHERE c.owner=? ORDER BY a.{self.ledger.order_column} DESC LIMIT 100', (owner,)).fetchall()
-            return [{**json.loads(row['state']), 'busy': bool(row['busy']), 'execution_mode': row['execution_mode']} for row in rows]
+            rows = db.execute(f'SELECT a.id,{order} AS position,{title} AS title,{status} AS status,a.busy,a.execution_mode FROM agent_campaigns a JOIN campaigns c ON a.id=c.id WHERE c.owner=?{cursor} ORDER BY {order} DESC LIMIT ?',parameters).fetchall()
+        page = rows[:limit]
+        return {'items':[{'id':row['id'],'title':row['title'] or 'Untitled campaign','status':row['status'],
+                          'busy':bool(row['busy']),'execution_mode':row['execution_mode']} for row in page],
+                'next_cursor':str(page[-1]['position']) if len(rows)>limit else None}
 
     def delete(self, campaign_id, owner):
         """Permanently remove an owned, idle campaign and its stored records."""
