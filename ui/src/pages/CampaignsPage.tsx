@@ -81,6 +81,30 @@ export function CampaignsPage() {
   const canUpload = !!campaign && !campaign.busy && (campaign.execution_mode !== 'running' || campaign.status === 'awaiting_user') && ['ready', 'awaiting_user', 'waiting', 'waiting_jobs'].includes(campaign.status)
   const conversationEnd = useRef<HTMLDivElement | null>(null)
   useEffect(() => { if (followConversation.current) conversationEnd.current?.scrollIntoView({ block: 'nearest' }) }, [campaign?.history?.length, campaign?.question, campaign?.report, structurePreview?.name])
+  const workspace = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const root = workspace.current
+    const conversation = root?.querySelector<HTMLElement>('.workspace-conversation')
+    const history = root?.querySelector<HTMLElement>('.workspace-history')
+    const list = history?.querySelector<HTMLElement>('nav')
+    if (!root || !conversation || !history || !list) return
+    const sizeHistory = () => {
+      if (!list.getClientRects().length) return
+      const available = Math.max(0, conversation.getBoundingClientRect().bottom - list.getBoundingClientRect().top)
+      root.style.setProperty('--history-list-height', `${available}px`)
+    }
+    const observer = new ResizeObserver(sizeHistory)
+    observer.observe(conversation)
+    observer.observe(history)
+    history.addEventListener('toggle', sizeHistory, true)
+    window.addEventListener('resize', sizeHistory)
+    sizeHistory()
+    return () => {
+      observer.disconnect()
+      history.removeEventListener('toggle', sizeHistory, true)
+      window.removeEventListener('resize', sizeHistory)
+    }
+  }, [showDetails])
   const mounted = useRef(true)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -279,7 +303,7 @@ export function CampaignsPage() {
     <header className="workspace-header">
       <button aria-expanded={showDetails} aria-controls="campaign-details" onClick={() => setShowDetails(value => !value)}>{showDetails ? 'Hide details' : 'Campaign details'}</button>
     </header>
-    <div className={`workspace-layout${showDetails ? ' workspace-layout--details' : ''}`}>
+    <div ref={workspace} className={`workspace-layout${showDetails ? ' workspace-layout--details' : ''}`}>
       <aside className="workspace-history" aria-label="Campaign history">
         <button className="workspace-new" disabled={controlsBusy} onClick={() => { if (window.location && window.history) { const url = new URL(window.location.href); url.searchParams.delete('campaign'); window.history.replaceState(null, '', url) }; setCampaign(null); setEvents([]); setPrompt(''); setReply(''); setError(''); }}>+ New campaign</button>
         <details open><summary>Recent campaigns <span title={nextCursor ? `${campaigns.length} loaded; more available` : `${campaigns.length} campaigns`}>{campaigns.length}{nextCursor ? "+" : ""}</span></summary>
